@@ -12,6 +12,8 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { PedidosProvider } from "../lib/pedidos-store";
+import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
   return (
@@ -78,21 +80,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Sul · Força de Vendas" },
-      { name: "description", content: "Força de Vendas SulBR" },
-      { name: "author", content: "SulBR" },
-      { property: "og:title", content: "Sul · Força de Vendas" },
-      { property: "og:description", content: "Força de Vendas SulBR" },
+      { title: "Força de Vendas" },
+      { name: "description", content: "App de força de vendas: clientes, catálogo, pedidos e metas." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
+      { rel: "stylesheet", href: appCss },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Sora:wght@600;700&display=swap" },
     ],
   }),
   shellComponent: RootShell,
@@ -103,7 +100,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="pt-BR" className="ds-app" data-theme="light" suppressHydrationWarning>
+    <html lang="pt-BR">
       <head>
         <HeadContent />
       </head>
@@ -120,8 +117,10 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
+      <PedidosProvider>
+        <Outlet />
+        <Toaster />
+      </PedidosProvider>
     </QueryClientProvider>
   );
 }
