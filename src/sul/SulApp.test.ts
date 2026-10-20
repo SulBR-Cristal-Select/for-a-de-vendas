@@ -1,6 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('@g4ai/ds', async (original) => ({ ...await original<Record<string, unknown>>(), notify: vi.fn() }));
-import { businessDate, createAppState, createMutationQueue, identifyPriceTable, createEditorValues, technicalCode, monthlyTargets, setMonthlyTarget, activityOwner, customerPriceTables, openActivityEditor, openCustomerEditor, openUserBindingEditor, userBindingRoles } from './SulApp';
+import { businessDate, createAppState, createMutationQueue, identifyPriceTable, createEditorValues, technicalCode, monthlyTargets, setMonthlyTarget, activityOwner, customerPriceTables, openActivityEditor, openCustomerEditor, openUserBindingEditor, userBindingRoles, percentageChange, invoicedOrders, businessMonthLabel } from './SulApp';
+
+describe('Dados reais dos indicadores e relatórios', () => {
+  it.each([[0, 9008.8, null], [0, 0, null], [100, 125, 25], [100, 0, -100], [100, 50, -50], [-100, 50, null]])('calcula variação de %s para %s sem inventar base', (previous, current, expected) => {
+    expect(percentageChange(previous!, current!)).toBe(expected);
+  });
+  it('não apresenta venda nem valor informado como nota fiscal', () => {
+    const orders = [{ id: 'venda', total: 9008.8, status: 'Concluído' }, { id: 'com-nota', total: 100 }, { id: 'valor-sem-documento', invoiced: 999 }];
+    expect(invoicedOrders(orders, [])).toEqual([]);
+    expect(invoicedOrders(orders, [{ orderId: 'com-nota' }])).toEqual([orders[1]]);
+  });
+  it.each([['2026-09', 'setembro de 2026'], ['2027-01', 'janeiro de 2027']])('rotula o período %s sem fixar outubro', (month, label) => {
+    expect(businessMonthLabel(month)).toBe(label);
+  });
+});
 
 describe('Contrato da interface Sul', () => {
   it('inicia sem carteira ou pedidos históricos e preserva o catálogo estrutural', () => {

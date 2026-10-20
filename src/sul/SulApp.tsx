@@ -9,6 +9,9 @@ import './sul.css';
 const He: any = React;
 const b: any = runtime;
 export function businessDate(now = new Date()): string { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now); }
+export function percentageChange(previous: number, current: number): number | null { return previous > 0 ? ((current - previous) / previous) * 100 : null; }
+export function invoicedOrders(orders: any[], invoices: any[]): any[] { const ids = new Set(invoices.map((invoice: any) => invoice.orderId).filter(Boolean)); return orders.filter((order: any) => ids.has(order.id)); }
+export function businessMonthLabel(month: string): string { return new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(month + '-01T12:00:00Z')); }
 export function createAppState(remote: Record<string, any> = {}): Record<string, any> { const base: Record<string, any> = structuredClone(catalogo); return { ...base, ...remote, company: { ...base['company'], ...remote['company'] }, config: { ...base['config'], ...remote['config'] }, collections: { ...base['collections'], ...remote['collections'] } }; }
 // A identidade pertence ao formulário, não ao tamanho da carteira visível.
 export function createEditorValues(values: Record<string, any> = {}): Record<string, any> {
@@ -163,7 +166,7 @@ function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r
                     title: n || "Nenhum registro neste recorte",
                     hint: f
                         ? "Tente outro termo de busca."
-                        : "O arquivo cont\xE9m somente os dados recuperados da inspe\xE7\xE3o.",
+                        : "Nenhum dado disponível para os filtros selecionados.",
                     action: f
                         ? (0, b.jsx)(xt, {
                             onClick: () => (i ? i("") : c("")),
@@ -363,7 +366,7 @@ function nz(): any {
             name: p.name,
             atual,
             ant,
-            pct: ant > 0 ? ((atual - ant) / ant) * 100 : atual > 0 ? 100 : null,
+            pct: percentageChange(ant, atual),
         };
     })
         .filter((p: any) => p.atual > 0 || p.ant > 0)
@@ -429,7 +432,7 @@ function nz(): any {
                             {
                                 label: "Definir metas",
                                 onSelect: () => a({
-                                    title: "Definir meta local",
+                                    title: "Definir meta",
                                     fields: [
                                         {
                                             key: "seller",
@@ -540,7 +543,7 @@ function nz(): any {
                             z("atual", nomeMes, (p: any) => (p.atual > 0 ? rt(p.atual) : "\u2014"), { align: "right" }),
                             z("pct", "Varia\xE7\xE3o", (p: any) => {
                                 if (p.pct == null)
-                                    return pa;
+                                    return "\u2014";
                                 let subiu: any = p.pct >= 0;
                                 return (0, b.jsxs)("span", {
                                     style: {
@@ -1060,7 +1063,7 @@ function sz(): any {
                                     children: [(0, b.jsx)(ka, {}), "Salvar pedido"],
                                 }),
                                 (0, b.jsx)(Xt, {
-                                    children: "O pedido recebe um identificador SIM. Nenhuma integra\xE7\xE3o, envio ou pagamento \xE9 executado.",
+                                    children: "O número do pedido é confirmado pelo servidor. Nenhum envio ao ERP ou pagamento externo é executado.",
                                 }),
                             ],
                         }),
@@ -1391,13 +1394,13 @@ function uz(): any {
                     }), { primary: !0, wide: !0 }),
                     z("city", "Cidade"),
                     z("state", "UF"),
-                    z("seller", "Vendedor observado"),
+                    z("seller", "Vendedor"),
                     z("blocked", "Situa\xE7\xE3o", (o: any) => (0, b.jsx)(qn, {
                         value: o.blocked
                             ? "Bloqueado"
                             : o.source === "simulado"
                                 ? "Ativo"
-                                : "Cadastro observado",
+                                : o.source === "observado" ? "Cadastro observado" : "Cadastrado",
                     })),
                     z("source", "Origem", (o: any) => (0, b.jsx)(qr, { row: o })),
                 ],
@@ -1641,7 +1644,7 @@ function dz({ id: e }: any): any {
                                                         { label: "Fantasia", value: r.fantasy },
                                                         { label: "CPF/CNPJ", value: r.cnpj || pa },
                                                         {
-                                                            label: "Vendedor observado",
+                                                            label: "Vendedor",
                                                             value: r.seller || pa,
                                                         },
                                                         {
@@ -1971,7 +1974,7 @@ function mz(): any {
         children: [
             (0, b.jsx)(Ua, {
                 title: "Produtos",
-                description: "Cat\xE1logo do recorte \xB7 integra\xE7\xE3o observada: 65099-CorpCloud Solu\xE7\xF5es",
+                description: "Cadastro e consulta de produtos persistidos na SulBR",
                 actions: (0, b.jsxs)(Ft, {
                     onClick: () => a({
                         title: "Cadastrar produto local",
@@ -1985,7 +1988,7 @@ function mz(): any {
                                 active: !0,
                                 variants: [],
                                 source: "simulado",
-                                priceSource: "Pre\xE7o definido no prot\xF3tipo",
+                                priceSource: "Preço cadastrado no sistema",
                             });
                         }),
                     }),
@@ -2065,7 +2068,7 @@ function mz(): any {
                         ],
                     })),
                     z("unit", "Unidade"),
-                    z("price", "Pre\xE7o unit\xE1rio observado", (s: any) => rt(s.price), {
+                    z("price", "Preço unitário", (s: any) => rt(s.price), {
                         align: "right",
                     }),
                     z("source", "Origem", (s: any) => (0, b.jsx)(qr, { row: s })),
@@ -2103,7 +2106,7 @@ function hz({ id: e }: any): any {
         }
         (await a((f: any) => Object.assign(Ur(f, e), r, {
             source: "simulado",
-            priceSource: "Pre\xE7o definido no prot\xF3tipo",
+            priceSource: "Preço cadastrado no sistema",
         })),
             go("Produto alterado no sistema"));
     };
@@ -2782,7 +2785,7 @@ function bz({ id: e }: any): any {
     if (!n)
         return (0, b.jsx)(Wu, {});
     const reportMonth=r.f.from?.slice(0,7) || r.f.to?.slice(0,7) || businessDate().slice(0,7);
-    let d: any = r.rows, m: any = [], p: any = [], y: any = "Somente registros recuperados na varredura e altera\xE7\xF5es da simula\xE7\xE3o local.", C: any = null, x: any = null, v: any = d.filter((h: any) => h.type === "Venda" && h.status === "Conclu\xEDdo");
+    let d: any = ['faturados', 'faturamento'].includes(e) ? invoicedOrders(r.rows, t.invoices) : r.rows, m: any = [], p: any = [], y: any = "Dados persistidos no sistema, conforme os filtros selecionados.", C: any = null, x: any = null, v: any = d.filter((h: any) => h.type === "Venda" && h.status === "Conclu\xEDdo");
     if ([
         "resumo",
         "vendas",
@@ -2802,7 +2805,7 @@ function bz({ id: e }: any): any {
                         .join(", ") || pa),
                 ]),
                     (y =
-                        "Os totais de faturamento e n\xFAmeros de notas n\xE3o foram extra\xEDdos. Preenchimentos novos s\xE3o exclusivamente simulados.")),
+                        "Somente pedidos com documentos fiscais disponíveis. A integração fiscal não está configurada; vendas não são apresentadas como faturamento.")),
             l !== "nenhum")) {
             let h: any = {};
             (d.forEach((S: any) => {
@@ -2867,14 +2870,14 @@ function bz({ id: e }: any): any {
                 z("total", "Vendido", (h: any) => rt(h.total), { align: "right" }),
                 z("count", "Pedidos"),
                 z("clients", "Clientes atendidos"),
-                z("target", "Meta local", (h: any) => rt(h.target), { align: "right" }),
+                z("target", "Meta", (h: any) => rt(h.target), { align: "right" }),
                 z("hit", "Atingimento", (h: any) => h.target > 0
                     ? na((100 * h.total) / h.target) + "%"
                     : "N\xE3o definida"),
             ]),
             (x = (0, b.jsxs)(xt, {
                 onClick: () => a({
-                    title: "Definir meta local",
+                    title: "Definir meta",
                     fields: [
                         {
                             key: "seller",
@@ -2884,7 +2887,7 @@ function bz({ id: e }: any): any {
                         },
                         {
                             key: "target",
-                            label: "Meta para outubro de 2026",
+                            label: "Meta para " + businessMonthLabel(reportMonth),
                             kind: "currency",
                             required: !0,
                         },
@@ -2896,7 +2899,7 @@ function bz({ id: e }: any): any {
                 children: [(0, b.jsx)(od, {}), "Definir metas"],
             })),
             (y =
-                "N\xE3o havia meta definida no painel observado. Metas inseridas aqui pertencem apenas \xE0 simula\xE7\xE3o de outubro de 2026."));
+                "Metas persistidas por vendedor para " + businessMonthLabel(reportMonth) + "."));
     else if (e === "nao-compraram") {
         let h: any = new Set(v.filter((S:any)=>S.date?.startsWith(reportMonth)).map((S: any) => S.customerId)), mes: any = reportMonth;
         ((m = t.customers
@@ -2987,7 +2990,7 @@ function bz({ id: e }: any): any {
                 }),
             })),
             (y =
-                "Use a op\xE7\xE3o Definir metas para simular metas locais por vendedor. Metas v\xE1lidas para outubro de 2026."));
+                "Metas definidas no relatório Ranking de vendedor / Meta para " + businessMonthLabel(reportMonth) + "."));
     }
     else if (e === "gerencial") {
         let h: any = {};
@@ -3029,7 +3032,7 @@ function bz({ id: e }: any): any {
                     z("date", "Abertura", (h: any) => xo(h.date)),
                 ]),
                 (y =
-                    "O quadro estava vazio sob os filtros consultados. Novas oportunidades s\xE3o locais."))
+                    "Oportunidades persistidas no funil, conforme os filtros selecionados."))
             : e === "titulos"
                 ? ((m = t.titles),
                     (p = [
@@ -3092,7 +3095,7 @@ function bz({ id: e }: any): any {
                                     : "\u2014"),
                             ]),
                                 (y =
-                                    "Limiares A/B/C n\xE3o foram confirmados. O mock n\xE3o atribui curvas arbitr\xE1rias; s\xF3 soma os valores do recorte.")),
+                                    "Limiares A/B/C não foram confirmados. O sistema não atribui curvas arbitrárias; apresenta valores e participação no período.")),
                         e === "mix" &&
                             ((p = [
                                 z("name", "Raz\xE3o social", void 0, { primary: !0, wide: !0 }),
@@ -3192,7 +3195,7 @@ function bz({ id: e }: any): any {
                                                 z("commission", "Comiss\xE3o (R$)", () => pa),
                                             ]),
                                     (y =
-                                        "N\xE3o foram extra\xEDdos valores de comiss\xE3o. O detalhe de Adilson C\xE9sar dos Reis Souza abriu sem informa\xE7\xF5es para 01/08/2026 a 31/12/2026."))
+                                        "Não há lançamentos de comissão disponíveis. Nenhuma regra ou valor é presumido sem configuração confirmada."))
                                 : e === "produtos"
                                     ? ((m = dv(t, d)),
                                         (p = [
@@ -3209,14 +3212,14 @@ function bz({ id: e }: any): any {
                                             }),
                                         ]),
                                         (C = (0, b.jsx)(cs, {
-                                            title: "Quantidade nos itens recuperados",
-                                            description: "Os itens do pedido #2351 foram extra\xEDdos integralmente",
+                                            title: "Quantidade vendida por produto",
+                                            description: "Itens dos pedidos persistidos no período selecionado",
                                             children: (0, b.jsx)(Zy, {
                                                 items: m.map((h: any) => ({ label: h.name, value: h.qty })),
                                             }),
                                         })),
                                         (y =
-                                            "O cat\xE1logo e o relat\xF3rio foram observados. Esta soma considera apenas pedidos cujos itens constam no arquivo."))
+                                            "Soma das quantidades e valores dos itens persistidos no período selecionado."))
                                     : e === "produtos-pedido"
                                         ? ((m = d.flatMap((h: any) => (h.items || []).map((S: any) => ({
                                             id: h.id + "-" + S.productId,
@@ -3273,7 +3276,7 @@ function bz({ id: e }: any): any {
                                                     }), { action: !0 }),
                                                 ]),
                                                 (y =
-                                                    "O controle de estoque real estava desabilitado. Habilita\xE7\xE3o e saldos no prot\xF3tipo n\xE3o alteram o Sul."))
+                                                    "Saldos disponíveis somente quando o controle de estoque está habilitado. Nenhuma sincronização com ERP está configurada."))
                                             : e === "emails" &&
                                                 ((m = t.emails),
                                                     (p = [
@@ -3284,7 +3287,7 @@ function bz({ id: e }: any): any {
                                                         z("status", "Situa\xE7\xE3o"),
                                                     ]),
                                                     (y =
-                                                        "O relat\xF3rio original estava sem informa\xE7\xE3o no recorte. Registros deste arquivo s\xE3o simula\xE7\xF5es; nenhuma mensagem \xE9 enviada."));
+                                                        "Nenhum provedor de envio externo está configurado. Nenhuma mensagem é enviada por esta consulta."));
     if (e === "carteira-vendedor")
         return (0, b.jsxs)(fa, {
             width: "wide",
@@ -3295,8 +3298,8 @@ function bz({ id: e }: any): any {
                 }),
                 (0, b.jsx)(hn, {
                     icon: (0, b.jsx)(Im, {}),
-                    title: "Este recurso n\xE3o est\xE1 dispon\xEDvel no seu plano",
-                    hint: "Bloqueio explicitamente observado. Colunas e c\xE1lculos da tela protegida n\xE3o foram inventados.",
+                    title: "Estrutura e regras ainda não confirmadas",
+                    hint: "A tela de origem estava protegida por plano. Colunas e cálculos não foram extraídos; isso não representa uma assinatura exigida neste sistema.",
                     action: (0, b.jsx)(xt, {
                         href: "#/conta/plano",
                         children: "Ver plano observado",
@@ -3310,7 +3313,7 @@ function bz({ id: e }: any): any {
         children: [
             (0, b.jsx)(Ua, {
                 title: n.name,
-                description: "Consulta local \xB7 recorte observado e registros simulados",
+                description: "Consulta aos dados persistidos, conforme os filtros selecionados",
                 back: { label: "Relat\xF3rios", to: "/relatorios" },
                 actions: (0, b.jsx)(Gp, {
                     rows: m,
@@ -4553,7 +4556,7 @@ function Mz({ spec: e, close: closePanel, dbRef: dbR }: any): any {
         open: !0,
         onClose: t,
         title: e.title,
-        kicker: "Simula\xE7\xE3o local \xB7 sem grava\xE7\xE3o no Sul",
+        kicker: "Gravação no sistema",
         footer: (0, b.jsxs)(b.Fragment, {
             children: [
                 (0, b.jsx)(xt, { onClick: t, children: "Cancelar" }),
