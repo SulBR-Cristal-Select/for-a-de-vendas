@@ -1,6 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('@g4ai/ds', async (original) => ({ ...await original<Record<string, unknown>>(), notify: vi.fn() }));
-import { businessDate, createAppState, createMutationQueue, identifyPriceTable, createEditorValues, technicalCode, monthlyTargets, setMonthlyTarget, activityOwner, customerPriceTables, openActivityEditor, openCustomerEditor, openUserBindingEditor, userBindingRoles, percentageChange, invoicedOrders, businessMonthLabel } from './SulApp';
+import { businessDate, createAppState, createMutationQueue, identifyPriceTable, createEditorValues, technicalCode, monthlyTargets, setMonthlyTarget, activityOwner, customerPriceTables, openActivityEditor, openCustomerEditor, openUserBindingEditor, userBindingRoles, percentageChange, invoicedOrders, businessMonthLabel, csvRows } from './SulApp';
+
+describe('Exportação dos dados exibidos', () => {
+  it('exporta cliente derivado pelo getter sem perder números originais', () => {
+    expect(csvRows([{ number: 7, total: 9008.8, customerId: 'cliente-teste' }], [
+      { key: 'number' }, { key: 'customer', get: (row: any) => row.customerId === 'cliente-teste' ? 'TESTE CLIENTE' : '' }, { key: 'total' },
+    ])).toEqual([{ number: 7, customer: 'TESTE CLIENTE', total: 9008.8 }]);
+  });
+  it('usa resultados escalares derivados, sem exportar elementos React nem substituir zero', () => {
+    expect(csvRows([{ total: 0 }], [
+      { key: 'total', cell: () => 999 }, { key: 'hit', cell: () => '90%' }, { key: 'progress', cell: () => ({ type: 'div', props: {} }) },
+    ])).toEqual([{ total: 0, hit: '90%', progress: undefined }]);
+  });
+});
 
 describe('Dados reais dos indicadores e relatórios', () => {
   it.each([[0, 9008.8, null], [0, 0, null], [100, 125, 25], [100, 0, -100], [100, 50, -50], [-100, 50, null]])('calcula variação de %s para %s sem inventar base', (previous, current, expected) => {

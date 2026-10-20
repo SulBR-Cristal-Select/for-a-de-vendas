@@ -11,6 +11,16 @@ const b: any = runtime;
 export function businessDate(now = new Date()): string { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now); }
 export function percentageChange(previous: number, current: number): number | null { return previous > 0 ? ((current - previous) / previous) * 100 : null; }
 export function invoicedOrders(orders: any[], invoices: any[]): any[] { const ids = new Set(invoices.map((invoice: any) => invoice.orderId).filter(Boolean)); return orders.filter((order: any) => ids.has(order.id)); }
+export function csvRows(rows: any[], columns: any[]): any[] {
+    return rows.map((row: any) => Object.fromEntries(columns.map((column: any) => {
+        let value = column.get ? column.get(row) : row[column.key];
+        if (value === undefined && column.cell) {
+            const derived = column.cell(row);
+            if (['string', 'number', 'boolean'].includes(typeof derived)) value = derived;
+        }
+        return [column.key, value];
+    })));
+}
 export function businessMonthLabel(month: string): string { return new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(month + '-01T12:00:00Z')); }
 export function createAppState(remote: Record<string, any> = {}): Record<string, any> { const base: Record<string, any> = structuredClone(catalogo); return { ...base, ...remote, company: { ...base['company'], ...remote['company'] }, config: { ...base['config'], ...remote['config'] }, collections: { ...base['collections'], ...remote['collections'] } }; }
 // A identidade pertence ao formulário, não ao tamanho da carteira visível.
@@ -3316,7 +3326,7 @@ function bz({ id: e }: any): any {
                 description: "Consulta aos dados persistidos, conforme os filtros selecionados",
                 back: { label: "Relat\xF3rios", to: "/relatorios" },
                 actions: (0, b.jsx)(Gp, {
-                    rows: m,
+                    rows: csvRows(m, p.filter((h: any) => !h.action)),
                     name: "relatorio-" + e,
                     columns: p.filter((h: any) => !h.action).map((h: any) => h.key),
                 }),
