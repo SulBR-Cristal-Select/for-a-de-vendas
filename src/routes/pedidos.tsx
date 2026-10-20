@@ -31,7 +31,10 @@ function Pedidos() {
   const total = itens.reduce((s, i) => s + (produtos.find((p) => p.id === i.produtoId)!.preco) * i.qtd, 0);
 
   const salvar = () => {
-    if (!clienteId || itens.length === 0) return toast.error("Escolha o cliente e ao menos um produto.");
+    if (!clienteId || itens.length === 0) {
+      toast.error("Escolha o cliente e ao menos um produto.");
+      return;
+    }
     adicionar({ clienteId, itens });
     setQtds({});
     setClienteId("");
