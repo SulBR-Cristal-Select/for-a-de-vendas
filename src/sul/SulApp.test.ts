@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('@g4ai/ds', async (original) => ({ ...await original<Record<string, unknown>>(), notify: vi.fn() }));
-import { businessDate, createAppState, createMutationQueue, identifyPriceTable, createEditorValues, technicalCode, monthlyTargets, setMonthlyTarget, activityOwner, customerPriceTables, openActivityEditor, openCustomerEditor } from './SulApp';
+import { businessDate, createAppState, createMutationQueue, identifyPriceTable, createEditorValues, technicalCode, monthlyTargets, setMonthlyTarget, activityOwner, customerPriceTables, openActivityEditor, openCustomerEditor, openUserBindingEditor, userBindingRoles } from './SulApp';
 
 describe('Contrato da interface Sul', () => {
   it('inicia sem carteira ou pedidos históricos e preserva o catálogo estrutural', () => {
@@ -53,6 +53,51 @@ describe('Contrato da interface Sul', () => {
   });
 });
 
+
+describe('Vínculo de contas Auth pelo administrador', () => {
+  it('acrescenta somente e-mail e Gestor ao formulário existente', () => {
+    let spec: any;
+    openUserBindingEditor((dialog: any) => { spec = dialog; }, vi.fn());
+    expect(spec.allocateIdentity).toBe(true);
+    expect(spec.fields.map((field: any) => field.key)).toEqual(['name', 'email', 'role']);
+    expect(spec.fields[1]).toMatchObject({ type: 'email', required: true });
+    expect(spec.fields[2]).toMatchObject({ required: true, options: ['Administrador', 'Gestor', 'Vendedor'] });
+    expect(userBindingRoles).toEqual(['Administrador', 'Gestor', 'Vendedor']);
+  });
+  it('envia comando explícito sem falsificar users nem carimbar o comando como registro', async () => {
+    const pendingUser = { id: 'auth-id-real', name: 'Conta pendente', role: 'Vendedor', active: false, source: 'persistido' };
+    const current = { current: createAppState({ users: [pendingUser] }) };
+    const persist = vi.fn(async (next: Record<string, any>) => {
+      const { userBindings: _command, ...state } = next;
+      return { ...state, users: [{ ...pendingUser, name: 'Pessoa cadastrada', role: 'Gestor', active: true }] };
+    });
+    let spec: any;
+    openUserBindingEditor((dialog: any) => { spec = dialog; }, createMutationQueue(current, persist, vi.fn()));
+    const form = createEditorValues({ name: ' Pessoa cadastrada ', email: ' PESSOA@EXEMPLO.INVALID ', role: 'Gestor' });
+    await spec.save(form);
+    const sent = persist.mock.calls[0]![0];
+    expect(sent['users']).toEqual([pendingUser]);
+    expect(sent['userBindings']).toEqual([{ id: form['id'], name: 'Pessoa cadastrada', email: 'pessoa@exemplo.invalid', role: 'Gestor' }]);
+    expect(form['id']).not.toBe('auth-id-real');
+    expect(current.current['users'][0].id).toBe('auth-id-real');
+    expect(current.current['users'][0].active).toBe(true);
+    expect(current.current['userBindings']).toBeUndefined();
+  });
+  it('preserva o mesmo vínculo ao reenviar depois de falha de transporte', async () => {
+    const current = { current: createAppState() };
+    const persist = vi.fn().mockRejectedValueOnce(new Error('Resposta perdida')).mockImplementation(async (next) => {
+      const { userBindings: _command, ...state } = next;
+      return state;
+    });
+    let spec: any;
+    openUserBindingEditor((dialog: any) => { spec = dialog; }, createMutationQueue(current, persist, vi.fn()));
+    const form = createEditorValues({ name: 'Pessoa', email: 'pessoa@exemplo.invalid', role: 'Vendedor' });
+    await expect(spec.save(form)).rejects.toThrow('Resposta perdida');
+    expect(current.current['userBindings']).toBeUndefined();
+    await spec.save(form);
+    expect(persist.mock.calls[1]![0]['userBindings']).toEqual(persist.mock.calls[0]![0]['userBindings']);
+  });
+});
 
 describe('Correções focadas da revisão', () => {
   it('aloca UUID por formulário, sem depender da carteira, e preserva IDs existentes', () => {

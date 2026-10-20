@@ -15,6 +15,21 @@ export function createEditorValues(values: Record<string, any> = {}): Record<str
     return { ...values, id: values['id'] || crypto.randomUUID() };
 }
 export function technicalCode(prefix: string, id: string): string { return `${prefix}-${id}`; }
+export const userBindingRoles = ['Administrador', 'Gestor', 'Vendedor'];
+export function openUserBindingEditor(editor: any, update: any): void {
+    editor({
+        title: 'Adicionar registro local',
+        allocateIdentity: true,
+        fields: [
+            { key: 'name', label: 'Nome / descrição', required: true },
+            { key: 'email', label: 'E-mail', type: 'email', required: true },
+            { key: 'role', label: 'Papel', options: userBindingRoles, required: true },
+        ],
+        save: async (form: any) => await update((state: any) => {
+            state.userBindings = [{ id: form.id, name: String(form.name || '').trim(), email: String(form.email || '').trim().toLowerCase(), role: form.role }];
+        }),
+    });
+}
 export function monthlyTargets(db: any, month: string): Record<string, number> { return db.targetPeriods?.[month] || {}; }
 export function setMonthlyTarget(db: any, month: string, seller: string, value: number): void {
     db.targetPeriods ||= {};
@@ -49,7 +64,7 @@ export function createMutationQueue(current: {
             }
             else {
                 for (const key of Object.keys(value))
-                    mark(value[key], previous?.[key]);
+                    if (key !== 'userBindings') mark(value[key], previous?.[key]);
             } };
             mark(next, before);
             try {
@@ -3973,20 +3988,11 @@ function Sz({ section: e = "perfil" }: any): any {
             ],
         })),
             (l = (0, b.jsxs)(Ft, {
-                onClick: () => a({
+                onClick: () => e === 'usuarios' ? openUserBindingEditor(a, o) : a({
                     title: "Adicionar registro local",
                     allocateIdentity: true,
                     fields: [
                         { key: "name", label: "Nome / descri\xE7\xE3o", required: !0 },
-                        ...(e === "usuarios"
-                            ? [
-                                {
-                                    key: "role",
-                                    label: "Papel",
-                                    options: ["Administrador", "Vendedor"],
-                                },
-                            ]
-                            : []),
                     ],
                     save: async (u: any) => await o((c: any) => c[s].push({
                         ...u,
@@ -4690,6 +4696,7 @@ function Mz({ spec: e, close: closePanel, dbRef: dbR }: any): any {
                                             })
                                             : (0, b.jsx)(vr, {
                                                 label: u,
+                                                type: fi.type || 'text',
                                                 value: c || "",
                                                 onChange: (f: any) => l(fi.key, f),
                                             }),

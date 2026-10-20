@@ -27,6 +27,7 @@ A URL e a chave **publicável** do projeto estão configuradas no cliente. É po
 2. Novos cadastros começam como vendedor **inativo**, sem acesso à carteira.
 3. O administrador do projeto Supabase deve conferir a conta Auth e ativar explicitamente o primeiro administrador. Não há promoção automática do primeiro cadastro.
 4. Configurar no Supabase Auth a URL publicada e os redirecionamentos autorizados antes de liberar e-mails de confirmação para usuários finais.
+5. Depois do primeiro administrador, usar **Minha conta → Todos os usuários → Adicionar registro** para vincular uma conta já cadastrada, confirmada e ainda inativa, informando nome, e-mail e papel (Administrador, Gestor ou Vendedor). Somente administrador pode ativar esse vínculo; o ID é resolvido pelo Auth, não pelo formulário. Não é um serviço de convites por e-mail.
 
 A senha é enviada pelo cliente oficial diretamente ao Supabase Auth; não há senha de demonstração nem conta fixa no repositório.
 
@@ -39,9 +40,12 @@ Nenhuma carteira histórica ou simulação é carregada como operação real. Os
 ## Verificações realizadas
 
 - TypeScript e build de produção.
-- Vinte testes locais do adaptador, da fila de gravação, dos catálogos e dos contratos de identificação, metas e responsáveis.
+- Vinte e três testes locais do adaptador, fila, catálogos, identificação, metas, responsáveis e contrato de vínculo Auth.
 - Vinte e seis verificações transacionais no Supabase: total de R$ 9.008,80 para 974 unidades em três itens, reenvio idempotente, conflito de revisão, duplicidade de documento, rollback, preço histórico, restrições de papel, isolamento de carteira, metas mensais e edição da própria conta/empresa.
-- Dados fictícios desses testes foram revertidos. Testes transacionais não substituem o teste interativo de login e operação com a conta ativada.
+- Seis verificações adicionais do papel gestor no banco.
+- Trinta verificações de vínculo Auth (três ativações de destino e 27 recusas), incluindo reenvio idempotente, identidade real, ausência de alterações parciais e restauração das contagens originais.
+- Formulário de usuários verificado isoladamente em 390 e 1440 px: campos obrigatórios, e-mail semântico, opção Gestor, payload canônico e preservação do formulário em falha.
+- Dados fictícios desses testes foram revertidos. Testes transacionais e de componente não substituem o teste interativo de login e operação com a conta ativada.
 
 ## Limites atuais
 
