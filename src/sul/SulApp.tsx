@@ -10,6 +10,25 @@ const He: any = React;
 const b: any = runtime;
 export function businessDate(now = new Date()): string { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now); }
 export function createAppState(remote: Record<string, any> = {}): Record<string, any> { const base: Record<string, any> = structuredClone(catalogo); return { ...base, ...remote, company: { ...base['company'], ...remote['company'] }, config: { ...base['config'], ...remote['config'] }, collections: { ...base['collections'], ...remote['collections'] } }; }
+// A identidade pertence ao formulário, não ao tamanho da carteira visível.
+export function createEditorValues(values: Record<string, any> = {}): Record<string, any> {
+    return { ...values, id: values['id'] || crypto.randomUUID() };
+}
+export function technicalCode(prefix: string, id: string): string { return `${prefix}-${id}`; }
+export function monthlyTargets(db: any, month: string): Record<string, number> { return db.targetPeriods?.[month] || {}; }
+export function setMonthlyTarget(db: any, month: string, seller: string, value: number): void {
+    db.targetPeriods ||= {};
+    db.targetPeriods[month] ||= {};
+    db.targetPeriods[month][seller] = Number(value);
+    if (month === businessDate().slice(0, 7)) db.targets = { ...db.targetPeriods[month] };
+}
+export function activityOwner(db: any, customerId: string): string | undefined {
+    return customerId ? db.customers.find((customer: any) => customer.id === customerId)?.sellerId : db.company.userId;
+}
+export function customerPriceTables(db: any, existing: any, match: string): string[] {
+    return ['administrador', 'gestor'].includes(String(db.company.role).toLowerCase())
+        ? (match ? [match] : []) : [...(existing?.priceTables || [])];
+}
 export function createMutationQueue(current: {
     current: Record<string, any>;
 }, persist: SulAppProps['persist'], commit: (confirmed: Record<string, any>) => void) {
@@ -48,7 +67,7 @@ export function createMutationQueue(current: {
         return pending;
     };
 }
-var bo: any = businessDate(), pa: any = "N\xE3o extra\xEDdo", Xu: any = (e: any) => JSON.parse(JSON.stringify(e)), rt: any = (e: any) => (e == null ? pa : Vd(e)), xo: any = (e: any) => (e ? oI(e) : pa), La: any = (e: any) => e.map((t: any) => typeof t == "string" ? { value: t, label: t || "Todos" } : t), zp: any = (e: any, t: any) => e.customers.find((a: any) => a.id === t), Un: any = (e: any, t: any) => zp(e, t)?.name || "Cliente indispon\xEDvel", Ur: any = (e: any, t: any) => e.products.find((a: any) => a.id === t), Zo: any = (e: any, t: any) => e.reduce((a: any, o: any) => a + (Number(o[t]) || 0), 0), y5: any = (e: any) => Math.round(e * 100), d1: any = (e: any, t: any = 0) => (e.reduce((a: any, o: any) => a + y5(o.price) * o.qty, 0) + y5(t)) / 100, Jo: any = (e: any, t: any = "SIM") => `${t}-${String(1 + Math.max(0, ...e.filter((a: any) => String(a.id).startsWith(t + "-")).map((a: any) => Number(String(a.id).split("-").pop()) || 0))).padStart(3, "0")}`, I5: any = (0, He.createContext)(null), qa: any = () => (0, He.useContext)(I5);
+var bo: any = businessDate(), pa: any = "N\xE3o extra\xEDdo", Xu: any = (e: any) => JSON.parse(JSON.stringify(e)), rt: any = (e: any) => (e == null ? pa : Vd(e)), xo: any = (e: any) => (e ? oI(e) : pa), La: any = (e: any) => e.map((t: any) => typeof t == "string" ? { value: t, label: t || "Todos" } : t), zp: any = (e: any, t: any) => e.customers.find((a: any) => a.id === t), Un: any = (e: any, t: any) => zp(e, t)?.name || "Cliente indispon\xEDvel", Ur: any = (e: any, t: any) => e.products.find((a: any) => a.id === t), Zo: any = (e: any, t: any) => e.reduce((a: any, o: any) => a + (Number(o[t]) || 0), 0), y5: any = (e: any) => Math.round(e * 100), d1: any = (e: any, t: any = 0) => (e.reduce((a: any, o: any) => a + y5(o.price) * o.qty, 0) + y5(t)) / 100, I5: any = (0, He.createContext)(null), qa: any = () => (0, He.useContext)(I5);
 function sellerNames(db: any): string[] { return [...new Set<string>([db.company.user, ...(db.users || []).filter((u: any) => u.active !== false).map((u: any) => u.name)].filter(Boolean))]; }
 function qr({ row: e }: any): any {
     const source = e?.source;
@@ -290,7 +309,7 @@ function nz(): any {
     let uAnt: any = e.orders.filter((p: any) => p.date && p.date.startsWith(mesAnt) && (!r || p.seller === r));
     let cAnt: any = uAnt.filter((p: any) => p.type === "Venda" && p.status === "Conclu\xEDdo");
     let f: any = Zo(c, "total"), fAnt: any = Zo(cAnt, "total");
-    let meta: any = Object.values((e.targets || {})[o] || {}).reduce((p: any, y: any) => p + (Number(y) || 0), 0);
+    let meta: any = Object.values(monthlyTargets(e, o)).reduce((p: any, y: any) => p + (Number(y) || 0), 0);
     let ating: any = meta > 0 ? (f / meta) * 100 : null;
     let base: any = e.customers.filter((p: any) => !p.blocked).length;
     let compraram: any = new Set(c.map((p: any) => p.customerId));
@@ -411,8 +430,7 @@ function nz(): any {
                                         },
                                     ],
                                     save: async (p: any) => await t((y: any) => {
-                                        y.targets[o] ||= {};
-                                        y.targets[o][p.seller] = Number(p.target);
+                                        setMonthlyTarget(y, o, p.seller, p.target);
                                     }),
                                 }),
                             },
@@ -744,6 +762,7 @@ function lz(): any {
 }
 function sz(): any {
     const savingOrder=useRef(false);
+    const [orderId] = React.useState(() => crypto.randomUUID());
     let { db: e, update: t, path: a } = qa(), o: any = new URLSearchParams(location.hash.split("?")[1] || ""), [n, r] = (0, He.useState)(o.get("cliente") || ""), [l, s] = (0, He.useState)(e.company.user), [i, u] = (0, He.useState)(""), [c, f] = (0, He.useState)("Venda"), [d, m] = (0, He.useState)(bo), [p, y] = (0, He.useState)("1 - IMEDIATO"), [C, x] = (0, He.useState)("Conclu\xEDdo"), [v, g] = (0, He.useState)(""), [h, S] = (0, He.useState)([]), [L, I] = (0, He.useState)(0), [R, E] = (0, He.useState)(""), [OBS, OBSs] = (0, He.useState)(""), [k, M] = (0, He.useState)(""), [A, N] = (0, He.useState)(""), O: any = () => {
         let D: any = Ur(e, v);
         if (D) {
@@ -769,9 +788,8 @@ function sz(): any {
             N("Informe cliente, pagamento, entrega, tipo de agenda e pelo menos um item com quantidade inteira positiva.");
             return;
         }
-        let D: any = Jo(e.orders), j: any = {
+        let D: any = orderId, j: any = {
             id: D,
-            number: D,
             customerId: n,
             seller: l,
             type: c,
@@ -1038,21 +1056,23 @@ function sz(): any {
     });
 }
 function iz({ id: e }: any): any {
+    const duplicateIdentity = useRef<{ source: string; id: string } | null>(null);
     let { db: t, update: a, editor: o, confirm: n } = qa(), r: any = t.orders.find((f: any) => f.id === e);
     if (!r)
         return (0, b.jsx)(Wu, {});
     let l: any = zp(t, r.customerId);
     async function s(): Promise<any> {
-        let f: any = Jo(t.orders);
+        if (duplicateIdentity.current?.source !== e) duplicateIdentity.current = { source: e, id: crypto.randomUUID() };
+        let f: any = duplicateIdentity.current!.id;
         try { await a((d: any) => d.orders.unshift({
             ...Xu(r),
             id: f,
-            number: f,
+            number: undefined,
             date: bo,
             status: "Or\xE7amento",
             integration: "Sem envio ao ERP \xB7 simulado",
             source: "simulado",
-        })); go("Pedido duplicado"); bn("/pedidos/" + f); } catch { /* A fila já informa o erro; a tela atual permanece aberta. */ }
+        })); duplicateIdentity.current = null; go("Pedido duplicado"); bn("/pedidos/" + f); } catch { /* A fila já informa o erro; a tela atual permanece aberta. */ }
     }
     let i: any = () => o({
         title: "Alterar detalhes do pedido",
@@ -1088,6 +1108,7 @@ function iz({ id: e }: any): any {
         }),
     }), u: any = () => o({
         title: "Faturar pedido \u2014 simula\xE7\xE3o",
+        allocateIdentity: true,
         fields: [
             { key: "number", label: "N\xFAmero da nota fiscal", required: !0 },
             {
@@ -1107,7 +1128,7 @@ function iz({ id: e }: any): any {
         save: async (f: any) => await a((d: any) => {
             (d.invoices.push({
                 ...f,
-                id: Jo(d.invoices, "NF-SIM"),
+                id: f.id,
                 orderId: e,
                 customerId: r.customerId,
                 source: "simulado",
@@ -1116,6 +1137,7 @@ function iz({ id: e }: any): any {
         }),
     }), c: any = (f: any) => o({
         title: "Simular envio por " + f,
+        allocateIdentity: true,
         fields: [
             {
                 key: "recipient",
@@ -1130,7 +1152,7 @@ function iz({ id: e }: any): any {
         save: async (d: any) => {
             (await a((m: any) => m.emails.push({
                 ...d,
-                id: Jo(m.emails, "ENVIO-SIM"),
+                id: d.id,
                 channel: f,
                 orderId: e,
                 date: bo,
@@ -1464,6 +1486,7 @@ function cz(): any {
 function k5(e: any, t: any, a: any, o: any = undefined): any {
     e({
         title: o ? "Alterar cliente" : "Cadastrar cliente",
+        allocateIdentity: !o,
         values: o ? {...o, __priceList:o.refItems || o.__priceList || []} : {},
         fields: cz(),
         validate: (n: any) => a.config.duplicateDocument &&
@@ -1477,18 +1500,18 @@ function k5(e: any, t: any, a: any, o: any = undefined): any {
             await t((r: any) => {
                 if (o)
                     Object.assign(r.customers.find((l: any) => l.id === o.id), n, {
-                        priceTables: n.priceTableMatch ? [n.priceTableMatch] : [],
+                        priceTables: customerPriceTables(a, o, n.priceTableMatch),
                         source: "simulado",
                     });
                 else {
-                    let l: any = Jo(r.customers, "CLI-SIM");
+                    let l: any = n.id;
                     r.customers.push({
                         ...n,
                         id: l,
-                        code: l,
+                        code: n.code || technicalCode("CLI", l),
                         blocked: !1,
                         tags: [],
-                        priceTables: n.priceTableMatch ? [n.priceTableMatch] : [],
+                        priceTables: customerPriceTables(a, o, n.priceTableMatch),
                         refItems: n.__priceList || [],
                         refProduct: n.refProductId,
                         refPrice: n.refPrice,
@@ -1759,6 +1782,7 @@ function dz({ id: e }: any): any {
                             action: (0, b.jsxs)(Ft, {
                                 onClick: () => a({
                                     title: "Adicionar t\xEDtulo local",
+                                    allocateIdentity: true,
                                     values: { customerId: e, due: bo, status: "A vencer" },
                                     fields: [
                                         { key: "document", label: "Documento", required: !0 },
@@ -1777,7 +1801,7 @@ function dz({ id: e }: any): any {
                                     ],
                                     save: async (p: any) => await o((y: any) => y.titles.push({
                                         ...p,
-                                        id: Jo(y.titles, "TIT-SIM"),
+                                        id: p.id,
                                         customerId: e,
                                         status: "A vencer",
                                         source: "simulado",
@@ -1936,12 +1960,13 @@ function mz(): any {
                 actions: (0, b.jsxs)(Ft, {
                     onClick: () => a({
                         title: "Cadastrar produto local",
+                        allocateIdentity: true,
                         fields: pz(),
                         values: { unit: "PC", price: null },
                         save: async (s: any) => await t((i: any) => {
                             i.products.push({
                                 ...s,
-                                id: Jo(i.products, "PRD-SIM"),
+                                id: s.id,
                                 active: !0,
                                 variants: [],
                                 source: "simulado",
@@ -2329,6 +2354,7 @@ function dv(e: any, t: any): any {
 function N5(e: any, t: any, a: any, o: any = ""): any {
     e({
         title: "Criar tarefa local",
+        allocateIdentity: true,
         values: {
             customerId: o,
             date: bo,
@@ -2351,7 +2377,7 @@ function N5(e: any, t: any, a: any, o: any = ""): any {
         ],
         save: async (n: any) => await t((r: any) => r.tasks.push({
             ...n,
-            id: Jo(r.tasks, "TAR-SIM"),
+            id: n.id,
             status: "N\xE3o realizada",
             source: "simulado",
         })),
@@ -2360,6 +2386,7 @@ function N5(e: any, t: any, a: any, o: any = ""): any {
 function M5(e: any, t: any, a: any, o: any = ""): any {
     e({
         title: "Registrar atividade local",
+        allocateIdentity: true,
         values: { customerId: o, date: bo },
         fields: [
             { key: "name", label: "Descri\xE7\xE3o", required: !0 },
@@ -2378,7 +2405,8 @@ function M5(e: any, t: any, a: any, o: any = ""): any {
         ],
         save: async (n: any) => await t((r: any) => r.activities.push({
             ...n,
-            id: Jo(r.activities, "ATV-SIM"),
+            id: n.id,
+            sellerId: activityOwner(r, n.customerId),
             status: "Realizada",
             source: "simulado",
         })),
@@ -2406,6 +2434,7 @@ function v5({ routes: e = !1 }: any): any {
                     onClick: e
                         ? () => o({
                             title: "Criar roteiro local",
+                            allocateIdentity: true,
                             values: { date: bo },
                             fields: [
                                 { key: "name", label: "Nome do roteiro", required: !0 },
@@ -2429,7 +2458,7 @@ function v5({ routes: e = !1 }: any): any {
                             ],
                             save: async (u: any) => await a((c: any) => c.routes.push({
                                 ...u,
-                                id: Jo(c.routes, "ROT-SIM"),
+                                id: u.id,
                                 status: "Planejado",
                                 source: "simulado",
                             })),
@@ -2520,6 +2549,7 @@ function v5({ routes: e = !1 }: any): any {
 function A5(e: any, t: any, a: any, o: any = ""): any {
     e({
         title: "Criar oportunidade local",
+        allocateIdentity: true,
         values: {
             customerId: o,
             stage: a.stages[0],
@@ -2540,7 +2570,7 @@ function A5(e: any, t: any, a: any, o: any = ""): any {
         ],
         save: async (n: any) => await t((r: any) => r.opportunities.push({
             ...n,
-            id: Jo(r.opportunities, "OP-SIM"),
+            id: n.id,
             status: "Aberta",
             source: "simulado",
         })),
@@ -2812,7 +2842,7 @@ function bz({ id: e }: any): any {
                 total: Zo(S, "total"),
                 count: S.length,
                 clients: new Set(S.map((L: any) => L.customerId)).size,
-                target: t.targets[reportMonth]?.[String(h)] ?? null,
+                target: monthlyTargets(t, reportMonth)[String(h)] ?? null,
             };
         })
             .sort((h: any, S: any) => S.total - h.total)),
@@ -2845,7 +2875,7 @@ function bz({ id: e }: any): any {
                         },
                     ],
                     save: async (h: any) => await o((S: any) => {
-                        S.targets[reportMonth] ||= {}; S.targets[reportMonth][h.seller] = h.target;
+                        setMonthlyTarget(S, reportMonth, h.seller, h.target);
                     }),
                 }),
                 children: [(0, b.jsx)(od, {}), "Definir metas"],
@@ -2887,7 +2917,7 @@ function bz({ id: e }: any): any {
                 total: Zo(S, "total"),
                 count: S.length,
                 clients: new Set(S.map((L: any) => L.customerId)).size,
-                target: t.targets[String(h)] ?? null,
+                target: monthlyTargets(t, reportMonth)[String(h)] ?? null,
             };
         })
             .sort((h: any, S: any) => S.total - h.total)),
@@ -3395,6 +3425,7 @@ function Cz({ area: e, section: t }: any): any {
         crm: "CRM",
     } as Record<string, string>)[e], f: any = e + "/" + t, d: any = a.collections[f] || [], m: any = () => n({
         title: "Adicionar " + u.label.toLowerCase(),
+        allocateIdentity: true,
         fields: [
             { key: "name", label: "Nome / descri\xE7\xE3o", required: !0 },
             ...(t === "campos"
@@ -3411,7 +3442,7 @@ function Cz({ area: e, section: t }: any): any {
         save: async (p: any) => await o((y: any) => {
             (y.collections[f] ||= []).push({
                 ...p,
-                id: Jo(y.collections[f], "CFG-SIM"),
+                id: p.id,
                 source: "simulado",
             });
         }),
@@ -3944,6 +3975,7 @@ function Sz({ section: e = "perfil" }: any): any {
             (l = (0, b.jsxs)(Ft, {
                 onClick: () => a({
                     title: "Adicionar registro local",
+                    allocateIdentity: true,
                     fields: [
                         { key: "name", label: "Nome / descri\xE7\xE3o", required: !0 },
                         ...(e === "usuarios"
@@ -3958,7 +3990,7 @@ function Sz({ section: e = "perfil" }: any): any {
                     ],
                     save: async (u: any) => await o((c: any) => c[s].push({
                         ...u,
-                        id: Jo(c[s], "ADM-SIM"),
+                        id: u.id,
                         source: "simulado",
                     })),
                 }),
@@ -4091,6 +4123,7 @@ function Iz(): any {
                 actions: (0, b.jsxs)(Ft, {
                     onClick: () => a({
                         title: "Criar destaque de cat\xE1logo local",
+                        allocateIdentity: true,
                         fields: [
                             { key: "name", label: "Nome", required: !0 },
                             {
@@ -4105,7 +4138,7 @@ function Iz(): any {
                         save: async (o: any) => await t((n: any) => {
                             (n.collections.destaques ||= []).push({
                                 ...o,
-                                id: Jo(n.collections.destaques, "DST-SIM"),
+                                id: o.id,
                                 source: "simulado",
                             });
                         }),
@@ -4165,7 +4198,7 @@ function wz(): any {
                 o(""),
                 setTimeout(async () => {
                     (await t((i: any) => i.chats.push({
-                        id: Jo(i.chats, "CHAT-SIM"),
+                        id: crypto.randomUUID(),
                         question: s,
                         answer: Lz(i, s),
                         date: bo,
@@ -4488,7 +4521,7 @@ function PriceListEditor({ db: e, value: t, onChange: a }: any): any {
 }
 function Mz({ spec: e, close: closePanel, dbRef: dbR }: any): any {
     const saving=useRef(false); const t=()=>{if(!saving.current) closePanel()};
-    let [a, o] = (0, He.useState)(Xu(e.values || {})), [n, r] = (0, He.useState)(""), l: any = (i: any, u: any) => o((c: any) => ({ ...c, [i]: u }));
+    let [a, o] = (0, He.useState)(() => e.allocateIdentity ? createEditorValues(Xu(e.values || {})) : Xu(e.values || {})), [n, r] = (0, He.useState)(""), l: any = (i: any, u: any) => o((c: any) => ({ ...c, [i]: u }));
     async function s(): Promise<void> {
         if(saving.current) return;
         let i: any = e.fields.find((c: any) => c.required && (a[c.key] == null || a[c.key] === "" || (c.kind === "priceList" && !a[c.key]?.length)));
@@ -4906,3 +4939,5 @@ export default function SulApp({ initialState, persist, onSignOut }: SulAppProps
 
 export function monthOptions(orders: any[]): {value:string;label:string}[] { const now=businessDate(); const months=new Set<string>(orders.filter(r=>r.date).map(r=>String(r.date).slice(0,7))); for(let i=-12;i<=3;i++){const d=new Date(Number(now.slice(0,4)),Number(now.slice(5,7))-1+i,1);months.add(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'))} return [...months].sort().map(value=>({value,label:new Intl.DateTimeFormat('pt-BR',{month:'long',year:'numeric',timeZone:'America/Sao_Paulo'}).format(new Date(value+'-15T12:00:00Z'))})); }
 export function identifyPriceTable(db:any, items:any[]):string {const scores=Object.entries(db.priceTablesBase || {}).map(([name,rates]:[string,any])=>{const diffs=items.flatMap(it=>{const prod=Ur(db,it.productId); const factor=rates[prod?.category] ?? rates['*'];const expected=prod?.price*factor;return expected>0?[Math.abs(it.price-expected)/expected]:[]}); return {name,score:diffs.length?diffs.reduce((a,b)=>a+b,0)/diffs.length:Infinity}}).filter(s=>Number.isFinite(s.score)).sort((a,b)=>a.score-b.score);return scores[0]?.name || '';}
+
+export { M5 as openActivityEditor, k5 as openCustomerEditor };
