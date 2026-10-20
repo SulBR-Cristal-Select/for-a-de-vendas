@@ -28,7 +28,7 @@ function decode(data: unknown): Envelope {
 function failure(error: { message?: string; code?: string }): WorkspaceError {
   const message = error.message || '';
   if (message.includes('MEMBERSHIP_PENDING')) return new WorkspaceError('Cadastro recebido. Seu acesso à SulBR está pendente de ativação pelo administrador.', 'MEMBERSHIP_PENDING');
-  if (message.includes('REVISION_CONFLICT')) return new WorkspaceError('Os dados foram alterados por outra pessoa. Recarregue antes de tentar novamente; sua alteração não foi gravada.', 'REVISION_CONFLICT');
+  if (message.includes('REVISION_CONFLICT') || error.code === 'PT409') return new WorkspaceError('Os dados foram alterados por outra pessoa. Recarregue antes de tentar novamente; sua alteração não foi gravada.', 'REVISION_CONFLICT');
   if (message.includes('AUTH_REQUIRED') || error.code === 'PGRST301') return new WorkspaceError('Entre na sua conta para acessar a SulBR.', 'AUTH_REQUIRED');
   return new WorkspaceError(message || 'Não foi possível confirmar a gravação. Verifique sua conexão e tente novamente com a mesma alteração.', error.code);
 }
@@ -59,8 +59,8 @@ export async function saveWorkspace(nextState: State): Promise<State> {
     if (ownGeneration !== generation) throw new WorkspaceError('A sessão mudou. Carregue os dados novamente.');
     if (error) {
       // Erros SQL garantem rollback; erros de transporte preservam o UUID.
-      if (error.code && /^(P\d|[0-9]{2})/.test(error.code)) pending = null;
-      if (error.message.includes('REVISION_CONFLICT')) revision = null;
+      if (error.code && /^(P\d|PT\d{3}|[0-9]{2})/.test(error.code)) pending = null;
+      if (error.message.includes('REVISION_CONFLICT') || error.code === 'PT409') revision = null;
       throw failure(error);
     }
     const result = decode(data);

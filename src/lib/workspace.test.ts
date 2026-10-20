@@ -35,10 +35,10 @@ describe('Contrato autenticado do workspace', () => {
     mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: 'MEMBERSHIP_PENDING', code: '42501' } });
     await expect(loadWorkspace()).rejects.toMatchObject({ code: 'MEMBERSHIP_PENDING', message: expect.stringContaining('pendente de ativação') });
   });
-  it('invalida revisão quando há conflito', async () => {
+  it.each(['40001', 'PT409'])('invalida revisão quando há conflito %s', async (code) => {
     const { loadWorkspace, saveWorkspace } = await import('./workspace');
     mocks.rpc.mockResolvedValueOnce({ data: { state: {}, revision: 1 }, error: null }); await loadWorkspace();
-    mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: 'REVISION_CONFLICT', code: '40001' } });
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: code === 'PT409' ? 'Revisão desatualizada' : 'REVISION_CONFLICT', code } });
     await expect(saveWorkspace({})).rejects.toMatchObject({ code: 'REVISION_CONFLICT' });
     await expect(saveWorkspace({})).rejects.toThrow('Carregue os dados autenticados');
   });
