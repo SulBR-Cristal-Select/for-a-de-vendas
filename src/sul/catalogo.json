@@ -1,0 +1,311 @@
+{
+  "company": {
+    "name": "Sulbr",
+    "id": "432299",
+    "user": "",
+    "role": "",
+    "plan": "",
+    "integration": "Não configurada",
+    "credits": 0
+  },
+  "customers": [],
+  "orders": [],
+  "products": [],
+  "opportunities": [],
+  "tasks": [],
+  "activities": [],
+  "routes": [],
+  "titles": [],
+  "emails": [],
+  "invoices": [],
+  "stages": [
+    "Lead",
+    "Primeiro contato",
+    "Negociação",
+    "Fechamento"
+  ],
+  "payments": [
+    "35 DIAS PIX",
+    "A PRAZO - 21/28 DIAS",
+    "A PRAZO - 21/28/35 DIAS",
+    "A PRAZO - 28 DIAS",
+    "A PRAZO - 28/35/42 DIAS",
+    "A PRAZO - 35 DIAS"
+  ],
+  "reports": [
+    {
+      "id": "resumo",
+      "name": "Resumo de vendas"
+    },
+    {
+      "id": "vendas",
+      "name": "Vendas detalhadas"
+    },
+    {
+      "id": "ranking",
+      "name": "Ranking de vendedor / Meta"
+    },
+    {
+      "id": "meta-vendedor",
+      "name": "Meta por vendedor"
+    },
+    {
+      "id": "nao-compraram",
+      "name": "Clientes sem compra no mês"
+    },
+    {
+      "id": "gerencial",
+      "name": "Gerencial para representada"
+    },
+    {
+      "id": "funil",
+      "name": "Funil de vendas"
+    },
+    {
+      "id": "faturados",
+      "name": "Pedidos faturados"
+    },
+    {
+      "id": "faturamento",
+      "name": "Faturamento"
+    },
+    {
+      "id": "titulos",
+      "name": "Títulos"
+    },
+    {
+      "id": "clientes",
+      "name": "Clientes"
+    },
+    {
+      "id": "carteira",
+      "name": "Situação da carteira"
+    },
+    {
+      "id": "carteira-vendedor",
+      "name": "Carteira por vendedor"
+    },
+    {
+      "id": "positivacao",
+      "name": "Positivação de clientes"
+    },
+    {
+      "id": "abc",
+      "name": "Curva ABC de clientes"
+    },
+    {
+      "id": "visitas",
+      "name": "Visitas com check-in"
+    },
+    {
+      "id": "tarefas",
+      "name": "Tarefas realizadas"
+    },
+    {
+      "id": "comissoes",
+      "name": "Comissões"
+    },
+    {
+      "id": "comissoes-pedido",
+      "name": "Comissões por pedido"
+    },
+    {
+      "id": "produtos",
+      "name": "Produtos mais vendidos"
+    },
+    {
+      "id": "mix",
+      "name": "Positivação de produtos por cliente"
+    },
+    {
+      "id": "produtos-pedido",
+      "name": "Produtos por pedido"
+    },
+    {
+      "id": "estoque",
+      "name": "Estoque"
+    },
+    {
+      "id": "emails",
+      "name": "E-mails enviados"
+    },
+    {
+      "id": "vendas-anterior",
+      "name": "Vendas — versão anterior"
+    }
+  ],
+  "indicators": {
+    "Vendas": [
+      "Quantidade ou valor vendido de um produto ou categoria",
+      "Valor diário em vendas de produtos",
+      "Valor vendido em produtos por vendedor",
+      "Quantidade vendida em produtos por categoria",
+      "Evolução das vendas de produto ou categoria",
+      "Evolução de vendas (antigo)"
+    ],
+    "Positivação": [
+      "Positivação específica",
+      "Positivação diária",
+      "Novos clientes por vendedor",
+      "Clientes ativos por vendedor",
+      "Positivação de categoria ou produto específico",
+      "Positivação de categoria ou produto diária",
+      "Positivação de categoria ou produto por vendedor",
+      "Positivação por categoria de produto",
+      "Positivação geral"
+    ],
+    "Faturamento": [
+      "Faturamento específico",
+      "Faturamento diário",
+      "Faturamento total",
+      "Faturamento por vendedor",
+      "Evolução do faturamento"
+    ],
+    "Atividades": [
+      "Volume de atividades",
+      "Atividades por vendedor",
+      "Atividades diárias",
+      "Cobertura da carteira"
+    ],
+    "Outros": [
+      "Situação da carteira",
+      "Curva ABC de clientes",
+      "Conversão do e-commerce"
+    ]
+  },
+  "config": {
+    "recentDays": 180,
+    "oldDays": 365,
+    "checkinDistance": 300,
+    "stock": false,
+    "portal": false,
+    "pay": false,
+    "duplicateDocument": true,
+    "zeroPriceBlocked": true,
+    "freightRequired": false
+  },
+  "collections": {
+    "pedidos/campos": [
+      {
+        "id": "1",
+        "name": "Observação da Nota / pedido_erp",
+        "kind": "Livre",
+        "required": false,
+        "source": "catalogo"
+      },
+      {
+        "id": "2",
+        "name": "data_entrega",
+        "kind": "Data",
+        "required": true,
+        "source": "catalogo"
+      },
+      {
+        "id": "3",
+        "name": "Nº Pedido do Cliente",
+        "kind": "Numérico",
+        "required": false,
+        "source": "catalogo"
+      },
+      {
+        "id": "4",
+        "name": "Tipo de Agenda",
+        "kind": "Lista",
+        "required": true,
+        "source": "catalogo"
+      }
+    ],
+    "pedidos/status": [
+      {
+        "id": "1",
+        "name": "Integrado",
+        "source": "catalogo"
+      },
+      {
+        "id": "2",
+        "name": "Não integrado - Verifique na integração(Connector)",
+        "source": "catalogo"
+      },
+      {
+        "id": "3",
+        "name": "Status: Liberada - Liberação: Sem pendência",
+        "source": "catalogo"
+      },
+      {
+        "id": "4",
+        "name": "Status: Liberada - Liberação: Aprovado",
+        "source": "catalogo"
+      }
+    ],
+    "pedidos/tipos": [
+      {
+        "id": "0",
+        "name": "Venda",
+        "kind": "Padrão",
+        "source": "catalogo"
+      },
+      {
+        "id": "1",
+        "name": "Bonificação",
+        "kind": "Personalizado",
+        "source": "catalogo"
+      },
+      {
+        "id": "2",
+        "name": "Bonificação - Raslog",
+        "kind": "Personalizado",
+        "source": "catalogo"
+      },
+      {
+        "id": "3",
+        "name": "Venda - Cupom Fiscal",
+        "kind": "Personalizado",
+        "source": "catalogo"
+      },
+      {
+        "id": "4",
+        "name": "Venda - Faturamento Antecipado",
+        "kind": "Personalizado",
+        "source": "catalogo"
+      },
+      {
+        "id": "5",
+        "name": "Venda - Raslog",
+        "kind": "Personalizado",
+        "source": "catalogo"
+      }
+    ],
+    "clientes/resultados": [
+      {
+        "id": "1",
+        "name": "Relacionamento",
+        "source": "catalogo"
+      },
+      {
+        "id": "2",
+        "name": "Venda convertida",
+        "source": "catalogo"
+      }
+    ],
+    "produtos/categorias": [
+      {
+        "id": "1",
+        "name": "500ML COM GAS",
+        "source": "catalogo"
+      }
+    ]
+  },
+  "extraIndicators": [],
+  "panels": [
+    "Painel Sul"
+  ],
+  "activePanel": "Painel Sul",
+  "targets": {},
+  "priceTablesBase": {},
+  "logs": [],
+  "chats": [],
+  "users": [],
+  "teams": [],
+  "carriers": [],
+  "policy": []
+}
