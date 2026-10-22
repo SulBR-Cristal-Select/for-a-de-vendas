@@ -1,7 +1,8 @@
 import {FileText as $s} from 'lucide-react';
 import { ArrowLeft as gm, Download as vm, ArrowRight as Jr, Plus as Sa, Printer as td, Trash as Ws, Check as ka, FileCheck as Cm, Pencil as tl, Link2 as Jc, Package as du, ChevronRight as so, Target as od, Lock as Im, ListFilter as ed, Layers as Xl, Settings as ad, Users as Wl, ClipboardList as ym, Building2 as qs, Mail as Lm, Globe as Qc, CreditCard as Kc, ShieldCheck as Mm, ChartNoAxesCombined as Yc, Truck as nd, Sparkles as al, Send as Nm, ChartColumn as zs, Handshake as Sm, Search as tr } from 'lucide-react';
 import { Pagination as GI } from '@g4ai/ds';
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
+import { commercialItem, commercialPaymentOptions, commercialTotal, isERP, prepareCommercialOrder, quantityRules, validQuantity } from '../lib/erp-commercial';
 import * as runtime from 'react/jsx-runtime';
 import { Badge as bi, Button as Ft, PageHeading as Hp, PageToolbar as nv, TableToolbar as cv, DataTable as s1, Empty as hn, Drawer as xb, Combobox as Sl, Select as ho, Tabs as of, Page as fa, ActionMenu as Il, KpiGrid as _i, ChartCard as cs, DatePicker as Jd, Callout as Gu, Card as Vt, Section as Ot, FieldGrid as Vi, IconButton as wR, NumberField as Hr, TextField as vr, TextareaField as $u, PropertyList as _o, KpiCard as Ha, Checkbox as Yy, CurrencyField as Up, KanbanBoard as c1, KanbanColumn as i1, KanbanCard as u1, BarChart as Qy, Modal as gb, SettingsLayout as uv, SettingsSection as nf, Switch as zu, AppShell as l1, Sidebar as t1, ThemeToggle as n0, ConfirmDialog as HR, formatCurrency as Vd, formatDate as oI, formatNumber as na, normalize as ol, notify as go, useSort as UI, usePagination as zI, BarList as Zy, ProductMark as rv } from '@g4ai/ds';
 import catalogo from './catalogo.json';
@@ -95,7 +96,7 @@ export function createMutationQueue(current: {
         return pending;
     };
 }
-var bo: any = businessDate(), pa: any = "N\xE3o extra\xEDdo", Xu: any = (e: any) => JSON.parse(JSON.stringify(e)), rt: any = (e: any) => (e == null ? pa : Vd(e)), xo: any = (e: any) => (e ? oI(e) : pa), La: any = (e: any) => e.map((t: any) => typeof t == "string" ? { value: t, label: t || "Todos" } : t), zp: any = (e: any, t: any) => e.customers.find((a: any) => a.id === t), Un: any = (e: any, t: any) => zp(e, t)?.name || "Cliente indispon\xEDvel", Ur: any = (e: any, t: any) => e.products.find((a: any) => a.id === t), Zo: any = (e: any, t: any) => e.reduce((a: any, o: any) => a + (Number(o[t]) || 0), 0), y5: any = (e: any) => Math.round(e * 100), d1: any = (e: any, t: any = 0) => (e.reduce((a: any, o: any) => a + y5(o.price) * o.qty, 0) + y5(t)) / 100, I5: any = (0, He.createContext)(null), qa: any = () => (0, He.useContext)(I5);
+var bo: any = businessDate(), pa: any = "N\xE3o extra\xEDdo", Xu: any = (e: any) => JSON.parse(JSON.stringify(e)), rt: any = (e: any) => (e == null ? pa : Vd(e)), xo: any = (e: any) => (e ? oI(e) : pa), La: any = (e: any) => e.map((t: any) => typeof t == "string" ? { value: t, label: t || "Todos" } : t), zp: any = (e: any, t: any) => e.customers.find((a: any) => a.id === t), Un: any = (e: any, t: any) => zp(e, t)?.name || "Cliente indispon\xEDvel", Ur: any = (e: any, t: any) => e.products.find((a: any) => a.id === t), Zo: any = (e: any, t: any) => e.reduce((a: any, o: any) => a + (Number(o[t]) || 0), 0), y5: any = (e: any) => Math.round(e * 100), d1: any = (items: any[], freight: any = 0) => commercialTotal(items, freight), I5: any = (0, He.createContext)(null), qa: any = () => (0, He.useContext)(I5);
 function sellerNames(db: any): string[] { return [...new Set<string>([db.company.user, ...(db.users || []).filter((u: any) => u.active !== false).map((u: any) => u.name)].filter(Boolean))]; }
 function qr({ row: e }: any): any {
     const source = e?.source;
@@ -794,7 +795,7 @@ function sz(): any {
     let { db: e, update: t, path: a } = qa(), o: any = new URLSearchParams(location.hash.split("?")[1] || ""), [n, r] = (0, He.useState)(o.get("cliente") || ""), [l, s] = (0, He.useState)(e.company.user), [i, u] = (0, He.useState)(""), [c, f] = (0, He.useState)("Venda"), [d, m] = (0, He.useState)(bo), [p, y] = (0, He.useState)("1 - IMEDIATO"), [C, x] = (0, He.useState)("Conclu\xEDdo"), [v, g] = (0, He.useState)(""), [h, S] = (0, He.useState)([]), [L, I] = (0, He.useState)(0), [R, E] = (0, He.useState)(""), [OBS, OBSs] = (0, He.useState)(""), [k, M] = (0, He.useState)(""), [A, N] = (0, He.useState)(""), O: any = () => {
         let D: any = Ur(e, v);
         if (D) {
-            if (D.price == null || (D.price <= 0 && e.config.zeroPriceBlocked)) {
+            if (!isERP(D) && !isERP(zp(e, n)) && (D.price == null || (D.price <= 0 && e.config.zeroPriceBlocked))) {
                 N("Defina um preço positivo na ficha do produto antes de usá-lo.");
                 return;
             }
@@ -802,9 +803,14 @@ function sz(): any {
                 N("O produto j\xE1 est\xE1 no pedido. Ajuste a quantidade no item.");
                 return;
             }
-            (S([...h, { productId: v, qty: 1, price: D.price }]), g(""), N(""));
+            try { S([...h, commercialItem(e, n, v, businessDate())]); g(""); N(""); } catch (error) { N(error instanceof Error ? error.message : "Não foi possível confirmar o preço."); }
         }
     };
+    useEffect(() => {
+        if (!isERP(zp(e, n)) && !h.some((item: any) => isERP(Ur(e, item.productId)))) return;
+        try { const next = h.map((item: any) => commercialItem(e, n, item.productId, businessDate(), item)); if (JSON.stringify(next) !== JSON.stringify(h)) S(next); N(''); }
+        catch (error) { N(error instanceof Error ? error.message : 'Não foi possível confirmar o preço.'); }
+    }, [n, e.erpCommercial]);
     async function B(): Promise<any> {
         if (savingOrder.current) return;
         if (!n ||
@@ -812,10 +818,11 @@ function sz(): any {
             !d ||
             !p ||
             !h.length ||
-            h.some((F: any) => !Number.isInteger(F.qty) || F.qty < 1)) {
+            h.some((F: any) => !isERP(Ur(e, F.productId)) && !validQuantity(Ur(e, F.productId), F.qty, F.unit))) {
             N("Informe cliente, pagamento, entrega, tipo de agenda e pelo menos um item com quantidade inteira positiva.");
             return;
         }
+        if (h.some((item: any) => isERP(Ur(e, item.productId)) && !validQuantity(Ur(e, item.productId), item.qty, item.unit))) { N('Quantidade fora da precisão ou múltiplo configurado.'); return; }
         let D: any = orderId, j: any = {
             id: D,
             customerId: n,
@@ -836,6 +843,7 @@ function sz(): any {
             cargoStatus: "Pendente",
             source: "simulado",
         };
+        try { j = prepareCommercialOrder(e, j); } catch (error) { N(error instanceof Error ? error.message : 'Não foi possível confirmar o contrato comercial.'); return; }
         savingOrder.current=true;
         try { await t((F: any) => F.orders.unshift(j)); go('Pedido criado'); bn('/pedidos/'+D) } catch(error) {N(error instanceof Error ? error.message : 'Não foi possível salvar o pedido.')} finally {savingOrder.current=false}
     }
@@ -964,7 +972,8 @@ function sz(): any {
                                                                     className: "w-44",
                                                                     children: (0, b.jsx)(Hr, {
                                                                         label: "Quantidade",
-                                                                        min: 1,
+                                                                        min: quantityRules(Ur(e, D.productId), D.unit).min,
+                                                                        step: quantityRules(Ur(e, D.productId), D.unit).step,
                                                                         value: D.qty,
                                                                         onChange: (F: any) => S(h.map((G: any, X: any) => X === j ? { ...G, qty: F } : G)),
                                                                     }),
@@ -997,7 +1006,7 @@ function sz(): any {
                                                 (0, b.jsx)(Sl, {
                                                     label: "Condi\xE7\xE3o de pagamento",
                                                     value: i,
-                                                    options: La(e.payments),
+                                                    options: La(commercialPaymentOptions(e, zp(e, n), businessDate())),
                                                     onValueChange: (D: any) => u(String(D)),
                                                     required: !0,
                                                 }),

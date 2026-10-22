@@ -8,7 +8,7 @@ Aplicação SulBR baseada no bundle ajustado e no mapeamento funcional, com comp
 - Supabase: https://supabase.com/dashboard/project/cxurczhmrvxcuvklyiht
 - Repositório sincronizado: https://github.com/SulBR-Cristal-Select/for-a-de-vendas
 
-O nome final solicitado, `forca-vendas`, depende de renomeação por um administrador do GitHub. A conta de desenvolvimento tem escrita, mas não administração neste repositório. O README anterior permanece em `SulBR-Cristal-Select/forca-vendas-referencia`; não foi excluído.
+O nome `for-a-de-vendas` foi aceito pelo usuário em 22/10/2026; não há renomeação pendente. O repositório anterior permanece em `SulBR-Cristal-Select/forca-vendas-referencia`; não foi excluído.
 
 ## Desenvolvimento
 
@@ -33,19 +33,33 @@ A senha é enviada pelo cliente oficial diretamente ao Supabase Auth; não há s
 
 ## Persistência e regras
 
-As migrações em `supabase/migrations` correspondem às versões instaladas. Dez tabelas públicas, perfis vinculados ao Auth, RLS e RPCs `get_workspace` / `save_workspace` mantêm os dados por empresa e vendedor. Gravações usam revisão e chave de idempotência. Itens e totais de pedidos são validados e calculados no servidor, mantendo preços históricos. A interface aguarda confirmação para navegar ou fechar gravações críticas.
+As seis migrações em `supabase/migrations` correspondem às versões instaladas. Treze tabelas públicas, perfis vinculados ao Auth, RLS e RPCs `get_workspace` / `save_workspace` mantêm os dados por empresa e vendedor. Gravações usam revisão e chave de idempotência. Itens e totais de pedidos são validados e calculados no servidor, mantendo preços históricos. A interface aguarda confirmação para navegar ou fechar gravações críticas.
 
 Nenhuma carteira histórica ou simulação é carregada como operação real. Os 25 relatórios e 27 indicadores são catálogos estruturais; os resultados dependem dos registros persistidos. Agenda e Portal não aparecem na lateral. O menu e o layout do bundle são preservados, sem descontos, promoções ou Saldo Flex.
 
 ## Verificações realizadas
 
 - TypeScript e build de produção.
-- Vinte e três testes locais do adaptador, fila, catálogos, identificação, metas, responsáveis e contrato de vínculo Auth.
+- 75 testes locais do adaptador, fila, catálogos, identificação, metas, responsáveis, vínculo Auth e contrato comercial ERP.
+- 32 verificações SQL da compatibilidade ERP, mais recusa de perfil inativo, em transação revertida: preço exato/versão/unidade/vigência, filial e vínculo, precisão, parcelas, histórico não comercial, adulteração, idempotência, concorrência e regressão manual. A numeração real permaneceu em 8, sem fixtures restantes.
 - Vinte e seis verificações transacionais no Supabase: total de R$ 9.008,80 para 974 unidades em três itens, reenvio idempotente, conflito de revisão, duplicidade de documento, rollback, preço histórico, restrições de papel, isolamento de carteira, metas mensais e edição da própria conta/empresa.
 - Seis verificações adicionais do papel gestor no banco.
 - Trinta verificações de vínculo Auth (três ativações de destino e 27 recusas), incluindo reenvio idempotente, identidade real, ausência de alterações parciais e restauração das contagens originais.
 - Formulário de usuários verificado isoladamente em 390 e 1440 px: campos obrigatórios, e-mail semântico, opção Gestor, payload canônico e preservação do formulário em falha.
 - Dados fictícios desses testes foram revertidos. Testes transacionais e de componente não substituem o teste interativo de login e operação com a conta ativada.
+
+## Compatibilidade comercial Sankhya
+
+A migração adicional `20261022165600_sankhya_commercial_compatibility.sql` acrescenta três catálogos protegidos: `erp_price_tables`, `erp_prices` e `erp_payment_terms`. O tenant `432299` continua separado dos códigos ERP 1 e 4. `products.data.erp`, `customers.data.erp` e `profiles.erp` preservam identidades explícitas, sem criar Auth ou conceder papéis por e-mail/código ERP.
+
+- Fluxo manual preservado; produtos manuais continuam com quantidades inteiras.
+- Produtos ERP aceitam frações conforme unidade e precisão explicitamente cadastradas, de 0 a 3 casas. Valores não representáveis são recusados, nunca arredondados silenciosamente ou convertidos por nomes de embalagem.
+- Preços exigem tabela/versão/produto/unidade/local/controle e vigência exatos, com contexto de cliente e filial. Não há fallback ao preço base, fator, tabela alheia ou versão futura/inativa. O catálogo serializa preços como texto decimal, sem perda no transporte JSON.
+- Condições exigem código/versão e elegibilidade cliente/filial. Parcelas são preservadas; somas de 99,99% não geram rateio presumido. Bloqueio de venda a prazo não é convertido em bloqueio geral.
+- Totais são calculados no servidor; pedidos guardam os snapshots comerciais. Edições não comerciais preservam o histórico, mas não autorizam mudar status/tipo ou reutilizar esse preço numa operação nova sem revalidação.
+- Metadados ERP e catálogos não podem ser alterados pelo snapshot do navegador. RLS, perfis ativos, revisão otimista, UUID idempotente, ledger e conflito HTTP 409 permanecem.
+
+Não houve carga comercial, integração automática com o ERP, conversão de unidades, geração financeira ou ativação das contas de Adilson e Raul. A carteira, os responsáveis, as regras de preço e a elegibilidade devem ser aprovados antes de qualquer carga futura. As contas existentes permanecem vendedores inativos, sem confirmação artificial de e-mail.
 
 ## Limites atuais
 
