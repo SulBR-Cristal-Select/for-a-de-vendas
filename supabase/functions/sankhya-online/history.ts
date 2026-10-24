@@ -1,5 +1,5 @@
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
-import type { ReadScope } from './read-model.ts';
+import { scopeOf, sellerPredicate, type ReadScope } from './read-model.ts';
 import { foldERPText } from '../../../src/lib/erp-order.ts';
 
 type Row = Record<string, unknown>;
@@ -20,13 +20,6 @@ function windowOf(offset: unknown, limit: unknown) {
   const start = integer(offset, 0), size = integer(limit);
   if (size > 50 || start > 2147483647 - size) invalid();
   return { offset: start, limit: size };
-}
-function scopeOf(scope: ReadScope) {
-  const fail = (): never => { throw new SankhyaError('ERP_IDENTITY_REQUIRED', 'Vínculo explícito de vendedor e filial ERP necessário.', 403); };
-  if (!scope || !['administrador', 'gestor', 'vendedor'].includes(scope.role)) return fail();
-  if (scope.role === 'administrador') return { companies: [1, 4], seller: null };
-  if (!Number.isSafeInteger(scope.sellerCode) || scope.sellerCode! <= 0 || scope.sellerCode! > 2147483647 || !Array.isArray(scope.companyCodes) || !scope.companyCodes.length || scope.companyCodes.some(c => c !== 1 && c !== 4)) return fail();
-  return { companies: [...new Set(scope.companyCodes)], seller: scope.sellerCode! };
 }
 const text = (v: unknown): string | null => v == null ? null : typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= Number.MAX_SAFE_INTEGER) ? String(v) : incompatible();
 function numeric(v: unknown): number | null {
@@ -69,7 +62,7 @@ function baseWhere(scope: ReturnType<typeof scopeOf>, movement: 'P' | 'V', compa
   const list = companies.join(',');
   // Sem filtro ATIVO: cadastros hoje inativos continuam compondo o histórico.
   const where = [`C.TIPMOV='${movement}'`, `C.CODEMP IN (${list})`, "P.CLIENTE='S'", `(P.CODEMP IN (${list}) OR (P.CODEMP IS NULL AND EXISTS (SELECT 1 FROM TGFCAB H WHERE H.CODPARC=P.CODPARC AND H.CODEMP IN (${list}) AND H.TIPMOV IN ('P','V'))))`];
-  if (scope.seller !== null) where.push(`P.CODVEND=${scope.seller}`);
+  const seller = sellerPredicate(scope, 'P.CODVEND'); if (seller) where.push(seller);
   return where;
 }
 async function count(g: Transport, from: string, where: string[]) {

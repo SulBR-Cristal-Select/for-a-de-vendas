@@ -2,11 +2,11 @@ import { SankhyaError, type SankhyaGateway } from './gateway.ts';
 import { foldERPText } from '../../../src/lib/erp-order.ts';
 
 // Escopo fornecido exclusivamente pelo servidor após autenticação; nunca copiar do corpo HTTP.
-export type ReadScope = { role: 'administrador' | 'gestor' | 'vendedor'; sellerCode?: number; companyCodes?: readonly number[] };
+export type ReadScope = { role: 'administrador' | 'gestor' | 'vendedor'; sellerCode?: number; companyCodes?: readonly number[]; teamSellerCodes?: readonly number[] };
 export type Resource = 'customers' | 'products' | 'sellers';
 export type SortKey = 'code' | 'name' | 'city' | 'state' | 'seller' | 'blocked' | 'source' | 'icon' | 'category' | 'unit' | 'price';
 export type WindowInput = Omit<PageInput, 'page' | 'pageSize'> & { offset: number; limit: number };
-export type PageInput = { resource: Resource; page?: number; pageSize?: 10 | 20 | 50; search?: string; sort?: SortKey; direction?: 'asc' | 'desc'; filters?: { companyCode?: number; sellerCode?: number; categoryCode?: number; categoryName?: string; cityCode?: number } };
+export type PageInput = { resource: Resource; page?: number; pageSize?: 10 | 20 | 50; search?: string; sort?: SortKey; direction?: 'asc' | 'desc'; filters?: { companyCode?: number; sellerCode?: number; managerCode?: number; categoryCode?: number; categoryName?: string; cityCode?: number } };
 export type RecordInput = { resource: Resource; id: number | string };
 export type FacetInput = PageInput & { facet: 'category' | 'seller' | 'company' | 'city' };
 type Row = Record<string, unknown>;
@@ -17,12 +17,25 @@ const integer = (n: unknown, min = 1): number => typeof n === 'number' && Number
 function keys(value: unknown, allowed: readonly string[]): asserts value is Row {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(k => !allowed.includes(k))) invalid();
 }
-export function scopeOf(scope: ReadScope): { companies: number[]; seller: number | null } {
+export function scopeOf(scope: ReadScope): { companies: number[]; seller: number | null; sellers: readonly number[] | null } {
   if (!scope || !['administrador', 'gestor', 'vendedor'].includes(scope.role)) return identity();
-  if (scope.role === 'administrador') return { companies: [1, 4], seller: null };
-  if (!Number.isSafeInteger(scope.sellerCode) || scope.sellerCode! <= 0 || scope.sellerCode! > 2147483647 || !Array.isArray(scope.companyCodes) || !scope.companyCodes.length || scope.companyCodes.some(c => c !== 1 && c !== 4)) return identity();
-  // Gestores também ficam na carteira explicitamente vinculada; não inferir subordinados.
-  return { companies: [...new Set(scope.companyCodes)], seller: scope.sellerCode! };
+  if (scope.role === 'administrador') return { companies: [1, 4], seller: null, sellers: null };
+  if (!Number.isSafeInteger(scope.sellerCode) || scope.sellerCode! <= 0 || scope.sellerCode! > 2147483647 ||
+    !Array.isArray(scope.companyCodes) || scope.companyCodes.length < 1 || scope.companyCodes.length > 2 ||
+    scope.companyCodes.some(c => c !== 1 && c !== 4) || new Set(scope.companyCodes).size !== scope.companyCodes.length) return identity();
+  const team = scope.teamSellerCodes ?? [];
+  if (!Array.isArray(team) || team.length > 49 || new Set(team).size !== team.length ||
+    team.some(c => !Number.isSafeInteger(c) || c < 1 || c > 2147483647 || c === scope.sellerCode) ||
+    scope.role !== 'gestor' && team.length > 0) return identity();
+  // Somente o vínculo privado pode fornecer equipe; CODGER/histórico não concedem acesso automaticamente.
+  return { companies: [...scope.companyCodes], seller: scope.sellerCode!, sellers: [scope.sellerCode!, ...team] };
+}
+export function sellerAllowed(scope: ReturnType<typeof scopeOf>, code: number): boolean {
+  return scope.sellers === null || scope.sellers.includes(code);
+}
+export function sellerPredicate(scope: ReturnType<typeof scopeOf>, column: 'P.CODVEND' | 'C.CODVEND'): string | undefined {
+  return scope.sellers === null ? undefined : scope.sellers.length === 1
+    ? `${column}=${scope.sellers[0]}` : `${column} IN (${scope.sellers.join(',')})`;
 }
 function resource(value: unknown): Resource { if (!['customers', 'products', 'sellers'].includes(String(value)) || typeof value !== 'string') return invalid(); return value as Resource; }
 function searchText(value: unknown): string {
@@ -48,13 +61,13 @@ function baseWhere(r: Resource, scope: ReturnType<typeof scopeOf>, active: boole
   const where = active ? ["P.ATIVO='S'"] : [];
   if (r === 'customers') {
     where.push("P.CLIENTE='S'", `(P.CODEMP IN (${list}) OR (P.CODEMP IS NULL AND EXISTS (SELECT 1 FROM TGFCAB H WHERE H.CODPARC=P.CODPARC AND H.CODEMP IN (${list}) AND H.TIPMOV IN ('P','V'))))`);
-    if (scope.seller !== null) where.push(`P.CODVEND=${scope.seller}`);
+    const seller = sellerPredicate(scope, 'P.CODVEND'); if (seller) where.push(seller);
   } else if (r === 'products') {
     where.push(`EXISTS (SELECT 1 FROM TGFITE I JOIN TGFCAB H ON H.NUNOTA=I.NUNOTA WHERE I.CODPROD=P.CODPROD AND H.CODEMP IN (${list}) AND H.TIPMOV IN ('P','V'))`);
   } else {
     // Cadastro compartilhado permite listar o vendedor, nunca conceder carteira.
     where.push(`P.CODVEND<>0`, `(P.CODEMP IN (${list}) OR P.CODEMP IS NULL)`);
-    if (scope.seller !== null) where.push(`P.CODVEND=${scope.seller}`);
+    const seller = sellerPredicate(scope, 'P.CODVEND'); if (seller) where.push(seller);
   }
   return where;
 }
@@ -69,7 +82,7 @@ function queryParts(input: PageInput & Partial<WindowInput>, trustedScope: ReadS
   const sort = input.sort ?? 'code', direction = input.direction ?? 'asc';
   if (typeof sort !== 'string' || !Object.hasOwn(sortFields[r], sort) || !['asc', 'desc'].includes(direction)) invalid();
   const filters = input.filters ?? {};
-  keys(filters, ['companyCode', 'sellerCode', 'categoryCode', 'categoryName', 'cityCode']);
+  keys(filters, ['companyCode', 'sellerCode', 'managerCode', 'categoryCode', 'categoryName', 'cityCode']);
   let companies = scope.companies;
   if (filters.companyCode !== undefined) {
     const company = integer(filters.companyCode);
@@ -80,8 +93,15 @@ function queryParts(input: PageInput & Partial<WindowInput>, trustedScope: ReadS
   if (filters.sellerCode !== undefined) {
     const seller = integer(filters.sellerCode);
     if (r === 'products') invalid();
-    if (scope.seller !== null && seller !== scope.seller) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Vendedor fora do escopo autorizado.', 403);
+    if (!sellerAllowed(scope, seller)) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Vendedor fora do escopo autorizado.', 403);
     where.push(`${r === 'customers' ? 'P.CODVEND' : config.sellers.id}=${seller}`);
+  }
+  if (filters.managerCode !== undefined) {
+    if (r !== 'sellers') invalid();
+    const manager = integer(filters.managerCode);
+    if (trustedScope.role !== 'administrador' && (trustedScope.role !== 'gestor' || manager !== scope.seller))
+      throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Vendedor fora do escopo autorizado.', 403);
+    where.push(`P.CODGER=${manager}`);
   }
   if (filters.categoryCode !== undefined) { if (r !== 'products') invalid(); where.push(`P.CODGRUPOPROD=${integer(filters.categoryCode, 0)}`); }
   if (filters.categoryName !== undefined) {
