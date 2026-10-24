@@ -74,7 +74,11 @@ A função existente `sankhya-online` consulta clientes, produtos, vendedores, p
 - Snapshots e referências ficam somente nos pedidos locais. Não se criam clientes/produtos ERP para satisfazer FKs. Nomes e totais documentais são preservados; abertura/reabertura de ficha reconsulta o ERP.
 - A suíte SQL reversível da migração7 executa pelo menos40 assertivas e confere restauração de esquema, funções, perfis, revisão, numeração e fixtures. Gravação/reenvio/recarga por administrador Auth real também foram comprovados sem réplica de clientes/produtos.
 
-O frontend desta integração deve seguir commit, push e publicação no mesmo Lovable; backend implantado e teste local não substituem a conferência do pacote público e das telas autenticadas. Uma consulta bem-sucedida não homologa todos os contextos comerciais ou uma venda na empresa4. As três primeiras consultas exploratórias antigas usaram simularInclusao=true, sem garantia documental de ausência de efeitos; esse modo foi removido e não é reutilizado.
+Frontend publicado em 24/10/2026 no mesmo Lovable, com código da integração no commit `9750449`, enviado usando `sette-g4`. Os pacotes públicos de rotas e entrada foram comparados byte a byte ao build local validado. Na sessão administradora existente, as telas comprovaram clientes (1.145), produtos (148), busca/paginação, CSV completo de148 produtos, ficha e histórico separado do cliente141:10 pedidos P e56 notas V. O documento P75367 abriu seus cinco itens e total documental original.
+
+O formulário público retornou R$11,75 para o contexto testado, sem preço-base; o rascunho foi descartado sem criar outro pedido. A criação do pedido temporário9 havia sido comprovada pelo SDK com Auth real; sua edição não comercial e recarga foram comprovadas pela UI publicada. Ao final, somente esse pedido e seu item rastreado foram removidos tecnicamente, em transação guardada: revisão23→24,18 entradas de ledger,11 registros de workspace e sequência10 preservados; zero clientes/produtos replicados. Perfis, auditoria, prova privada e demais conjuntos protegidos permaneceram intactos.
+
+Uma consulta bem-sucedida não homologa todos os contextos comerciais. Empresa4 teve cadastros e histórico documental comprovados, mas não cotação/gravação comercial válida. As três primeiras consultas exploratórias antigas usaram simularInclusao=true, sem garantia documental de ausência de efeitos; esse modo foi removido e não é reutilizado.
 
 ## Limites atuais
 
