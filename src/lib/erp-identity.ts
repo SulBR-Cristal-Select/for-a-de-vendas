@@ -5,6 +5,7 @@ export type ERPActorBinding = {
   sellerId: string;
   sellerCode: number;
   companyCodes: readonly (1 | 4)[];
+  teamSellerCodes?: readonly number[];
 };
 export function decodeERPActorBinding(value: unknown, userId: string): ERPActorBinding | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;

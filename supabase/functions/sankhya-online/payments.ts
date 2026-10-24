@@ -1,5 +1,5 @@
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
-import { readRecord, scopeOf, type ReadScope } from './read-model.ts';
+import { readRecord, scopeOf, sellerPredicate, type ReadScope } from './read-model.ts';
 import { partnerCompany } from './policy.ts';
 import { foldERPText } from '../../../src/lib/erp-order.ts';
 type Transport = Pick<SankhyaGateway, 'select'>;
@@ -23,7 +23,7 @@ function dateValue(value?: unknown): string {
 function predicate(context: PaymentContext, scope: ReadScope): string {
   const allowed = scopeOf(scope);
   if (!allowed.companies.includes(context.companyCode)) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
-  const seller = allowed.seller === null ? '' : ` AND C.CODVEND=${allowed.seller}`;
+  const clause = sellerPredicate(allowed, 'C.CODVEND'), seller = clause ? ` AND ${clause}` : '';
   integer(context.partnerCode, 1);
   if (![1, 4].includes(context.companyCode)) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
   const day = dateValue(context.date);

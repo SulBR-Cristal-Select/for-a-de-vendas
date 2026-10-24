@@ -2,7 +2,7 @@ import type { ERPSortKey } from './erp-order';
 // Leitura online apenas. A identidade abaixo invalida trabalho; a sessão Supabase autentica.
 export type ERPResource = 'customers' | 'products' | 'sellers';
 export type ERPRow = Record<string, unknown>;
-export type ERPPageQuery = { resource: ERPResource; page?: number; pageSize?: 10 | 20 | 50; search?: string; sort?: ERPSortKey; direction?: 'asc' | 'desc'; filters?: { companyCode?: number; sellerCode?: number; categoryCode?: number; categoryName?: string; cityCode?: number } };
+export type ERPPageQuery = { resource: ERPResource; page?: number; pageSize?: 10 | 20 | 50; search?: string; sort?: ERPSortKey; direction?: 'asc' | 'desc'; filters?: { companyCode?: number; sellerCode?: number; managerCode?: number; categoryCode?: number; categoryName?: string; cityCode?: number } };
 export type ERPWindowQuery = Omit<ERPPageQuery, 'page' | 'pageSize'> & { offset: number; limit: number };
 export type ERPRecordQuery = { resource: ERPResource; id: number | string };
 export type ERPFacetQuery = ERPPageQuery & { facet: 'category' | 'seller' | 'company' | 'city' };
