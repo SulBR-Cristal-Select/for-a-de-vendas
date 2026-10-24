@@ -5,7 +5,7 @@ import { readPrice } from '../../supabase/functions/sankhya-online/price-context
 import { readPaymentRules } from '../../supabase/functions/sankhya-online/payments';
 vi.mock('../../supabase/functions/sankhya-online/price-context', () => ({ readPrice: vi.fn() }));
 vi.mock('../../supabase/functions/sankhya-online/payments', () => ({ readPaymentRules: vi.fn() }));
-const actor = { id: '00000000-0000-4000-8000-000000000001', company_id: '432299', role: 'administrador', active: true };
+const actor = { id: '00000000-0000-4000-8000-000000000001', company_id: '432299', role: 'administrador', active: true, binding: { userId: '00000000-0000-4000-8000-000000000001', sellerId: 'sankhya:seller:14', sellerCode: 14, companyCodes: [1, 4] as const } };
 const customerId = 'sankhya:customer:99000001', productId = 'sankhya:product:99000002';
 const payment = { code: 29, label: 'CONDIÇÃO SINTÉTICA', version: '2026-06-10T11:47:42', isCredit: true, installments: [{ sequence: 1, days: 21, percentage: 100 }], rules: { hasFormula: false } };
 const order = () => ({ id: 'pedido-local-sintetico', sellerId: actor.id, customerId, type: 'Venda', date: '2026-10-23', payment: payment.label, erp: { source: 'sankhya', mode: 'online', companyCode: 1, operationCode: 1001, sellerCode: 14, payment: { code: 29 } }, items: [{ productId, qty: 0.12345, price: 10.56, unit: 'KG' }] });
@@ -69,5 +69,34 @@ describe('Revalidação do ator real antes da gravação normal', () => {
   it('não aceita recibo vazio como prova de conclusão', async () => {
     const f = fixture(); f.attest.mockResolvedValue({});
     await expect(revalidateOrderRequest(f.gateway, f.request, actor, f.rpc, f.attest)).rejects.toMatchObject({ code: 'ERP_REVALIDATION_UNAVAILABLE' });
+  });
+});
+
+describe('Mesma identidade em preparação, cotação e prova', () => {
+  it.each([['vendedor','Vendedor'],['gestor','Gestor']] as const)('prepara com vendedor da sessão sem promovê-lo a administrador:%s', async (role,label) => {
+    const f = fixture(); f.state.company.role = label;
+    await revalidateOrderRequest(f.gateway, f.request, { ...actor, role }, f.rpc, f.attest);
+    expect(readPrice).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ sellerCode: 14 }), { role, sellerCode: 14, companyCodes: [1, 4] });
+    expect(f.attest.mock.calls[0]![0].p_actor_id).toBe(actor.id);
+  });
+  it('recusa vendedor adulterado no snapshot antes de recotar', async () => {
+    const f=fixture(); f.state.orders[0]!.erp.sellerCode=5;
+    await expect(revalidateOrderRequest(f.gateway, f.request, actor, f.rpc, f.attest)).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
+    expect(readPrice).not.toHaveBeenCalled(); expect(f.attest).not.toHaveBeenCalled();
+  });
+  it('não atesta resposta de outro vendedor mesmo que o transporte a devolva', async () => {
+    const f=fixture(); vi.mocked(readPrice).mockResolvedValueOnce({ ...quote(), seller: { name: 'OUTRO', erp: { sellerCode: 5 } } } as any);
+    await expect(revalidateOrderRequest(f.gateway, f.request, actor, f.rpc, f.attest)).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
+    expect(f.attest).not.toHaveBeenCalled();
+  });
+  it('não encontra vínculo do administrador a partir do vendedor enviado pelo navegador', async () => {
+    const f=fixture();
+    await expect(revalidateOrderRequest(f.gateway, f.request, { ...actor, binding: null }, f.rpc, f.attest)).rejects.toMatchObject({ code: 'ERP_IDENTITY_REQUIRED' });
+    expect(readPrice).not.toHaveBeenCalled(); expect(f.attest).not.toHaveBeenCalled();
+  });
+  it('mantém replay no ledger anterior à exigência de nova cotação/vínculo', async () => {
+    const f=fixture(); f.rpc.mockResolvedValue({ data:{ replay:true, proofReady:true, requiredOrders:[] }, error:null });
+    expect(await revalidateOrderRequest(f.gateway, f.request, { ...actor, binding:null }, f.rpc, f.attest)).toMatchObject({ ready:true,replay:true });
+    expect(readPrice).not.toHaveBeenCalled(); expect(f.attest).not.toHaveBeenCalled();
   });
 });

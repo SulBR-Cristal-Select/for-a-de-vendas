@@ -7,7 +7,8 @@ import { readCommercialDictionary } from './dictionary.ts';
 import { readPaymentOptions } from './payments.ts';
 import { revalidateOrderRequest } from './transactions.ts';
 import { readHistory, readDocument } from './history.ts';
-import { readWindow, readPage, readRecord, readFacets, type ReadScope } from './read-model.ts';
+import { readWindow, readPage, readRecord, readFacets } from './read-model.ts';
+import { actorScope } from './identity.ts';
 
 // A chave de manutenção não substitui uma identidade de usuário para consultas comerciais.
 const gateway = new SankhyaGateway(key => Deno.env.get(key));
@@ -46,7 +47,11 @@ async function actor(request: Request) {
   const result = await client.from('profiles').select('id,company_id,role,active').eq('id', user.id).eq('company_id', '432299').limit(1).maybeSingle();
   if (result.error) throw new SankhyaError('PROFILE_UNAVAILABLE', 'Não foi possível validar o acesso da conta.', 503);
   if (!result.data?.active || !['administrador', 'gestor', 'vendedor'].includes(result.data.role)) throw new SankhyaError('MEMBERSHIP_PENDING', 'Seu acesso à SulBR está pendente de ativação pelo administrador.', 403);
-  return { ...result.data, client };
+  const linked = await client.rpc('erp_actor_binding');
+  if (linked.error) throw new SankhyaError('PROFILE_UNAVAILABLE', 'Não foi possível validar o acesso da conta.', 503);
+  const profile = { ...result.data, client, binding: linked.data };
+  actorScope(profile, linked.data); // Valida somente o vínculo obtido pelo Auth no servidor.
+  return profile;
 }
 async function attestOrder(args: Record<string, unknown>) {
   const url = Deno.env.get('SUPABASE_URL');
@@ -100,9 +105,9 @@ Deno.serve(async (request: Request) => {
       return reply({ ok: true, source: 'sankhya', authenticationVerified: true, companiesVerified: companies, latencyMs: Math.round(performance.now() - started), readAt: new Date().toISOString() });
     }
     const profile = await actor(request);
-    // Não há vínculo ERP nas colunas de profiles. Não deduzir identidade por e-mail.
-    // Sem vínculo explícito configurado, vendedores/gestores falham de forma fechada.
-    const scope: ReadScope = { role: profile.role };
+    // Mesmo usuário Auth e vínculo privado em catálogo, cotação e preparação.
+    // Nenhum vendedor/filial do corpo HTTP se transforma em autoridade.
+    const scope = actorScope(profile);
     if (input.operation === 'prepare-order-save') return reply(await revalidateOrderRequest({ ...commercialGateway, contextPrices: q => gateway.contextPrices(q) }, input.query, profile, async (name, args) => await profile.client.rpc(name, args), attestOrder));
     if (input.operation === 'payment-options') return reply(await readPaymentOptions(commercialGateway, input.query, scope));
     if (input.operation === 'history') return reply(await readHistory(commercialGateway, input.query, scope));

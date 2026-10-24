@@ -3,6 +3,7 @@ import { readRecord, type ReadScope } from './read-model.ts';
 import { partnerCompany, saleOperation } from './policy.ts';
 import { validQuantity } from '../../../src/lib/erp-commercial.ts';
 import { readEligiblePayment } from './payments.ts';
+import { loggedSeller } from './identity.ts';
 
 type Row = Record<string, unknown>;
 type Transport = Pick<SankhyaGateway, 'select' | 'contextPrices'>;
@@ -42,18 +43,24 @@ export function currentCommercialDay(now = new Date()): string {
   if (!year || !month || !day) return fail('ERP_CONTEXT_REQUIRED', 'Data comercial não confirmada.');
   return `${year}-${month}-${day}`;
 }
+async function stockContext(gateway: Transport, companyCode: 1 | 4, productCode: number) {
+  // Local/controle são contexto, não preço. Sem tabela atribuída, ler somente o cadastro real do produto/filial.
+  const fields = await gateway.select("SELECT COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME='TGFEST' AND COLUMN_NAME IN ('CODEMP','CODPROD','CODLOCAL','CONTROLE') ORDER BY COLUMN_NAME FETCH FIRST 4 ROWS ONLY", 4);
+  const numeric = ['CODEMP', 'CODPROD', 'CODLOCAL'];
+  if (fields.length !== 4 || !numeric.every(name => fields.some(f => f['COLUMN_NAME'] === name && f['DATA_TYPE'] === 'NUMBER')) || !fields.some(f => f['COLUMN_NAME'] === 'CONTROLE' && ['VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'].includes(String(f['DATA_TYPE'])))) return fail('ERP_CONTEXT_REQUIRED', 'Local ou controle ERP não confirmado.');
+  return gateway.select(`SELECT DISTINCT CODLOCAL,CONTROLE FROM TGFEST WHERE CODEMP=${companyCode} AND CODPROD=${productCode} ORDER BY CODLOCAL,CONTROLE FETCH FIRST 2 ROWS ONLY`, 2);
+}
 export async function readPrice(gateway: Transport, input: PriceInput, scope: ReadScope) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k => !['customerId', 'productId', 'paymentCode', 'type', 'sellerCode', 'quantity', 'unit', 'date'].includes(k)) || typeof input.customerId !== 'string' || typeof input.productId !== 'string' || input.type !== 'Venda') return fail('INVALID_REQUEST', 'Contexto comercial inválido.');
+  const sellerCode = loggedSeller(scope, input.sellerCode);
   const paymentCode = integer(input.paymentCode), quantity = input.quantity ?? 1;
   const observedCustomer = await readRecord(gateway, { resource: 'customers', id: input.customerId }, scope);
   const customer = observedCustomer.record;
   if (!customer || customer.active !== true) return fail('ERP_CONTEXT_REQUIRED', 'Cliente ativo não confirmado no ERP.');
   const customerERP = object(customer.erp), companyCode = partnerCompany(customerERP['companyCode']);
-  if (scope.role !== 'administrador' && !scope.companyCodes?.includes(companyCode)) return fail('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
-  const sellerCode = integer(input.sellerCode ?? customerERP['sellerCode']);
-  if (scope.role !== 'administrador' && sellerCode !== scope.sellerCode) return fail('ERP_SCOPE_FORBIDDEN', 'Vendedor fora do escopo autorizado.', 403);
+  if (!scope.companyCodes?.includes(companyCode)) return fail('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
   const sellerResult = await readRecord(gateway, { resource: 'sellers', id: sellerCode }, scope);
-  if (!sellerResult.record || sellerResult.record.active !== true) return fail('ERP_CONTEXT_REQUIRED', 'Vendedor ativo não confirmado no ERP.');
+  if (!sellerResult.record || sellerResult.record.active !== true || sellerResult.record.id !== `sankhya:seller:${sellerCode}` || object(sellerResult.record.erp)['sellerCode'] !== sellerCode) return fail('ERP_CONTEXT_REQUIRED', 'Vendedor ativo não confirmado no ERP.');
   const productResult = await readRecord(gateway, { resource: 'products', id: input.productId }, scope);
   const product = productResult.record;
   if (!product || product.active !== true) return fail('ERP_CONTEXT_REQUIRED', 'Produto ativo não confirmado no ERP.');
@@ -70,11 +77,10 @@ export async function readPrice(gateway: Transport, input: PriceInput, scope: Re
   if (operations.length !== 1 || Number(operations[0]!['CODTIPOPER']) !== operationCode || operations[0]!['ATIVO'] !== 'S' || operations[0]!['TIPMOV'] !== 'P' || typeof operations[0]!['OPERATION_VERSION'] !== 'string') return fail('ERP_CONTEXT_REQUIRED', 'TOP de venda ativa e vigente não confirmada.');
   // Resolve apenas local/controle reais. O valor continua vindo exclusivamente do motor nativo.
   const tables = [...new Set([customerERP['tableCode'], term.tableCode].filter(v => v !== null && v !== 0).map(v => responseCode(v)))];
-  if (!tables.length) return fail('ERP_CONTEXT_REQUIRED', 'Tabela contextual de preço não confirmada.');
-  const variants = await gateway.select(`WITH V AS (SELECT T.NUTAB,ROW_NUMBER() OVER (PARTITION BY T.CODTAB ORDER BY T.DTVIGOR DESC,T.DTALTER DESC,T.NUTAB DESC) AS RN FROM TGFTAB T JOIN TGFNTA N ON N.CODTAB=T.CODTAB WHERE T.CODTAB IN (${tables.join(',')}) AND N.ATIVO='S' AND T.DTVIGOR<=${asOf} AND (T.DTALTER IS NULL OR T.DTALTER<=${asOf})) SELECT DISTINCT E.CODLOCAL,E.CONTROLE FROM TGFEXC E JOIN V ON V.NUTAB=E.NUTAB AND V.RN=1 WHERE E.CODPROD=${productCode} AND E.TIPO='V' ORDER BY E.CODLOCAL,E.CONTROLE FETCH FIRST 2 ROWS ONLY`, 2);
+  const variants = tables.length ? await gateway.select(`WITH V AS (SELECT T.NUTAB,ROW_NUMBER() OVER (PARTITION BY T.CODTAB ORDER BY T.DTVIGOR DESC,T.DTALTER DESC,T.NUTAB DESC) AS RN FROM TGFTAB T JOIN TGFNTA N ON N.CODTAB=T.CODTAB WHERE T.CODTAB IN (${tables.join(',')}) AND N.ATIVO='S' AND T.DTVIGOR<=${asOf} AND (T.DTALTER IS NULL OR T.DTALTER<=${asOf})) SELECT DISTINCT E.CODLOCAL,E.CONTROLE FROM TGFEXC E JOIN V ON V.NUTAB=E.NUTAB AND V.RN=1 WHERE E.CODPROD=${productCode} AND E.TIPO='V' ORDER BY E.CODLOCAL,E.CONTROLE FETCH FIRST 2 ROWS ONLY`, 2) : await stockContext(gateway, companyCode, productCode);
   if (variants.length !== 1) return fail('ERP_PRICE_AMBIGUOUS', 'Local e controle sem contexto único de preço.', 502);
-  const localCode = Number(variants[0]!['CODLOCAL']), control = variants[0]!['CONTROLE'];
-  if (variants[0]!['CODLOCAL'] == null || variants[0]!['CODLOCAL'] === '' || !Number.isSafeInteger(localCode) || localCode < 0 || typeof control !== 'string' || control.length > 17) return fail('ERP_CONTEXT_REQUIRED', 'Local ou controle ERP não confirmado.');
+  const rawLocal = variants[0]!['CODLOCAL'], localCode = Number(rawLocal), control = variants[0]!['CONTROLE'];
+  if (!(typeof rawLocal === 'number' || typeof rawLocal === 'string' && /^\d+$/.test(rawLocal)) || !Number.isSafeInteger(localCode) || localCode < 0 || typeof control !== 'string' || control.length > 17) return fail('ERP_CONTEXT_REQUIRED', 'Local ou controle ERP não confirmado.');
   const native = await gateway.contextPrices({ codigoEmpresa: companyCode, codigoCliente: integer(customerERP['partnerCode']), codigoVendedor: sellerCode, codigoTipoOperacao: operationCode, codigoTipoNegociacao: paymentCode, dataNegociacao: date, produtos: [{ codigoProduto: productCode, unidade: unit, quantidade: quantity, codigoLocalEstoque: localCode, controle: control }] });
   if (!Array.isArray(native['precos'])) return fail('ERP_INVALID_RESPONSE', 'Preço contextual não confirmado.', 502);
   const candidates = native['precos'].map(object), sameProduct = candidates.filter(p => responseCode(p['codigoProduto']) === productCode);

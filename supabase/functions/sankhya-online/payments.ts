@@ -1,5 +1,5 @@
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
-import { readRecord, type ReadScope } from './read-model.ts';
+import { readRecord, scopeOf, type ReadScope } from './read-model.ts';
 import { partnerCompany } from './policy.ts';
 import { foldERPText } from '../../../src/lib/erp-order.ts';
 type Transport = Pick<SankhyaGateway, 'select'>;
@@ -20,17 +20,17 @@ function dateValue(value?: unknown): string {
   if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(Date.parse(day + 'T00:00:00Z')) || new Date(day + 'T00:00:00Z').toISOString().slice(0, 10) !== day) throw new SankhyaError('INVALID_REQUEST', 'Data comercial inválida.', 400);
   return day;
 }
-function assertScope(scope: ReadScope) {
-  if (scope.role !== 'administrador') throw new SankhyaError('ERP_IDENTITY_REQUIRED', 'Vínculo ERP explícito necessário.', 403);
-}
-function predicate(context: PaymentContext): string {
+function predicate(context: PaymentContext, scope: ReadScope): string {
+  const allowed = scopeOf(scope);
+  if (!allowed.companies.includes(context.companyCode)) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
+  const seller = allowed.seller === null ? '' : ` AND C.CODVEND=${allowed.seller}`;
   integer(context.partnerCode, 1);
   if (![1, 4].includes(context.companyCode)) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
   const day = dateValue(context.date);
   const asOf = `LEAST(SYSDATE,TO_DATE('${day} 23:59:59','YYYY-MM-DD HH24:MI:SS'))`;
   // Grupo é um código do cadastro, nunca nome/e-mail. PPG.CODEMP não filtra a filial:
   // TIPOEMP=E usa a empresa do cabeçalho, conforme documentação e dicionário reais.
-  return `C.CODPARC=${context.partnerCode} AND (C.CODEMP=${context.companyCode}${context.companyCode === 1 ? ' OR C.CODEMP IS NULL' : ''}) AND C.ATIVO='S' AND C.CLIENTE='S' AND T.ATIVO='S' AND T.DHALTER=(SELECT MAX(V.DHALTER) FROM TGFTPV V WHERE V.CODTIPVENDA=T.CODTIPVENDA AND V.DHALTER<=${asOf}) AND (TRIM(T.GRUPOAUTOR) IS NULL OR (LENGTH(TRIM(T.GRUPOAUTOR))=1 AND INSTR(C.GRUPOAUTOR,TRIM(T.GRUPOAUTOR))>0))${context.creditBlocked ? " AND T.SUBTIPOVENDA='1'" : ''} AND EXISTS(SELECT 1 FROM TGFPPG G WHERE G.CODTIPVENDA=T.CODTIPVENDA)`;
+  return `C.CODPARC=${context.partnerCode} AND (C.CODEMP=${context.companyCode}${context.companyCode === 1 ? ' OR C.CODEMP IS NULL' : ''}) AND C.ATIVO='S' AND C.CLIENTE='S'${seller} AND T.ATIVO='S' AND T.DHALTER=(SELECT MAX(V.DHALTER) FROM TGFTPV V WHERE V.CODTIPVENDA=T.CODTIPVENDA AND V.DHALTER<=${asOf}) AND (TRIM(T.GRUPOAUTOR) IS NULL OR (LENGTH(TRIM(T.GRUPOAUTOR))=1 AND INSTR(C.GRUPOAUTOR,TRIM(T.GRUPOAUTOR))>0))${context.creditBlocked ? " AND T.SUBTIPOVENDA='1'" : ''} AND EXISTS(SELECT 1 FROM TGFPPG G WHERE G.CODTIPVENDA=T.CODTIPVENDA)`;
 }
 function mapPayment(row: Row): PaymentOption {
   const code = integer(row['CODTIPVENDA'], 1), subtype = text(row['SUBTIPOVENDA']);
@@ -44,21 +44,21 @@ function mapPayment(row: Row): PaymentOption {
 }
 const paymentFields = "T.CODTIPVENDA,T.DESCRTIPVENDA,T.ATIVO,T.CODTAB,TO_CHAR(T.DHALTER,'YYYY-MM-DD\"T\"HH24:MI:SS') AS VERSION,T.SUBTIPOVENDA";
 export async function readEligiblePayment(gateway: Transport, context: PaymentContext, code: number, scope: ReadScope): Promise<PaymentOption> {
-  assertScope(scope); integer(code, 1);
-  const rows = await gateway.select(`SELECT ${paymentFields} FROM TGFTPV T JOIN TGFPAR C ON C.CODPARC=${context.partnerCode} WHERE ${predicate(context)} AND T.CODTIPVENDA=${code} FETCH FIRST 2 ROWS ONLY`, 2);
+  integer(code, 1);
+  const rows = await gateway.select(`SELECT ${paymentFields} FROM TGFTPV T JOIN TGFPAR C ON C.CODPARC=${context.partnerCode} WHERE ${predicate(context, scope)} AND T.CODTIPVENDA=${code} FETCH FIRST 2 ROWS ONLY`, 2);
   if (rows.length !== 1) throw new SankhyaError('ERP_PAYMENT_SCOPE_UNAVAILABLE', 'Condição de pagamento não autorizada para este parceiro e contexto.', 400);
   const payment = mapPayment(rows[0]!);
   if (payment.code !== code || context.creditBlocked && payment.isCredit !== false) throw new SankhyaError('ERP_PAYMENT_SCOPE_UNAVAILABLE', 'Condição de pagamento não autorizada para este parceiro e contexto.', 400);
   return payment;
 }
 export async function readPaymentOptions(gateway: Transport, input: { customerId: string; offset: number; limit: number; search?: string; date?: string }, scope: ReadScope) {
-  assertScope(scope);
+  scopeOf(scope);
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k => !['customerId','offset','limit','search','date'].includes(k)) || typeof input.customerId !== 'string' || !/^sankhya:customer:[1-9]\d*$/.test(input.customerId) || !Number.isSafeInteger(input.offset) || input.offset < 0 || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 50 || input.search !== undefined && (typeof input.search !== 'string' || input.search.length > 100)) throw new SankhyaError('INVALID_REQUEST', 'Consulta de condições inválida.', 400);
   const customer = (await readRecord(gateway, { resource: 'customers', id: input.customerId }, scope)).record;
   if (!customer || customer['active'] !== true) throw new SankhyaError('ERP_CONTEXT_REQUIRED', 'Cliente ERP ativo necessário.', 400);
   const erp = customer['erp'] as Row;
   const context: PaymentContext = { partnerCode: integer(erp['partnerCode'], 1), companyCode: partnerCompany(erp['companyCode']), date: dateValue(input.date), creditBlocked: erp['creditBlocked'] === true };
-  const base = `FROM TGFTPV T JOIN TGFPAR C ON C.CODPARC=${context.partnerCode} WHERE ${predicate(context)}`;
+  const base = `FROM TGFTPV T JOIN TGFPAR C ON C.CODPARC=${context.partnerCode} WHERE ${predicate(context, scope)}`;
   const needle = foldERPText(input.search?.trim() ?? '');
   const folded = "ASCIISTR(TRANSLATE(UPPER(T.DESCRTIPVENDA),'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑ','AAAAAEEEEIIIIOOOOOUUUUCN'))";
   const escaped = needle.replaceAll('!', '!!').replaceAll('%', '!%').replaceAll('_', '!_');

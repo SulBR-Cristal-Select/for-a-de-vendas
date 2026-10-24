@@ -199,6 +199,7 @@ export function useERPDocument(client: ERPClient | undefined, id: string) {
 
 /** Valida a fila antes do RPC e antes de converter origens; não conserva carteira. */
 export function assertManualMutation(next: Record<string, any>, before: Record<string, any>): void {
+  if (JSON.stringify(next['company']?.erpSeller ?? null) !== JSON.stringify(before['company']?.erpSeller ?? null)) throw new Error('Cadastro ERP disponível somente para consulta.');
   const canonical = new Set<string>();
   function collect(value: unknown) {
     if (!value || typeof value !== 'object') return;
@@ -220,7 +221,7 @@ export function assertManualMutation(next: Record<string, any>, before: Record<s
   }
   preserve(before, next);
   function check(value: unknown, previous: unknown, field?: string): void {
-    if (field && ['id', 'customerId', 'productId', 'sellerId'].includes(field) && typeof value === 'string' && value.startsWith('sankhya:') && !canonical.has(value)) throw new Error('Cadastro ERP disponível somente para consulta.');
+    if (field && ['id', 'customerId', 'productId', 'sellerId'].includes(field) && typeof value === 'string' && value.startsWith('sankhya:') && value !== previous && !canonical.has(value)) throw new Error('Cadastro ERP disponível somente para consulta.');
     if (!value || typeof value !== 'object') return;
     if (Array.isArray(value)) { value.forEach((row: ERPRow) => check(row, Array.isArray(previous) ? previous.find(item => item?.id === row?.['id']) : undefined)); return; }
     const row = value as ERPRow;

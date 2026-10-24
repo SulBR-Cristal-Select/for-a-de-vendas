@@ -186,7 +186,7 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
     expect(result.current.products).toHaveLength(50);
     expect(transporte.mock.calls.filter(([corpo]) => corpo.operation === "record")).toHaveLength(2);
   });
-  it("mantém vendedores homônimos por código e consulta vínculo do cliente com id numérico", async () => {
+  it("mantém vendedor da sessão fora da busca e não o substitui pelo vendedor do cliente", async () => {
     const { client, transporte } = preparar();
     transporte.mockImplementationOnce(async ({ query }: CorpoTeste) => ({
       error: null,
@@ -198,8 +198,8 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
         totalWithoutSearch: 1,
       },
     }));
-    const { result } = renderHook(() => useERPOrderLookups(client, "sankhya:customer:1", []));
-    // O record inicial e a janela devem informar o mesmo vínculo.
+    const { result } = renderHook(() => useERPOrderLookups(client, "sankhya:customer:1", [], "sankhya:seller:901"));
+    // O cliente aponta900; somente o vínculo da sessão901 deve ficar retido.
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.sellers).toHaveLength(51);
     expect(
@@ -207,7 +207,7 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
         ([corpo]) =>
           corpo.operation === "record" &&
           corpo.query.resource === "sellers" &&
-          corpo.query.id === 900,
+          corpo.query.id === 901,
       ),
     ).toBe(true);
     expect(new Set(result.current.sellers.map((row) => row["id"])).size).toBe(51);

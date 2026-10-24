@@ -33,7 +33,7 @@ A senha é enviada pelo cliente oficial diretamente ao Supabase Auth; não há s
 
 ## Persistência e regras
 
-As sete migrações em `supabase/migrations` correspondem às versões instaladas. A sétima acrescenta o fluxo online sem reaplicar ou alterar as seis anteriores. Treze tabelas públicas, perfis vinculados ao Auth, RLS e RPCs `get_workspace` / `save_workspace` mantêm os dados por empresa e vendedor. Gravações usam revisão e chave de idempotência. Itens e totais de pedidos são validados e calculados no servidor, mantendo preços históricos. A interface aguarda confirmação para navegar ou fechar gravações críticas.
+As sete migrações anteriores são preservadas em `supabase/migrations`. A sétima acrescenta o fluxo online; a oitava, `20261024184200_sankhya_actor_identity.sql`, resolve o vendedor pelo usuário Auth, sem reaplicar arquivos anteriores. Treze tabelas públicas, perfis vinculados ao Auth, RLS e RPCs `get_workspace` / `save_workspace` mantêm os dados por empresa e vendedor. Gravações usam revisão e chave de idempotência. Itens e totais de pedidos são validados e calculados no servidor, mantendo preços históricos. A interface aguarda confirmação para navegar ou fechar gravações críticas.
 
 Nenhuma carteira histórica ou simulação é carregada como operação real. Os 25 relatórios e 27 indicadores são catálogos estruturais; os resultados dependem dos registros persistidos. Agenda e Portal não aparecem na lateral. O menu e o layout do bundle são preservados, sem descontos, promoções ou Saldo Flex.
 
@@ -50,7 +50,7 @@ Nenhuma carteira histórica ou simulação é carregada como operação real. Os
 
 ## Compatibilidade comercial Sankhya
 
-A migração adicional `20261022165600_sankhya_commercial_compatibility.sql` acrescenta três catálogos protegidos: `erp_price_tables`, `erp_prices` e `erp_payment_terms`. O tenant `432299` continua separado dos códigos ERP 1 e 4. `products.data.erp`, `customers.data.erp` e `profiles.erp` preservam identidades explícitas, sem criar Auth ou conceder papéis por e-mail/código ERP.
+A migração adicional `20261022165600_sankhya_commercial_compatibility.sql` acrescenta três catálogos protegidos: `erp_price_tables`, `erp_prices` e `erp_payment_terms`. O tenant `432299` continua separado dos códigos ERP 1 e 4. `products.data.erp` e `customers.data.erp` preservam identidades explícitas, sem criar Auth ou conceder papéis por e-mail/código ERP.
 
 - Fluxo manual preservado; produtos manuais continuam com quantidades inteiras.
 - Produtos ERP aceitam frações conforme unidade e precisão explicitamente cadastradas, de 0 a 3 casas. Valores não representáveis são recusados, nunca arredondados silenciosamente ou convertidos por nomes de embalagem.
@@ -71,6 +71,9 @@ A função existente `sankhya-online` consulta clientes, produtos, vendedores, p
 - Preço vem da API nativa contextual com simularInclusao=false. A API não identifica tabela/versão: esses campos ficam explicitamente nulos. Data interna ISO é enviada em DD/MM/AAAA.
 - Antes de salvar, o estado, UUID e revisão são congelados. O backend revalida o ERP e atesta uma prova privada de5minutos, vinculada pelo PostgreSQL ao autor real e ao JSONB canônico. Só service_role atesta; o usuário comum grava pelo RPC normal.
 - Gravação, consumo da prova, revisão e ledger são atômicos. Replay do mesmo UUID precede validade/consumo da prova e não repete a cotação. Proprietário Auth e vendedor ERP são identidades distintas.
+- O vendedor do pedido é o vínculo privado do usuário autenticado, nunca o vendedor do cliente, um nome/e-mail ou um código fixo. A RPC `erp_actor_binding()` não recebe usuário pelo navegador. O mesmo vínculo limita cotação, preparação, atestação e gravação; inclusive administrador não pode indicar outro vendedor para cotar. Sem vínculo, não se inventa vendedor.
+- `company.erpSeller` apenas apresenta a seleção no controle existente e não pode ser alterado pelo snapshot. O servidor resolve novamente a identidade. A migração8 prepara os pareamentos já confirmados de Adilson34 e Raul12, mantendo ambos inativos e sem conceder gerência/equipe implicitamente. Leitura não administrativa de pedidos online fica restrita ao próprio proprietário Auth e ao vínculo/filial permitidos.
+- A correção tem478 testes/22 arquivos e teste SQL reversível com pelo menos35 verificações. Isso não equivale a login real de vendedor/gestor: esses perfis continuam sem homologação enquanto não houver conta ativa autorizada. O conector Sankhya é referência de negócio, não um fluxo replicado; a regra de preço nativa permanece inalterada.
 - Snapshots e referências ficam somente nos pedidos locais. Não se criam clientes/produtos ERP para satisfazer FKs. Nomes e totais documentais são preservados; abertura/reabertura de ficha reconsulta o ERP.
 - A suíte SQL reversível da migração7 executa pelo menos40 assertivas e confere restauração de esquema, funções, perfis, revisão, numeração e fixtures. Gravação/reenvio/recarga por administrador Auth real também foram comprovados sem réplica de clientes/produtos.
 

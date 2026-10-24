@@ -10,6 +10,7 @@ import { assertManualMutation, manualRows, useERPCategories, useERPRecord, useER
 import type { ERPClient, ERPQueryRef } from './erp-hooks';
 import { useERPOrderLookups } from './erp-order-lookups';
 import type { ERPPrice, ERPRow } from '../lib/erp-online';
+import { workspaceERPSeller } from '../lib/erp-identity';
 import './sul.css';
 const He: any = React;
 const b: any = runtime;
@@ -136,7 +137,7 @@ export async function quoteERPOrderItem(client: ERPClient, context: OnlineOrderC
     if (!/^sankhya:customer:[1-9]\d*$/.test(context.customerId) || !Number.isSafeInteger(context.paymentCode) || context.paymentCode < 1 ||
         !Number.isSafeInteger(sellerCode) || sellerCode < 1 || context.type !== 'Venda' || !unit || !validQuantity(product, quantity, unit))
         throw new Error('Confirme cliente, condição de pagamento, vendedor ERP, unidade e quantidade antes de consultar o preço.');
-    const quote = await client.price({ customerId: context.customerId, productId: product.id, paymentCode: context.paymentCode, sellerCode, type: 'Venda', quantity, unit, date: context.date });
+    const quote = await client.price({ customerId: context.customerId, productId: product.id, paymentCode: context.paymentCode, type: 'Venda', quantity, unit, date: context.date });
     if (quote.seller['id'] !== context.sellerId || quote.quantity !== quantity || quote.price.unit !== unit || quote.customer['id'] !== context.customerId || quote.product['id'] !== product.id || quote.payment.code !== context.paymentCode)
         throw new Error('O preço retornado não corresponde ao contexto selecionado.');
     if (quote.price.amount <= 0) throw new Error('Preço ERP não confirmado.');
@@ -921,7 +922,8 @@ function sz(): any {
     const savingOrder=useRef(false);
     const [orderId] = React.useState(() => crypto.randomUUID());
     let { db: base, update: t, path: a, online } = qa(), o: any = new URLSearchParams(location.hash.split("?")[1] || ""), [n, r] = (0, He.useState)(o.get("cliente") || ""), [l, s] = (0, He.useState)(base.company.user), [i, u] = (0, He.useState)(""), [c, f] = (0, He.useState)("Venda"), [d, m] = (0, He.useState)(bo), [p, y] = (0, He.useState)("1 - IMEDIATO"), [C, x] = (0, He.useState)("Conclu\xEDdo"), [v, g] = (0, He.useState)(""), [h, S] = (0, He.useState)([]), [L, I] = (0, He.useState)(0), [R, E] = (0, He.useState)(""), [OBS, OBSs] = (0, He.useState)(""), [k, M] = (0, He.useState)(""), [A, N] = (0, He.useState)("");
-    const lookups = useERPOrderLookups(online, n, [...h.map((item: any) => item.productId), v]);
+    const actorSeller = workspaceERPSeller(base.company);
+    const lookups = useERPOrderLookups(online, n, [...h.map((item: any) => item.productId), v], actorSeller?.sellerId);
     // Visão transitória só no formulário: os arrays canônicos permanecem intactos.
     const e = React.useMemo(() => online ? { ...base, customers: [...manualRows(base.customers), ...lookups.customers], products: [...manualRows(base.products), ...lookups.products] } : base,
         [base, online, lookups.customers, lookups.products]);
@@ -929,7 +931,7 @@ function sz(): any {
     const paymentMenu = useERPOrderPayments(online, n);
     const [paymentChoice, setPaymentChoice] = React.useState<{ customerId: string; row: ERPRow }>();
     const selectedPayment = paymentChoice && paymentChoice.customerId === n && paymentChoice.row['id'] === i ? paymentChoice.row : undefined;
-    const context: OnlineOrderContext = { customerId: n, paymentCode: Number(selectedPayment?.['code']), sellerId: l, type: c, date: businessDate() };
+    const context: OnlineOrderContext = { customerId: n, paymentCode: Number(selectedPayment?.['code']), sellerId: onlineOrder ? actorSeller?.sellerId ?? '' : l, type: c, date: businessDate() };
     const prices = useERPOrderPrices(onlineOrder ? online : undefined, context, h, e.products);
     const contextKey = JSON.stringify([context, v]);
     const activeContext = useRef(contextKey); activeContext.current = contextKey;
@@ -1037,9 +1039,9 @@ function sz(): any {
                                             }),
                                             (0, b.jsx)(Sl, {
                                                 label: "Vendedor",
-                                                value: l,
-                                                onValueChange: (D: any) => s(String(D)),
-                                                options: [...La(sellerNames(e)), ...(online ? lookups.sellers.map((seller: any) => ({ value: seller.id, label: seller.name })) : [])],
+                                                value: onlineOrder ? context.sellerId : l,
+                                                onValueChange: (D: any) => { if (!onlineOrder) s(String(D)); },
+                                                options: onlineOrder ? lookups.sellers.filter((seller: any) => seller.id === context.sellerId).map((seller: any) => ({ value: seller.id, label: seller.name })) : [...La(sellerNames(e)), ...(online ? lookups.sellers.map((seller: any) => ({ value: seller.id, label: seller.name })) : [])],
                                             }),
                                             (0, b.jsx)(ho, {
                                                 label: "Tipo de pedido",

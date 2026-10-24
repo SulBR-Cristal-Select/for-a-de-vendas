@@ -137,7 +137,6 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
         customerId: customer.id,
         productId: product.id,
         paymentCode: 31,
-        sellerCode: 8,
         type: "Venda",
         date: context.date,
       },
@@ -273,7 +272,7 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
   });
   it("integra os seletores existentes, preço contextual e persistência sem baixar carteira", async () => {
     location.hash = "#/pedidos/novo";
-    const state = createAppState({ customers: [], products: [], orders: [] });
+    const state = createAppState({ company: { userId: '00000000-0000-4000-8000-000000000001', erpSeller: { userId: '00000000-0000-4000-8000-000000000001', sellerId: seller.id, sellerCode: 8, companyCodes: [4] } }, customers: [], products: [], orders: [] });
     const original = structuredClone(state);
     const client = fakeClient(),
       persist = vi.fn(async (value) => value);
@@ -286,7 +285,7 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
     fireEvent.change(screen.getByLabelText("Condição de pagamento"), {
       target: { value: payment.id },
     });
-    fireEvent.change(screen.getByLabelText("Vendedor"), { target: { value: seller.id } });
+    expect((screen.getByLabelText("Vendedor") as HTMLSelectElement).value).toBe(seller.id);
     fireEvent.change(screen.getByLabelText("Produto"), { target: { value: product.id } });
     fireEvent.click(screen.getByRole("button", { name: /Adicionar produto/ }));
     await screen.findByText("Produto ERP", { selector: "strong" });

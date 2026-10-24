@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readEligiblePayment, readPaymentOptions, readPaymentRules } from '../../supabase/functions/sankhya-online/payments';
 import { readRecord } from '../../supabase/functions/sankhya-online/read-model';
-vi.mock('../../supabase/functions/sankhya-online/read-model', () => ({ readRecord: vi.fn() }));
+vi.mock('../../supabase/functions/sankhya-online/read-model', async original => ({ ...await original<Record<string, unknown>>(), readRecord: vi.fn() }));
 const scope = { role: 'administrador' as const }, context = { partnerCode: 99000001, companyCode: 4 as const, date: '2026-10-23', creditBlocked: false };
 const option = { CODTIPVENDA: 29, DESCRTIPVENDA: 'Condição sintética', ATIVO: 'S', CODTAB: null, VERSION: '2026-06-10T11:47:42', SUBTIPOVENDA: '2' };
 const installment = { SEQUENCIA: 1, PRAZO: 21, PERCENTUAL: 100, CODEMP: 1, CODPARC: 0, TIPOEMP: 'E', TIPOPAR: 'N', BASEPRAZO: -1, VENCNAOUTIL: 0, SOMAPRAZOCLIENTE: 'N', HASFORMULA: 0 };

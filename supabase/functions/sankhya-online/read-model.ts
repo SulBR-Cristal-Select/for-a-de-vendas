@@ -17,7 +17,7 @@ const integer = (n: unknown, min = 1): number => typeof n === 'number' && Number
 function keys(value: unknown, allowed: readonly string[]): asserts value is Row {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(k => !allowed.includes(k))) invalid();
 }
-function scopeOf(scope: ReadScope): { companies: number[]; seller: number | null } {
+export function scopeOf(scope: ReadScope): { companies: number[]; seller: number | null } {
   if (!scope || !['administrador', 'gestor', 'vendedor'].includes(scope.role)) return identity();
   if (scope.role === 'administrador') return { companies: [1, 4], seller: null };
   if (!Number.isSafeInteger(scope.sellerCode) || scope.sellerCode! <= 0 || scope.sellerCode! > 2147483647 || !Array.isArray(scope.companyCodes) || !scope.companyCodes.length || scope.companyCodes.some(c => c !== 1 && c !== 4)) return identity();

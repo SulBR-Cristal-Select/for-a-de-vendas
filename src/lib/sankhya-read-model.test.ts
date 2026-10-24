@@ -201,7 +201,7 @@ describe('roteamento sem substituição da sessão comercial', () => {
     const probe = indexSource.slice(probeStart, auth);
     expect(probe).not.toMatch(/readWindow|readPage|readRecord|readFacets|commercialGateway/);
     expect(probe).toContain("input.check !== 'schema'");
-    expect(indexSource.slice(auth)).toContain('const scope: ReadScope = { role: profile.role }');
+    expect(indexSource.slice(auth)).toContain('const scope = actorScope(profile)');
     expect(indexSource.slice(route)).toContain('readWindow(commercialGateway, input.query, scope)');
     expect(indexSource.slice(auth)).not.toContain('maintenance(request)');
   });

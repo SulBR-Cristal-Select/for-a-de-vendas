@@ -219,18 +219,12 @@ export function useERPOrderLookups(
   client: ERPClient | undefined,
   customerId: string,
   productIds: readonly string[],
+  actorSellerId?: string,
 ) {
   const customers = useConsulta(client, "customers", customerId ? [customerId] : []);
   const products = useConsulta(client, "products", productIds);
-  const cliente = customers.rows.find((row) => row["id"] === customerId);
-  const erp = cliente?.["erp"] as Record<string, unknown> | undefined;
-  const codigo = cliente?.["sellerCode"] ?? erp?.["sellerCode"];
-  const sellerId =
-    typeof cliente?.["sellerId"] === "string"
-      ? cliente["sellerId"]
-      : typeof codigo === "number" && Number.isSafeInteger(codigo) && codigo > 0
-        ? `sankhya:seller:${codigo}`
-        : "";
+  // A carteira do cliente não identifica a pessoa autenticada. Fixar somente o vínculo da sessão.
+  const sellerId = typeof actorSellerId === 'string' && /^sankhya:seller:[1-9]\d*$/.test(actorSellerId) ? actorSellerId : '';
   const sellers = useConsulta(client, "sellers", sellerId ? [sellerId] : []);
   const estados = { customers, products, sellers };
   const erro = recursos.map((recurso) => estados[recurso].error).find(Boolean);
