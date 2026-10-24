@@ -24,6 +24,9 @@ describe('Diagnóstico comercial fixo e somente leitura', () => {
     {kind:'stock-context',companyCode:4,productCode:0},
     {kind:'stock-context',companyCode:4,productCode:11240,sellerCode:5},
     {kind:'stock-context',companyCode:4,productCode:11240,sql:'SELECT 1'},
+    {kind:'stock-overview',companyCode:3},
+    {kind:'stock-overview',companyCode:4,sql:'SELECT 1'},
+    {...operations,standardSales:'true'},
     {kind:['payments']},
     {kind:'analytics',section:'metadata',after:"TGFPAR.X' OR 1=1"},
     {kind:'analytics',section:'metadata',table:'TSIUSU'},
@@ -91,6 +94,59 @@ describe('Diagnóstico comercial fixo e somente leitura', () => {
     const g={select:vi.fn().mockResolvedValueOnce(physical.filter(row=>row.TABLE_NAME!=='TGFTOP'||['CODTIPOPER','DHALTER'].includes(row.COLUMN_NAME))).mockResolvedValueOnce([])};
     expect(await readCommercialDictionary(g,operations,admin)).toMatchObject({observedTopFields:[],rows:[],hasMore:false});
     const sql=g.select.mock.calls[1]?.[0];expect(sql).not.toContain('GOLSINAL');expect(sql).not.toContain('MAX(T.');
+  });
+  it.each(['gestor','vendedor'] as const)('não libera cobertura de estoque para %s', async role => {
+    const g={select:vi.fn()};
+    await expect(readCommercialDictionary(g,{kind:'stock-overview',companyCode:4},{role,sellerCode:34,companyCodes:[1,4]})).rejects.toMatchObject({code:'ERP_IDENTITY_REQUIRED'});
+    expect(g.select).not.toHaveBeenCalled();
+  });
+  it('comprova ausência de registros de estoque por agregado sem afirmar saldo zero', async () => {
+    const g={select:vi.fn().mockResolvedValueOnce(stockColumns.filter(r=>['CODEMP','CODPROD'].includes(r.COLUMN_NAME))).mockResolvedValueOnce([{CONTEXT_ROWS:0,PRODUCT_COUNT:'0'}])};
+    expect(await readCommercialDictionary(g,{kind:'stock-overview',companyCode:4},admin)).toMatchObject({contextRows:0,productCount:0,productSample:[],hasMore:false,variantSelected:false,balanceQueried:false,priceQueried:false});
+    expect(g.select).toHaveBeenCalledTimes(2);expect(g.select.mock.calls[1]?.[0]).toContain('FROM TGFEST WHERE CODEMP=4');
+    expect(g.select.mock.calls.some(([sql])=>/ESTOQUE|RESERVADO|PRECO|TGFEXC/.test(sql))).toBe(false);
+  });
+  it('traz apenas dois códigos observados, sem eleger local ou controle', async () => {
+    const g={select:vi.fn().mockResolvedValueOnce(stockColumns.filter(r=>['CODEMP','CODPROD'].includes(r.COLUMN_NAME))).mockResolvedValueOnce([{CONTEXT_ROWS:12,PRODUCT_COUNT:4}]).mockResolvedValueOnce([{CODPROD:11},{CODPROD:'12'}])};
+    expect(await readCommercialDictionary(g,{kind:'stock-overview',companyCode:4},admin)).toMatchObject({productSample:[11,12],hasMore:true,variantSelected:false});
+    expect(g.select.mock.calls[2]?.[0]).toContain('FETCH FIRST 2 ROWS ONLY');expect(g.select.mock.calls[2]?.[1]).toBe(2);
+  });
+  it.each([
+    {CONTEXT_ROWS:null,PRODUCT_COUNT:0},
+    {CONTEXT_ROWS:3,PRODUCT_COUNT:4},
+    {CONTEXT_ROWS:3,PRODUCT_COUNT:0},
+  ])('não transforma contagem ausente ou incoerente em zero: %j', async totals => {
+    const g={select:vi.fn().mockResolvedValueOnce(stockColumns.filter(r=>['CODEMP','CODPROD'].includes(r.COLUMN_NAME))).mockResolvedValueOnce([totals])};
+    await expect(readCommercialDictionary(g,{kind:'stock-overview',companyCode:4},admin)).rejects.toMatchObject({code:'ERP_INVALID_RESPONSE'});
+    expect(g.select).toHaveBeenCalledTimes(2);
+  });
+  it('recusa amostra que mudou entre contagem e leitura', async () => {
+    const g={select:vi.fn().mockResolvedValueOnce(stockColumns.filter(r=>['CODEMP','CODPROD'].includes(r.COLUMN_NAME))).mockResolvedValueOnce([{CONTEXT_ROWS:3,PRODUCT_COUNT:2}]).mockResolvedValueOnce([{CODPROD:11}])};
+    await expect(readCommercialDictionary(g,{kind:'stock-overview',companyCode:4},admin)).rejects.toMatchObject({code:'ERP_INVALID_RESPONSE'});
+  });
+  it('aplica a venda padrão confirmada com versão exata e sem usar GOLSINAL de P como classificador', async () => {
+    const columns=[...physical,{TABLE_NAME:'TGFTOP',COLUMN_NAME:'BONIFICACAO',DATA_TYPE:'VARCHAR2'},{TABLE_NAME:'TGFTOP',COLUMN_NAME:'TIPMOV',DATA_TYPE:'VARCHAR2'}];
+    const g={select:vi.fn().mockResolvedValueOnce(columns).mockResolvedValueOnce([{MISSING_CONTEXT_COUNT:0}]).mockResolvedValueOnce([])};
+    expect(await readCommercialDictionary(g,{...operations,standardSales:true},admin)).toMatchObject({salesPolicy:{movement:'P',operationCode:1001,natureCode:10100000,statusCode:'L'},rows:[],rulesInferred:false});
+    const sql=g.select.mock.calls[2]?.[0];
+    for(const clause of ["H.TIPMOV='P'",'H.CODTIPOPER=1001','H.CODNAT=10100000',"H.STATUSNOTA='L'","T.BONIFICACAO='N'",'T.GOLDEV=1','T.DHALTER=H.DHTIPOPER']) expect(sql).toContain(clause);
+    expect(sql).not.toMatch(/T\.GOLSINAL\s*=/);expect(g.select.mock.calls.every(([,limit])=>limit<=50)).toBe(true);
+    expect(g.select.mock.calls[1]?.[0]).toContain("T.BONIFICACAO NOT IN ('N','S')");
+    expect(g.select.mock.calls[1]?.[0]).toContain('T.GOLDEV NOT IN (-1,1)');
+  });
+  it('não retorna zero quando falta o contexto histórico da venda padrão', async () => {
+    const columns=[...physical,{TABLE_NAME:'TGFTOP',COLUMN_NAME:'BONIFICACAO',DATA_TYPE:'VARCHAR2'},{TABLE_NAME:'TGFTOP',COLUMN_NAME:'TIPMOV',DATA_TYPE:'VARCHAR2'}];
+    const g={select:vi.fn().mockResolvedValueOnce(columns).mockResolvedValueOnce([{MISSING_CONTEXT_COUNT:1}])};
+    await expect(readCommercialDictionary(g,{...operations,standardSales:true},admin)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});
+    expect(g.select).toHaveBeenCalledTimes(2);
+  });
+  it('recusa venda padrão sem metadados de bonificação e preserva a consulta bruta quando false', async () => {
+    const g={select:vi.fn().mockResolvedValue(physical)};
+    await expect(readCommercialDictionary(g,{...operations,standardSales:true},admin)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});
+    expect(g.select).toHaveBeenCalledTimes(1);
+    const raw={select:vi.fn().mockResolvedValueOnce(physical).mockResolvedValueOnce([])};
+    expect(await readCommercialDictionary(raw,{...operations,standardSales:false},admin)).not.toHaveProperty('salesPolicy');
+    expect(raw.select.mock.calls[1]?.[0]).toContain("H.TIPMOV IN ('P','V')");
   });
   it('falha fechado se a data ou chave necessária não tem tipo confirmado', async () => {
     const g={select:vi.fn().mockResolvedValueOnce(physical.map(row=>row.COLUMN_NAME==='DTNEG'?{...row,DATA_TYPE:'VARCHAR2'}:row))};
