@@ -3,6 +3,7 @@ import { readRecord, type ReadScope } from './read-model.ts';
 import { partnerCompany, saleOperation } from './policy.ts';
 import { validQuantity } from '../../../src/lib/erp-commercial.ts';
 import { readEligiblePayment } from './payments.ts';
+import { loggedSeller } from './identity.ts';
 
 type Row = Record<string, unknown>;
 type Transport = Pick<SankhyaGateway, 'select' | 'contextPrices'>;
@@ -51,16 +52,15 @@ async function stockContext(gateway: Transport, companyCode: 1 | 4, productCode:
 }
 export async function readPrice(gateway: Transport, input: PriceInput, scope: ReadScope) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k => !['customerId', 'productId', 'paymentCode', 'type', 'sellerCode', 'quantity', 'unit', 'date'].includes(k)) || typeof input.customerId !== 'string' || typeof input.productId !== 'string' || input.type !== 'Venda') return fail('INVALID_REQUEST', 'Contexto comercial inválido.');
+  const sellerCode = loggedSeller(scope, input.sellerCode);
   const paymentCode = integer(input.paymentCode), quantity = input.quantity ?? 1;
   const observedCustomer = await readRecord(gateway, { resource: 'customers', id: input.customerId }, scope);
   const customer = observedCustomer.record;
   if (!customer || customer.active !== true) return fail('ERP_CONTEXT_REQUIRED', 'Cliente ativo não confirmado no ERP.');
   const customerERP = object(customer.erp), companyCode = partnerCompany(customerERP['companyCode']);
-  if (scope.role !== 'administrador' && !scope.companyCodes?.includes(companyCode)) return fail('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
-  const sellerCode = integer(input.sellerCode ?? customerERP['sellerCode']);
-  if (scope.role !== 'administrador' && sellerCode !== scope.sellerCode) return fail('ERP_SCOPE_FORBIDDEN', 'Vendedor fora do escopo autorizado.', 403);
+  if (!scope.companyCodes?.includes(companyCode)) return fail('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
   const sellerResult = await readRecord(gateway, { resource: 'sellers', id: sellerCode }, scope);
-  if (!sellerResult.record || sellerResult.record.active !== true) return fail('ERP_CONTEXT_REQUIRED', 'Vendedor ativo não confirmado no ERP.');
+  if (!sellerResult.record || sellerResult.record.active !== true || sellerResult.record.id !== `sankhya:seller:${sellerCode}` || object(sellerResult.record.erp)['sellerCode'] !== sellerCode) return fail('ERP_CONTEXT_REQUIRED', 'Vendedor ativo não confirmado no ERP.');
   const productResult = await readRecord(gateway, { resource: 'products', id: input.productId }, scope);
   const product = productResult.record;
   if (!product || product.active !== true) return fail('ERP_CONTEXT_REQUIRED', 'Produto ativo não confirmado no ERP.');
