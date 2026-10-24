@@ -6,7 +6,7 @@ export async function readCommercialDictionary(gateway: Transport, value: unknow
   if (scope.role !== 'administrador') throw new SankhyaError('ERP_IDENTITY_REQUIRED', 'Vínculo ERP explícito necessário.', 403);
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SankhyaError('INVALID_REQUEST', 'Consulta de dicionário inválida.', 400);
   const input = value as Record<string, unknown>;
-  if (input['kind'] === 'stock-context' || input['kind'] === 'analytics') return readCommercialDiagnostic(gateway, input);
+  if (input['kind'] === 'stock-context' || input['kind'] === 'stock-overview' || input['kind'] === 'analytics') return readCommercialDiagnostic(gateway, input);
   if (Object.keys(input).some(k => k !== 'kind') || typeof input['kind'] !== 'string' || !['payments','products','eligibility'].includes(input['kind'])) throw new SankhyaError('INVALID_REQUEST', 'Consulta de dicionário inválida.', 400);
   const columns = await gateway.select("SELECT TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME IN ('TDDCAM','TDDOPC') AND COLUMN_NAME IN ('NUCAMPO','NOMETAB','NOMECAMPO','VALOR','OPCAO','DESCRCAMPO') ORDER BY TABLE_NAME,COLUMN_NAME FETCH FIRST 20 ROWS ONLY", 20);
   const has = (table: string, field: string) => columns.some(r => r['TABLE_NAME'] === table && r['COLUMN_NAME'] === field);

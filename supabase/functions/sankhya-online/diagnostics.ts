@@ -1,4 +1,5 @@
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
+import { STANDARD_SALES_REPORT_POLICY } from './policy.ts';
 
 type Row = Record<string, unknown>;
 type Transport = Pick<SankhyaGateway, 'select'>;
@@ -14,6 +15,13 @@ function day(value: unknown): string {
   return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value ? value : invalid();
 }
 const observation = () => ({ source: 'sankhya' as const, readOnly: true as const, readAt: new Date().toISOString() });
+const incompatible = (): never => { throw new SankhyaError('ERP_INVALID_RESPONSE', 'Diagnóstico ERP inválido ou incompleto.', 502); };
+function observedInteger(value: unknown): number {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !/^(?:0|[1-9]\d*)$/.test(value))) return incompatible();
+  const n = Number(value);
+  return Number.isSafeInteger(n) && n >= 0 ? n : incompatible();
+}
+function oneCount(rows: Row[], name: string): number { return rows.length === 1 ? observedInteger(rows[0]?.[name]) : incompatible(); }
 const textTypes = ['VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'];
 const requiredColumns = {
   TGFCAB: { CODEMP: 'NUMBER', CODTIPOPER: 'NUMBER', CODNAT: 'NUMBER', NUNOTA: 'NUMBER', DHTIPOPER: 'DATE', DTNEG: 'DATE', TIPMOV: 'text', STATUSNOTA: 'text' },
@@ -35,9 +43,22 @@ async function requireDictionary(gateway: Transport) {
   if (!['NUCAMPO','NOMETAB','NOMECAMPO','DESCRCAMPO'].every(name => structure.some(c => c['TABLE_NAME'] === 'TDDCAM' && c['COLUMN_NAME'] === name)) || !['NUCAMPO','VALOR','OPCAO'].every(name => structure.some(c => c['TABLE_NAME'] === 'TDDOPC' && c['COLUMN_NAME'] === name))) return unsupported();
 }
 
-/** Somente os dois diagnósticos fixos encaminhados pelo dicionário administrativo. */
+/** Consultas fixas encaminhadas exclusivamente pelo dicionário administrativo. */
 export async function readCommercialDiagnostic(gateway: Transport, value: unknown) {
   const input = object(value);
+  if (input['kind'] === 'stock-overview') {
+    keys(input, ['kind', 'companyCode']);
+    const companyCode = company(input['companyCode']);
+    const columns = await gateway.select("SELECT COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME='TGFEST' AND COLUMN_NAME IN ('CODEMP','CODPROD') ORDER BY COLUMN_NAME FETCH FIRST 2 ROWS ONLY", 2);
+    if (columns.length !== 2 || !['CODEMP','CODPROD'].every(name => columns.some(c => c['COLUMN_NAME'] === name && c['DATA_TYPE'] === 'NUMBER'))) return unsupported();
+    const totals = await gateway.select(`SELECT COUNT(*) AS CONTEXT_ROWS,COUNT(DISTINCT CODPROD) AS PRODUCT_COUNT FROM TGFEST WHERE CODEMP=${companyCode}`, 1);
+    const contextRows = oneCount(totals, 'CONTEXT_ROWS'), productCount = oneCount(totals, 'PRODUCT_COUNT');
+    if (contextRows < productCount || (contextRows === 0) !== (productCount === 0)) return incompatible();
+    const sample = productCount === 0 ? [] : await gateway.select(`SELECT DISTINCT CODPROD FROM TGFEST WHERE CODEMP=${companyCode} ORDER BY CODPROD FETCH FIRST 2 ROWS ONLY`, 2);
+    const productSample = sample.map(row => observedInteger(row['CODPROD']));
+    if (productSample.length !== Math.min(productCount, 2) || productSample.some(code => code < 1 || code > 2147483647) || new Set(productSample).size !== productSample.length) return incompatible();
+    return { ...observation(), supported: true, companyCode, contextRows, productCount, productSample, hasMore: productCount > productSample.length, variantSelected: false, balanceQueried: false, priceQueried: false };
+  }
   if (input['kind'] === 'stock-context') {
     keys(input, ['kind', 'companyCode', 'productCode']);
     const companyCode = company(input['companyCode']), productCode = integer(input['productCode']);
@@ -78,7 +99,9 @@ export async function readCommercialDiagnostic(gateway: Transport, value: unknow
     return { ...observation(), supported: true, options, fieldId, offset, hasMore: options.length === 50 };
   }
   if (input['section'] !== 'operations') return invalid();
-  keys(input, ['kind', 'section', 'companyCode', 'from', 'to', 'offset']);
+  keys(input, ['kind', 'section', 'companyCode', 'from', 'to', 'offset', 'standardSales']);
+  if (input['standardSales'] !== undefined && typeof input['standardSales'] !== 'boolean') return invalid();
+  const standardSales = input['standardSales'] === true;
   const companyCode = company(input['companyCode']), from = day(input['from']), to = day(input['to']), offset = integer(input['offset'] ?? 0, 0);
   const span = Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z');
   if (span < 0 || span > 366 * 86400000 || offset > 2147483597) return invalid();
@@ -88,8 +111,18 @@ export async function readCommercialDiagnostic(gateway: Transport, value: unknow
     if (!columns.some(c => c['TABLE_NAME'] === table && c['COLUMN_NAME'] === name && (type === 'text' ? textTypes.includes(String(c['DATA_TYPE'])) : c['DATA_TYPE'] === type))) return unsupported();
   }
   const extras = optionalTop.filter(name => columns.some(c => c['TABLE_NAME'] === 'TGFTOP' && c['COLUMN_NAME'] === name && (c['DATA_TYPE'] === 'NUMBER' || textTypes.includes(String(c['DATA_TYPE'])))));
+  const report = STANDARD_SALES_REPORT_POLICY;
+  const join = 'TGFCAB H LEFT JOIN TGFTOP T ON T.CODTIPOPER=H.CODTIPOPER AND T.DHALTER=H.DHTIPOPER';
+  const period = `H.CODEMP=${companyCode} AND H.DTNEG>=TO_DATE('${from}','YYYY-MM-DD') AND H.DTNEG<TO_DATE('${to}','YYYY-MM-DD')+1`;
+  const base = standardSales ? `${period} AND H.TIPMOV='${report.movement}' AND H.CODTIPOPER=${report.operationCode} AND H.CODNAT=${report.natureCode} AND H.STATUSNOTA='${report.statusCode}'` : `${period} AND H.TIPMOV IN ('P','V')`;
+  if (standardSales) {
+    if (!columns.some(c => c['TABLE_NAME'] === 'TGFTOP' && c['COLUMN_NAME'] === 'GOLDEV' && c['DATA_TYPE'] === 'NUMBER') || !['BONIFICACAO','TIPMOV'].every(name => columns.some(c => c['TABLE_NAME'] === 'TGFTOP' && c['COLUMN_NAME'] === name && textTypes.includes(String(c['DATA_TYPE']))))) return unsupported();
+    const missing = await gateway.select(`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${join} WHERE ${base} AND (T.CODTIPOPER IS NULL OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1) OR T.TIPMOV IS NULL OR T.TIPMOV<>'${report.movement}')`, 1);
+    if (oneCount(missing, 'MISSING_CONTEXT_COUNT') !== 0) return unsupported();
+  }
+  const where = standardSales ? `${base} AND T.TIPMOV='${report.movement}' AND T.BONIFICACAO='${report.bonification}' AND T.GOLDEV=${report.devolution}` : base;
   const dimensions = ['H.CODEMP','H.TIPMOV','H.STATUSNOTA','H.CODTIPOPER',`TO_CHAR(H.DHTIPOPER,'YYYY-MM-DD"T"HH24:MI:SS')`,'H.CODNAT',...extras.map(name => `T.${name}`)];
   const select = ['H.CODEMP','H.TIPMOV','H.STATUSNOTA','H.CODTIPOPER',`${dimensions[4]} AS OPERATION_VERSION`,'H.CODNAT',...extras.map(name => `T.${name} AS TOP_${name}`)];
-  const rows = await gateway.select(`SELECT ${select.join(',')},COUNT(*) AS DOCUMENT_COUNT,TO_CHAR(MIN(H.DTNEG),'YYYY-MM-DD') AS FIRST_DATE,TO_CHAR(MAX(H.DTNEG),'YYYY-MM-DD') AS LAST_DATE FROM TGFCAB H LEFT JOIN TGFTOP T ON T.CODTIPOPER=H.CODTIPOPER AND T.DHALTER=H.DHTIPOPER WHERE H.CODEMP=${companyCode} AND H.TIPMOV IN ('P','V') AND H.DTNEG>=TO_DATE('${from}','YYYY-MM-DD') AND H.DTNEG<TO_DATE('${to}','YYYY-MM-DD')+1 GROUP BY ${dimensions.join(',')} ORDER BY H.TIPMOV,H.CODTIPOPER,OPERATION_VERSION,H.CODNAT,H.STATUSNOTA OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`, 50);
-  return { ...observation(), supported: true, companyCode, from, to, dateField: 'DTNEG', observedTopFields: extras, rows, offset, hasMore: rows.length === 50, rulesInferred: false };
+  const rows = await gateway.select(`SELECT ${select.join(',')},COUNT(*) AS DOCUMENT_COUNT,TO_CHAR(MIN(H.DTNEG),'YYYY-MM-DD') AS FIRST_DATE,TO_CHAR(MAX(H.DTNEG),'YYYY-MM-DD') AS LAST_DATE FROM ${join} WHERE ${where} GROUP BY ${dimensions.join(',')} ORDER BY H.TIPMOV,H.CODTIPOPER,OPERATION_VERSION,H.CODNAT,H.STATUSNOTA OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`, 50);
+  return { ...observation(), supported: true, companyCode, from, to, dateField: 'DTNEG', observedTopFields: extras, rows, offset, hasMore: rows.length === 50, rulesInferred: false, ...(standardSales ? { salesPolicy: report } : {}) };
 }

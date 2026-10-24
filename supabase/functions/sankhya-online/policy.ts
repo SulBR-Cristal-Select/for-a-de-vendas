@@ -7,6 +7,18 @@ export const COMMERCIAL_POLICY = Object.freeze({
   saleOperationByCompany: Object.freeze({ 1: 1001, 4: 1001 }),
 });
 
+// Recorte dos relatórios confirmado em24/10/2026 às18h42 (America/Sao_Paulo).
+// Não altera a política de criação/cotação de pedidos acima.
+export const STANDARD_SALES_REPORT_POLICY = Object.freeze({
+  movement: 'P' as const,
+  operationCode: 1001 as const,
+  natureCode: 10100000 as const,
+  statusCode: 'L' as const,
+  bonification: 'N' as const,
+  devolution: 1 as const,
+  dateField: 'DTNEG' as const,
+});
+
 export function partnerCompany(code: unknown): 1 | 4 {
   if (code === null) return COMMERCIAL_POLICY.sharedPartnerCompany;
   if (code === 1 || code === 4) return code;
