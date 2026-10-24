@@ -4,11 +4,12 @@ import { Pagination as GI } from '@g4ai/ds';
 import React, { useRef, useEffect } from 'react';
 import { commercialItem, commercialPaymentOptions, commercialTotal, isERP, prepareCommercialOrder, quantityRules, validQuantity } from '../lib/erp-commercial';
 import * as runtime from 'react/jsx-runtime';
-import { Badge as bi, Button as Ft, PageHeading as Hp, PageToolbar as nv, TableToolbar as cv, DataTable as s1, Empty as hn, Drawer as xb, Combobox as Sl, Select as ho, Tabs as of, Page as fa, ActionMenu as Il, KpiGrid as _i, ChartCard as cs, DatePicker as Jd, Callout as Gu, Card as Vt, Section as Ot, FieldGrid as Vi, IconButton as wR, NumberField as Hr, TextField as vr, TextareaField as $u, PropertyList as _o, KpiCard as Ha, Checkbox as Yy, CurrencyField as Up, KanbanBoard as c1, KanbanColumn as i1, KanbanCard as u1, BarChart as Qy, Modal as gb, SettingsLayout as uv, SettingsSection as nf, Switch as zu, AppShell as l1, Sidebar as t1, ThemeToggle as n0, ConfirmDialog as HR, formatCurrency as Vd, formatDate as oI, formatNumber as na, normalize as ol, notify as go, useSort as UI, usePagination as zI, BarList as Zy, ProductMark as rv } from '@g4ai/ds';
+import { Badge as bi, Button as Ft, PageHeading as Hp, PageToolbar as nv, TableToolbar as cv, DataTable as s1, Empty as hn, Drawer as xb, Select as ho, Tabs as of, Page as fa, ActionMenu as Il, KpiGrid as _i, ChartCard as cs, DatePicker as Jd, Callout as Gu, Card as Vt, Section as Ot, FieldGrid as Vi, IconButton as wR, NumberField as Hr, TextField as vr, TextareaField as $u, PropertyList as _o, KpiCard as Ha, Checkbox as Yy, CurrencyField as Up, KanbanBoard as c1, KanbanColumn as i1, KanbanCard as u1, BarChart as Qy, Modal as gb, SettingsLayout as uv, SettingsSection as nf, Switch as zu, AppShell as l1, Sidebar as t1, ThemeToggle as n0, ConfirmDialog as HR, formatCurrency as Vd, formatDate as oI, formatNumber as na, normalize as ol, notify as go, useSort as UI, usePagination as zI, BarList as Zy, ProductMark as rv } from '@g4ai/ds';
 import catalogo from './catalogo.json';
 import { assertManualMutation, manualRows, useERPCategories, useERPRecord, useERPDocument, useERPTable } from './erp-hooks';
 import type { ERPClient, ERPQueryRef } from './erp-hooks';
 import { useERPOrderLookups } from './erp-order-lookups';
+import { ERPCombobox as Sl } from './erp-combobox';
 import type { ERPPrice, ERPRow } from '../lib/erp-online';
 import { workspaceERPSeller } from '../lib/erp-identity';
 import './sul.css';
@@ -1027,6 +1028,7 @@ function sz(): any {
                                         children: [
                                             (0, b.jsx)(Sl, {
                                                 label: "Cliente",
+                                                remote: online ? lookups.matches.customers : undefined,
                                                 value: n,
                                                 onValueChange: (D: any) => { r(String(D)); u(''); setPaymentChoice(undefined); },
                                                 options: e.customers
@@ -1039,6 +1041,7 @@ function sz(): any {
                                             }),
                                             (0, b.jsx)(Sl, {
                                                 label: "Vendedor",
+                                                remote: online ? lookups.matches.sellers : undefined,
                                                 value: onlineOrder ? context.sellerId : l,
                                                 onValueChange: (D: any) => { if (!onlineOrder) s(String(D)); },
                                                 options: onlineOrder ? lookups.sellers.filter((seller: any) => seller.id === context.sellerId).map((seller: any) => ({ value: seller.id, label: seller.name })) : [...La(sellerNames(e)), ...(online ? lookups.sellers.map((seller: any) => ({ value: seller.id, label: seller.name })) : [])],
@@ -1071,6 +1074,7 @@ function sz(): any {
                                                     className: "flex-1 min-w-0",
                                                     children: (0, b.jsx)(Sl, {
                                                         label: "Produto",
+                                                        remote: online ? lookups.matches.products : undefined,
                                                         value: v,
                                                         onValueChange: (D: any) => g(String(D)),
                                                         options: e.products

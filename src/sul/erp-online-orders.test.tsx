@@ -35,6 +35,9 @@ vi.mock("@g4ai/ds", async (original) => ({
     </select>
   ),
 }));
+// Este teste mantém o seletor sintético já usado para isolar preço/persistência.
+// O seletor real e a filtragem remota são exercitados em erp-combobox.test.tsx.
+vi.mock('./erp-combobox', async () => ({ ERPCombobox: (await import('@g4ai/ds')).Combobox }));
 const customer = {
   id: "sankhya:customer:7",
   code: "7",
