@@ -9,7 +9,7 @@ export const EXPECTED_COMPANIES: Readonly<Record<string, string>> = { '1': '1337
 export type NativePriceInput = {
   codigoEmpresa: 1 | 4; codigoCliente: number; codigoVendedor: number;
   codigoTipoOperacao: number; codigoTipoNegociacao: number; dataNegociacao: string;
-  produtos: { codigoProduto: number; unidade: string; quantidade: number; codigoLocalEstoque?: number; controle?: string }[];
+  produtos: { codigoProduto: number; unidade: string; quantidade: number; codigoLocalEstoque: number; controle: string }[];
 };
 export class SankhyaGateway {
   private token: string | null = null;
@@ -76,7 +76,7 @@ export class SankhyaGateway {
   // Consulta de preço com simulação explicitamente desativada. Não há rota de envio ou confirmação aqui.
   async contextPrices(input: NativePriceInput): Promise<ObjectValue> {
     const positive = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v > 0 && v <= 9999999999;
-    if (![1, 4].includes(input.codigoEmpresa) || !positive(input.codigoCliente) || !positive(input.codigoVendedor) || !positive(input.codigoTipoOperacao) || !positive(input.codigoTipoNegociacao) || !Array.isArray(input.produtos) || !input.produtos.length || input.produtos.length > 50 || input.produtos.some(p => !positive(p.codigoProduto) || typeof p.unidade !== 'string' || !p.unidade.trim() || p.unidade.length > 12 || typeof p.quantidade !== 'number' || !Number.isFinite(p.quantidade) || p.quantidade <= 0 || p.quantidade > 100000000 || (p.codigoLocalEstoque !== undefined && (!Number.isSafeInteger(p.codigoLocalEstoque) || p.codigoLocalEstoque < 0)) || (p.controle !== undefined && (typeof p.controle !== 'string' || p.controle.length > 17)) || ((p.codigoLocalEstoque === undefined) !== (p.controle === undefined)))) {
+    if (![1, 4].includes(input.codigoEmpresa) || !positive(input.codigoCliente) || !positive(input.codigoVendedor) || !positive(input.codigoTipoOperacao) || !positive(input.codigoTipoNegociacao) || !Array.isArray(input.produtos) || !input.produtos.length || input.produtos.length > 50 || input.produtos.some(p => !positive(p.codigoProduto) || typeof p.unidade !== 'string' || !p.unidade.trim() || p.unidade.length > 12 || typeof p.quantidade !== 'number' || !Number.isFinite(p.quantidade) || p.quantidade <= 0 || p.quantidade > 100000000 || (!Number.isSafeInteger(p.codigoLocalEstoque) || p.codigoLocalEstoque < 0) || (typeof p.controle !== 'string' || p.controle.length > 17))) {
       throw new SankhyaError('ERP_INVALID_QUERY', 'Contexto de preço recusado.', 400);
     }
     if (typeof input.dataNegociacao !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(input.dataNegociacao) || !Number.isFinite(Date.parse(input.dataNegociacao + 'T00:00:00Z')) || new Date(input.dataNegociacao + 'T00:00:00Z').toISOString().slice(0, 10) !== input.dataNegociacao) throw new SankhyaError('ERP_INVALID_QUERY', 'Data comercial inválida.', 400);

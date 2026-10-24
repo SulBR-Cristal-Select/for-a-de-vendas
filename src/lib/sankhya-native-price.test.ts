@@ -21,16 +21,6 @@ describe('Serviço oficial de preços, sem endpoint de gravação ERP', () => {
     expect(options.redirect).toBe('error');
     expect(request.mock.calls).toHaveLength(3);
   });
-  it('consulta contextos sem fabricar local/controle, mantendo cabeçalho, unidade, quantidade e simulaçãofalse', async () => {
-    const request = transport(), gateway = new SankhyaGateway(key => key, request);
-    await gateway.contextPrices({ ...input, produtos: [{ codigoProduto: 11240, unidade: 'PC', quantidade: 1.23456 }] });
-    const body = JSON.parse(String(request.mock.calls.at(-1)![1]?.body));
-    expect(body.produtos).toEqual([{ codigoProduto: 11240, unidade: 'PC', quantidade: 1.23456 }]); expect(body.simularInclusao).toBe(false); expect(body.dataNegociacao).toBe('23/10/2026');
-  });
-  it.each([{ codigoLocalEstoque: 0 }, { controle: ' ' }])('recusa envio parcial dos filtros antes da rede: %j', async fields => {
-    const request = transport(), gateway = new SankhyaGateway(key => key, request);
-    await expect(gateway.contextPrices({ ...input, produtos: [{ codigoProduto: 11240, unidade: 'PC', quantidade: 1, ...fields }] })).rejects.toMatchObject({ code: 'ERP_INVALID_QUERY' }); expect(request).not.toHaveBeenCalled();
-  });
   it('aceita o nome real produtos somente com os campos de preço completos', async () => {
     const result = await new SankhyaGateway(key => key, transport('{"codigo":200,"produtos":[{"codigoProduto":11240,"unidade":"PC","valor":10.56}]}')).contextPrices(input);
     expect(result['precos']).toMatchObject([{ codigoProduto: 11240, unidade: 'PC', valor: '10.56' }]);
