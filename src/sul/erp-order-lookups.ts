@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ERPClient } from "./erp-hooks";
 import type { ERPResource, ERPRow } from "../lib/erp-online";
+import type { ERPMatches } from "./erp-combobox";
 
 const recursos = ["customers", "products", "sellers"] as const;
 const rotulos = { customers: "Cliente", products: "Produto", sellers: "Vendedor" };
@@ -10,6 +11,7 @@ const mensagem = (erro: unknown) =>
 type Consulta = {
   client?: ERPClient | undefined;
   rows: ERPRow[];
+  query?: string;
   loading: boolean;
   error?: string;
   total?: number;
@@ -80,6 +82,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
       definirEstado((anterior) => ({
         client,
         rows: anexar ? anterior.rows : [],
+        query: consulta,
         loading: true,
         hasMore: false,
       }));
@@ -99,6 +102,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
         definirEstado({
           client,
           rows: linhas.current,
+          query: consulta,
           loading: false,
           total,
           hasMore: offset < total,
@@ -205,8 +209,13 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
   const registros =
     fixados && fixados.client === client && fixados.chave === chave ? fixados : undefined;
   const rows = client ? unir(pagina?.rows || vazio, registros?.rows || vazio) : vazio;
+  const matches: ERPMatches = {
+    query: pagina?.query ?? '',
+    ids: new Set((pagina?.rows || vazio).map(row => String(row['id']))),
+  };
   return {
     rows,
+    matches,
     loading: !!client && (!pagina || pagina.loading || !registros || registros.loading),
     error: pagina?.error || registros?.error,
     total: pagina?.total,
@@ -232,6 +241,7 @@ export function useERPOrderLookups(
     customers: customers.rows,
     products: products.rows,
     sellers: sellers.rows,
+    matches: { customers: customers.matches, products: products.matches, sellers: sellers.matches },
     loading: recursos.some((recurso) => estados[recurso].loading),
     error: erro ? { message: erro } : undefined,
     totals: Object.fromEntries(recursos.map((recurso) => [recurso, estados[recurso].total])),
