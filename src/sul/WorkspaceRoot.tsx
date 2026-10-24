@@ -4,12 +4,13 @@ import type { Session } from '@supabase/supabase-js';
 import { Button, Callout, Card, Page, PageHeading, TextField, ThemeToggle } from '@g4ai/ds';
 import SulApp, { createAppState } from './SulApp';
 import { supabase } from '../lib/supabase';
+import { erpClient } from '../lib/erp-online';
 import { loadWorkspace, saveWorkspace, WorkspaceError } from '../lib/workspace';
 
 export default function WorkspaceRoot() {
   const [session, setSession] = useState<Session | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [state, setState] = useState<Record<string, any> | null>(null);
+  const [state, setState] = useState<{ owner: string; value: Record<string, any> } | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -21,17 +22,24 @@ export default function WorkspaceRoot() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    let alive = true;
-    void supabase.auth.getSession().then(({ data, error: authError }) => {
-      if (!alive) return;
-      if (authError) setError('Não foi possível recuperar a sessão. Entre novamente.');
-      setSession(data.session);
+    let alive = true, sessionChanged = false, currentIdentity: string | null = null;
+    const acceptSession = (next: Session | null) => {
+      const identity = next?.user.id ?? null;
+      erpClient.setIdentity(identity);
+      if (identity !== currentIdentity) setState(null);
+      currentIdentity = identity;
+      setSession(next);
       setInitialized(true);
+    };
+    void supabase.auth.getSession().then(({ data, error: authError }) => {
+      if (!alive || sessionChanged) return;
+      if (authError) setError('Não foi possível recuperar a sessão. Entre novamente.');
+      acceptSession(data.session);
     });
     const { data } = supabase.auth.onAuthStateChange((_event, next) => {
-      if (alive) { setSession(next); setInitialized(true); }
+      if (alive) { sessionChanged = true; acceptSession(next); }
     });
-    return () => { alive = false; data.subscription.unsubscribe(); };
+    return () => { alive = false; data.subscription.unsubscribe(); erpClient.setIdentity(null); };
   }, []);
 
   const userId = session?.user.id;
@@ -43,7 +51,7 @@ export default function WorkspaceRoot() {
     setLoading(true);
     setError('');
     void loadWorkspace().then((remote) => {
-      if (alive) setState(createAppState(remote));
+      if (alive) setState({ owner: userId, value: createAppState(remote) });
     }).catch((cause: unknown) => {
       if (!alive) return;
       setPending(cause instanceof WorkspaceError && cause.code === 'MEMBERSHIP_PENDING');
@@ -95,7 +103,7 @@ export default function WorkspaceRoot() {
     } finally { setSubmitting(false); }
   }
 
-  if (session && state) return <SulApp key={session.user.id + ':' + reload} initialState={state} persist={saveWorkspace} onSignOut={signOut} />;
+  if (session && state?.owner === session.user.id) return <SulApp key={session.user.id + ':' + reload} initialState={state.value} online={erpClient} persist={saveWorkspace} onSignOut={signOut} />;
   return <Page width="narrow">
     <PageHeading title="Sul · Força de Vendas" description="SulBR" />
     <Card className="space-y-5">

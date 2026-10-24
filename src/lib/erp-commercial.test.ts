@@ -27,15 +27,32 @@ describe('Quantidade sem arredondamento ou conversão inferida', () => {
     const p = { ...fixture().product, multiple: 0.25 };
     expect(validQuantity(p, 0.5)).toBe(true); expect(validQuantity(p, 0.23)).toBe(false);
   });
-  it('não converte PC para unidade desconhecida e recusa precisão maior que três', () => {
+  it('não converte PC para unidade desconhecida e recusa precisão acima do contrato', () => {
     expect(() => quantityRules(fixture().product, 'KG')).toThrow();
-    expect(validQuantity({ ...fixture().product, erp: { source: 'sankhya', quantityDecimals: 4 } }, 1)).toBe(false);
+    expect(validQuantity({ ...fixture().product, erp: { source: 'sankhya', quantityDecimals: 6 } }, 1)).toBe(false);
+  });
+  it('preserva DECQTD 5 observado no ERP sem arredondar nem gerar passo impreciso', () => {
+    const product = { unit: 'UN', erp: { source: 'sankhya', quantityDecimals: 5 } };
+    expect(quantityRules(product)).toEqual({ min: 0.00001, step: 0.00001, decimals: 5 });
+    expect(validQuantity(product, 0.00001)).toBe(true);
+    expect(validQuantity(product, 1.23456)).toBe(true);
+    expect(validQuantity(product, 1.234567)).toBe(false);
+    expect(commercialTotal([{ qty: 1.23456, price: 10 }])).toBe(12.35);
+  });
+  it('respeita bloqueio fracionado sem confundir DECQTD com permissão e calcula passo válido exato', () => {
+    const product = { unit: 'UN', multiple: 0.3, erp: { source: 'sankhya', quantityDecimals: 5, fractionBlocked: true } };
+    expect(quantityRules(product)).toEqual({ min: 3, step: 3, decimals: 0 });
+    expect(validQuantity(product, 0.3)).toBe(false);
+    expect(validQuantity(product, 1)).toBe(false);
+    expect(validQuantity(product, 3)).toBe(true);
+    expect(validQuantity(product, 6)).toBe(true);
   });
   it('arredonda somente o total de cada linha, em centavos', () => {
     expect(commercialTotal([{ qty: 0.23, price: 10.56 }])).toBe(2.43);
     expect(commercialTotal([{ qty: 0.5, price: 0.01 }, { qty: 0.5, price: 0.01 }])).toBe(0.02);
     expect(commercialTotal([{ qty: 300, price: 10.56 }, { qty: 224, price: 9.2 }, { qty: 450, price: 8.4 }])).toBe(9008.8);
-    expect(() => commercialTotal([{ qty: 0.0001, price: 10 }])).toThrow();
+    expect(commercialTotal([{ qty: 0.0001, price: 10 }])).toBe(0);
+    expect(() => commercialTotal([{ qty: 0.000001, price: 10 }])).toThrow();
   });
 });
 

@@ -16,3 +16,8 @@ enable_signup = true
 [auth.email]
 enable_signup = true
 enable_confirmations = true
+
+# Validação explícita de usuário com auth.getUser e perfil ativo no handler.
+# A operação de diagnóstico aceita também a chave privada de manutenção do servidor.
+[functions.sankhya-online]
+verify_jwt = false

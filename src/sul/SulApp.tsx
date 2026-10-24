@@ -6,6 +6,10 @@ import { commercialItem, commercialPaymentOptions, commercialTotal, isERP, prepa
 import * as runtime from 'react/jsx-runtime';
 import { Badge as bi, Button as Ft, PageHeading as Hp, PageToolbar as nv, TableToolbar as cv, DataTable as s1, Empty as hn, Drawer as xb, Combobox as Sl, Select as ho, Tabs as of, Page as fa, ActionMenu as Il, KpiGrid as _i, ChartCard as cs, DatePicker as Jd, Callout as Gu, Card as Vt, Section as Ot, FieldGrid as Vi, IconButton as wR, NumberField as Hr, TextField as vr, TextareaField as $u, PropertyList as _o, KpiCard as Ha, Checkbox as Yy, CurrencyField as Up, KanbanBoard as c1, KanbanColumn as i1, KanbanCard as u1, BarChart as Qy, Modal as gb, SettingsLayout as uv, SettingsSection as nf, Switch as zu, AppShell as l1, Sidebar as t1, ThemeToggle as n0, ConfirmDialog as HR, formatCurrency as Vd, formatDate as oI, formatNumber as na, normalize as ol, notify as go, useSort as UI, usePagination as zI, BarList as Zy, ProductMark as rv } from '@g4ai/ds';
 import catalogo from './catalogo.json';
+import { assertManualMutation, manualRows, useERPCategories, useERPRecord, useERPDocument, useERPTable } from './erp-hooks';
+import type { ERPClient, ERPQueryRef } from './erp-hooks';
+import { useERPOrderLookups } from './erp-order-lookups';
+import type { ERPPrice, ERPRow } from '../lib/erp-online';
 import './sul.css';
 const He: any = React;
 const b: any = runtime;
@@ -58,6 +62,120 @@ export function customerPriceTables(db: any, existing: any, match: string): stri
     return ['administrador', 'gestor'].includes(String(db.company.role).toLowerCase())
         ? (match ? [match] : []) : [...(existing?.priceTables || [])];
 }
+// O único desvio da guarda de cadastros é o documento local online: o RPC valida
+// referências e cria snapshots. Nenhum cadastro transitório entra no estado global.
+export function assertOrderMutation(next: Record<string, any>, before: Record<string, any>): void {
+    const document = (order: any) => order?.erp?.source === 'sankhya' && order.erp.mode === 'online';
+    for (const order of next['orders'] || []) {
+        if (!document(order)) continue;
+        if (typeof order.id !== 'string' || order.id.startsWith('sankhya:') || order.readOnly === true ||
+            !/^sankhya:customer:[1-9]\d*$/.test(order.customerId) || ![1, 4].includes(order.erp.companyCode) ||
+            order.erp.operationCode !== 1001 || !Number.isSafeInteger(order.erp.sellerCode) || order.erp.sellerCode < 1 ||
+            !Number.isSafeInteger(order.erp.payment?.code) || order.erp.payment.code < 1 ||
+            !Array.isArray(order.items) || !order.items.length || order.items.some((item: any) => !/^sankhya:product:[1-9]\d*$/.test(item.productId)))
+            throw new Error('Documento ERP online inválido.');
+    }
+    const referencesOnly = (order: any) => {
+        if (!document(order)) return order;
+        const { erp: _erp, customerSnapshot: _customer, ...local } = order;
+        return { ...local, customerId: 'referencia-online', items: order.items.map((item: any) => {
+            const { erp: _itemERP, productSnapshot: _product, ...fields } = item;
+            return { ...fields, productId: 'referencia-online' };
+        }) };
+    };
+    assertManualMutation({ ...next, orders: (next['orders'] || []).map(referencesOnly) },
+        { ...before, orders: (before['orders'] || []).map(referencesOnly) });
+}
+const orderError = (error: unknown) => error instanceof Error ? error.message : 'Não foi possível confirmar o contexto comercial.';
+export function useERPOrderPayments(client: ERPClient | undefined, customerId: string) {
+    const [result, setResult] = React.useState<{ client: ERPClient; customerId: string; rows: ERPRow[]; error?: string }>();
+    const current = useRef({ client, customerId }); current.current = { client, customerId };
+    useEffect(() => {
+        if (!client || !/^sankhya:customer:[1-9]\d*$/.test(customerId)) return;
+        let alive = true, generation = 0, search = '', offset = 0, total = 0, busy = false, rows: ERPRow[] = [];
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const valid = (version: number) => alive && generation === version && current.current.client === client && current.current.customerId === customerId;
+        async function load(append = false) {
+            if (busy) return;
+            busy = true; const version = generation;
+            try {
+                const page = await client!.paymentOptions({ customerId, offset, limit: 50, search });
+                if (!valid(version)) return;
+                rows = append ? [...rows, ...page.items] : page.items;
+                offset += page.items.length; total = page.total;
+                setResult({ client: client!, customerId, rows });
+            } catch (error) { if (valid(version)) { rows = []; setResult({ client: client!, customerId, rows, error: orderError(error) }); } }
+            finally { if (valid(version)) busy = false; }
+        }
+        function popup(target: EventTarget | null) {
+            if (!(target instanceof HTMLElement)) return null;
+            const found = target.closest<HTMLElement>('[aria-label="Condição de pagamento"]');
+            return found?.tagName !== 'BUTTON' && found?.querySelector('input[aria-label="Buscar em condição de pagamento"]') ? found : null;
+        }
+        function input(event: Event) {
+            const field = event.target;
+            if (!(field instanceof HTMLInputElement) || !popup(field) || field.value === search) return;
+            search = field.value; generation++; busy = false; rows = []; offset = 0; total = 0;
+            setResult({ client: client!, customerId, rows }); clearTimeout(timer); timer = setTimeout(() => { void load(); }, 180);
+        }
+        function scroll(event: Event) {
+            const list = event.target;
+            if (list instanceof HTMLElement && list.getAttribute('role') === 'listbox' && popup(list) &&
+                list.scrollHeight > list.clientHeight && list.scrollTop + list.clientHeight >= list.scrollHeight - 4 && offset < total) void load(true);
+        }
+        document.addEventListener('input', input, true); document.addEventListener('focusin', input, true); document.addEventListener('scroll', scroll, true);
+        void load();
+        return () => { alive = false; clearTimeout(timer); document.removeEventListener('input', input, true); document.removeEventListener('focusin', input, true); document.removeEventListener('scroll', scroll, true); };
+    }, [client, customerId]);
+    const valid = result?.client === client && result?.customerId === customerId ? result : undefined;
+    return { rows: valid?.rows || [], error: valid?.error };
+}
+export type OnlineOrderContext = { customerId: string; paymentCode: number; sellerId: string; type: string; date: string };
+export async function quoteERPOrderItem(client: ERPClient, context: OnlineOrderContext, product: any, quantity: number, unit = product?.unit): Promise<ERPPrice> {
+    const sellerCode = Number(/^sankhya:seller:([1-9]\d*)$/.exec(context.sellerId)?.[1]);
+    if (!/^sankhya:customer:[1-9]\d*$/.test(context.customerId) || !Number.isSafeInteger(context.paymentCode) || context.paymentCode < 1 ||
+        !Number.isSafeInteger(sellerCode) || sellerCode < 1 || context.type !== 'Venda' || !unit || !validQuantity(product, quantity, unit))
+        throw new Error('Confirme cliente, condição de pagamento, vendedor ERP, unidade e quantidade antes de consultar o preço.');
+    const quote = await client.price({ customerId: context.customerId, productId: product.id, paymentCode: context.paymentCode, sellerCode, type: 'Venda', quantity, unit, date: context.date });
+    if (quote.seller['id'] !== context.sellerId || quote.quantity !== quantity || quote.price.unit !== unit || quote.customer['id'] !== context.customerId || quote.product['id'] !== product.id || quote.payment.code !== context.paymentCode)
+        throw new Error('O preço retornado não corresponde ao contexto selecionado.');
+    if (quote.price.amount <= 0) throw new Error('Preço ERP não confirmado.');
+    // Valida centavos sem arredondar nem transformar preço ausente em zero.
+    commercialTotal([{ qty: quantity, price: quote.price.amount }]);
+    return quote;
+}
+export function prepareOnlineOrder(order: any, context: OnlineOrderContext, quotes: ERPPrice[]): any {
+    const first = quotes[0];
+    if (context.type !== 'Venda') throw new Error('Tipo de pedido ERP não autorizado neste contexto.');
+    if (!first || quotes.length !== order.items.length) throw new Error('Aguarde a confirmação de todos os preços no contexto atual.');
+    order.items.forEach((item: any, index: number) => {
+        const quote = quotes[index];
+        if (!quote || quote.customer['id'] !== context.customerId || quote.product['id'] !== item.productId || quote.seller['id'] !== context.sellerId ||
+            quote.payment.code !== context.paymentCode || quote.companyCode !== first.companyCode || quote.operationCode !== 1001 || quote.operationVersion !== first.operationVersion ||
+            quote.payment.version !== first.payment.version || quote.payment.label !== first.payment.label || quote.quantity !== item.qty || quote.price.amount !== item.price || quote.price.unit !== item.unit)
+            throw new Error('Contexto comercial mudou; confirme os preços antes de salvar.');
+    });
+    return { ...order, customerId: context.customerId, seller: String(first.seller['name'] || order.seller), payment: first.payment.label,
+        items: order.items.map((item: any) => ({ productId: item.productId, qty: item.qty, price: item.price, unit: item.unit })),
+        total: commercialTotal(order.items, order.freight ?? 0),
+        erp: { source: 'sankhya', mode: 'online', companyCode: first.companyCode, operationCode: 1001,
+            sellerCode: Number(context.sellerId.split(':')[2]), payment: { code: first.payment.code } } };
+}
+export function useERPOrderPrices(client: ERPClient | undefined, context: OnlineOrderContext, items: any[], products: any[]) {
+    const productKey = JSON.stringify(products.filter(product => items.some(item => item.productId === product.id)));
+    const key = JSON.stringify([context, items.map(item => [item.productId, item.qty, item.unit]), productKey]);
+    const current = useRef({ client, key }); current.current = { client, key };
+    const [state, setState] = React.useState<{ client: ERPClient; key: string; quotes?: ERPPrice[]; error?: string }>();
+    useEffect(() => {
+        if (!client || !context.customerId.startsWith('sankhya:')) return;
+        let alive = true;
+        void Promise.all(items.map(item => quoteERPOrderItem(client, context, products.find(product => product.id === item.productId), item.qty, item.unit)))
+            .then(quotes => { if (alive && current.current.client === client && current.current.key === key) setState({ client, key, quotes }); })
+            .catch(error => { if (alive && current.current.client === client && current.current.key === key) setState({ client, key, error: orderError(error) }); });
+        return () => { alive = false; };
+    }, [client, key]);
+    return state?.client === client && state?.key === key ? state : undefined;
+}
 export function createMutationQueue(current: {
     current: Record<string, any>;
 }, persist: SulAppProps['persist'], commit: (confirmed: Record<string, any>) => void) {
@@ -67,18 +185,19 @@ export function createMutationQueue(current: {
             const before = current.current;
             const next = structuredClone(before);
             mutator(next);
+            try { assertOrderMutation(next, before); } catch (error) { go(error instanceof Error ? error.message : String(error)); throw error; }
             const mark = (value: any, previous: any): void => { if (!value || typeof value !== 'object')
                 return; if (Array.isArray(value)) {
                 for (const row of value) {
                     const prior = previous?.find?.((item: any) => item.id === row?.id);
-                    if (row && typeof row === 'object' && row.id && JSON.stringify(row) !== JSON.stringify(prior))
+                    if (row && typeof row === 'object' && row['id'] && JSON.stringify(row) !== JSON.stringify(prior))
                         row.source = 'registrado';
                     mark(row, prior);
                 }
             }
             else {
                 for (const key of Object.keys(value))
-                    if (key !== 'userBindings') mark(value[key], previous?.[key]);
+                    if (key !== 'userBindings' && key !== 'erp' && key !== 'customerSnapshot' && key !== 'productSnapshot') mark(value[key], previous?.[key]);
             } };
             mark(next, before);
             try {
@@ -140,8 +259,8 @@ function L5(e: any, t: any): any {
         .filter((o: any) => typeof o != "object")
         .join(" ")).includes(ol(t)));
 }
-function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r = !0, actions: l, q: s, onQuery: i, }: any): any {
-    let [u, c] = (0, He.useState)(""), f: any = s ?? u, d: any = L5(e, f), m: any = (0, He.useMemo)(() => Object.fromEntries(t.map((x: any) => [x.key, x.get || ((v: any) => v[x.key] ?? "")])), [t]), p: any = UI(d, m), y: any = zI(p.rows, 10, { resetKey: f }), C: any = t.map((x: any) => ({
+function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r = !0, actions: l, q: s, onQuery: i, remote, }: any): any {
+    let [u, c] = (0, He.useState)(""), f: any = s ?? u, d: any = L5(e, f), m: any = (0, He.useMemo)(() => Object.fromEntries(t.map((x: any) => [x.key, x.get || ((v: any) => v[x.key] ?? "")])), [t]), p: any = UI(remote ? [] : d, m), local: any = zI(p.rows, 10, { resetKey: f }), context = qa(), onlinePage = useERPTable(remote, e, f, p.sort, context.queryMetadata), y: any = remote ? onlinePage : local, C: any = t.map((x: any) => ({
         ...x,
         sortKey: x.action || x.selection ? void 0 : x.key,
     }));
@@ -153,8 +272,8 @@ function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r
                     children: (0, b.jsx)(cv, {
                         query: f,
                         onQuery: i || c,
-                        shown: d.length,
-                        total: e.length,
+                        shown: remote ? onlinePage.total ?? pa : d.length,
+                        total: remote ? onlinePage.totalWithoutSearch ?? pa : e.length,
                         noun: "registro",
                         hideSearch: !1,
                         dirty: !!f,
@@ -170,8 +289,8 @@ function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r
                 rowLabel: (x: any) => String(x.name || x.number || x.id),
                 onRowClick: o,
                 sort: p,
-                loading: !1,
-                error: void 0,
+                loading: remote ? onlinePage.loading : !1,
+                error: remote ? onlinePage.error : void 0,
                 empty: (0, b.jsx)(hn, {
                     framed: !1,
                     title: n || "Nenhum registro neste recorte",
@@ -201,14 +320,22 @@ function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r
 function z(e: any, t: any, a: any = undefined, o: any = {}): any {
     return { key: e, header: t, cell: a || ((n: any) => n[e] ?? pa), ...o };
 }
-function Gp({ rows: e, name: t, columns: a }: any): any {
+function Gp({ rows: e, name: t, columns: a, remoteResource }: any): any {
+    const { online, queryMetadata } = qa();
     return (0, b.jsxs)(xt, {
-        onClick: () => {
+        onClick: async () => {
+            try {
+            let rows = e;
+            if (online && remoteResource) {
+                const metadata = queryMetadata.current[remoteResource];
+                if (!metadata) throw new Error("Consulta ERP indisponível. Tente novamente.");
+                rows = await metadata.exportRows();
+            }
             let o: any = a ||
-                Object.keys(e[0] || {}).filter((s: any) => !["items", "variants"].includes(s)), n: any = (s: any) => '"' + String(s ?? "").replaceAll('"', '""') + '"', r: any = "\uFEFF" +
+                Object.keys(rows[0] || {}).filter((s: any) => !["items", "variants"].includes(s)), n: any = (s: any) => '"' + String(s ?? "").replaceAll('"', '""') + '"', r: any = "\uFEFF" +
                 [
                     o.join(";"),
-                    ...e.map((s: any) => o
+                    ...rows.map((s: any) => o
                         .map((i: any) => n(typeof s[i] == "object" ? JSON.stringify(s[i]) : s[i]))
                         .join(";")),
                 ].join(`\r
@@ -218,6 +345,7 @@ function Gp({ rows: e, name: t, columns: a }: any): any {
                 l.click(),
                 setTimeout(() => URL.revokeObjectURL(l.href), 2e3),
                 go("Recorte exportado em CSV"));
+            } catch (error) { go(error instanceof Error ? error.message : String(error)); }
         },
         children: [(0, b.jsx)(vm, {}), "Exportar CSV"],
     });
@@ -308,9 +436,9 @@ function jp(e: any): any {
             ],
         }), { primary: !0 }),
         z("date", "Emiss\xE3o", (t: any) => xo(t.date)),
-        z("customer", "Cliente", (t: any) => Un(e, t.customerId), {
+        z("customer", "Cliente", (t: any) => t.customerName || Un(e, t.customerId), {
             wide: !0,
-            get: (t: any) => Un(e, t.customerId),
+            get: (t: any) => t.customerName || Un(e, t.customerId),
         }),
         z("seller", "Vendedor"),
         z("delivery", "data_entrega", (t: any) => xo(t.delivery)),
@@ -792,25 +920,52 @@ function lz(): any {
 function sz(): any {
     const savingOrder=useRef(false);
     const [orderId] = React.useState(() => crypto.randomUUID());
-    let { db: e, update: t, path: a } = qa(), o: any = new URLSearchParams(location.hash.split("?")[1] || ""), [n, r] = (0, He.useState)(o.get("cliente") || ""), [l, s] = (0, He.useState)(e.company.user), [i, u] = (0, He.useState)(""), [c, f] = (0, He.useState)("Venda"), [d, m] = (0, He.useState)(bo), [p, y] = (0, He.useState)("1 - IMEDIATO"), [C, x] = (0, He.useState)("Conclu\xEDdo"), [v, g] = (0, He.useState)(""), [h, S] = (0, He.useState)([]), [L, I] = (0, He.useState)(0), [R, E] = (0, He.useState)(""), [OBS, OBSs] = (0, He.useState)(""), [k, M] = (0, He.useState)(""), [A, N] = (0, He.useState)(""), O: any = () => {
-        let D: any = Ur(e, v);
-        if (D) {
-            if (!isERP(D) && !isERP(zp(e, n)) && (D.price == null || (D.price <= 0 && e.config.zeroPriceBlocked))) {
-                N("Defina um preço positivo na ficha do produto antes de usá-lo.");
-                return;
-            }
-            if (h.find((j: any) => j.productId === v)) {
-                N("O produto j\xE1 est\xE1 no pedido. Ajuste a quantidade no item.");
-                return;
-            }
-            try { S([...h, commercialItem(e, n, v, businessDate())]); g(""); N(""); } catch (error) { N(error instanceof Error ? error.message : "Não foi possível confirmar o preço."); }
+    let { db: base, update: t, path: a, online } = qa(), o: any = new URLSearchParams(location.hash.split("?")[1] || ""), [n, r] = (0, He.useState)(o.get("cliente") || ""), [l, s] = (0, He.useState)(base.company.user), [i, u] = (0, He.useState)(""), [c, f] = (0, He.useState)("Venda"), [d, m] = (0, He.useState)(bo), [p, y] = (0, He.useState)("1 - IMEDIATO"), [C, x] = (0, He.useState)("Conclu\xEDdo"), [v, g] = (0, He.useState)(""), [h, S] = (0, He.useState)([]), [L, I] = (0, He.useState)(0), [R, E] = (0, He.useState)(""), [OBS, OBSs] = (0, He.useState)(""), [k, M] = (0, He.useState)(""), [A, N] = (0, He.useState)("");
+    const lookups = useERPOrderLookups(online, n, [...h.map((item: any) => item.productId), v]);
+    // Visão transitória só no formulário: os arrays canônicos permanecem intactos.
+    const e = React.useMemo(() => online ? { ...base, customers: [...manualRows(base.customers), ...lookups.customers], products: [...manualRows(base.products), ...lookups.products] } : base,
+        [base, online, lookups.customers, lookups.products]);
+    const onlineOrder = !!online && n.startsWith('sankhya:customer:');
+    const paymentMenu = useERPOrderPayments(online, n);
+    const [paymentChoice, setPaymentChoice] = React.useState<{ customerId: string; row: ERPRow }>();
+    const selectedPayment = paymentChoice && paymentChoice.customerId === n && paymentChoice.row['id'] === i ? paymentChoice.row : undefined;
+    const context: OnlineOrderContext = { customerId: n, paymentCode: Number(selectedPayment?.['code']), sellerId: l, type: c, date: businessDate() };
+    const prices = useERPOrderPrices(onlineOrder ? online : undefined, context, h, e.products);
+    const contextKey = JSON.stringify([context, v]);
+    const activeContext = useRef(contextKey); activeContext.current = contextKey;
+    const adding = useRef(false);
+    useEffect(() => { if (lookups.error || paymentMenu.error || prices?.error) N(lookups.error?.message || paymentMenu.error || prices?.error); }, [lookups.error?.message, paymentMenu.error, prices?.error]);
+    useEffect(() => {
+        if (!prices?.quotes?.length) return;
+        if (!lookups.error && !paymentMenu.error) N('');
+        const next = h.map((item: any, index: number) => ({ ...item, price: prices.quotes![index]!.price.amount, unit: prices.quotes![index]!.price.unit }));
+        if (JSON.stringify(next) !== JSON.stringify(h)) S(next);
+    }, [prices]);
+    useEffect(() => () => { activeContext.current = ''; }, []);
+    const O = async () => {
+        const product = Ur(e, v);
+        if (!product || adding.current) return;
+        if (h.find((item: any) => item.productId === v)) { N('O produto já está no pedido. Ajuste a quantidade no item.'); return; }
+        if (onlineOrder) {
+            const key = contextKey; adding.current = true;
+            try {
+                const quote = await quoteERPOrderItem(online!, context, product, 1);
+                if (activeContext.current !== key) return;
+                S((items: any[]) => items.some(item => item.productId === product.id) ? items : [...items, { productId: product.id, qty: quote.quantity, price: quote.price.amount, unit: quote.price.unit }]);
+                g(''); if (!lookups.error && !paymentMenu.error) N('');
+            } catch (error) { if (activeContext.current === key) N(orderError(error)); }
+            finally { adding.current = false; }
+            return;
         }
+        if (!isERP(product) && !isERP(zp(e, n)) && (product.price == null || (product.price <= 0 && e.config.zeroPriceBlocked))) { N('Defina um preço positivo na ficha do produto antes de usá-lo.'); return; }
+        try { S([...h, commercialItem(e, n, v, businessDate())]); g(''); N(''); } catch (error) { N(orderError(error)); }
     };
     useEffect(() => {
-        if (!isERP(zp(e, n)) && !h.some((item: any) => isERP(Ur(e, item.productId)))) return;
+        if (onlineOrder || (!isERP(zp(e, n)) && !h.some((item: any) => isERP(Ur(e, item.productId))))) return;
         try { const next = h.map((item: any) => commercialItem(e, n, item.productId, businessDate(), item)); if (JSON.stringify(next) !== JSON.stringify(h)) S(next); N(''); }
-        catch (error) { N(error instanceof Error ? error.message : 'Não foi possível confirmar o preço.'); }
-    }, [n, e.erpCommercial]);
+        catch (error) { N(orderError(error)); }
+    }, [n, base.erpCommercial]);
+    const total = (items: any[], freight = 0): number | undefined => { try { return d1(items, freight); } catch { return undefined; } };
     async function B(): Promise<any> {
         if (savingOrder.current) return;
         if (!n ||
@@ -830,7 +985,7 @@ function sz(): any {
             type: c,
             date: businessDate(),
             payment: i,
-            total: d1(h, L || 0),
+            total: 0,
             status: C,
             integration: "Sem envio ao ERP \xB7 simulado",
             items: h,
@@ -843,7 +998,7 @@ function sz(): any {
             cargoStatus: "Pendente",
             source: "simulado",
         };
-        try { j = prepareCommercialOrder(e, j); } catch (error) { N(error instanceof Error ? error.message : 'Não foi possível confirmar o contrato comercial.'); return; }
+        try { j = onlineOrder ? prepareOnlineOrder(j, context, prices?.quotes || []) : prepareCommercialOrder(e, { ...j, total: d1(h, L || 0) }); } catch (error) { N(error instanceof Error ? error.message : 'Não foi possível confirmar o contrato comercial.'); return; }
         savingOrder.current=true;
         try { await t((F: any) => F.orders.unshift(j)); go('Pedido criado'); bn('/pedidos/'+D) } catch(error) {N(error instanceof Error ? error.message : 'Não foi possível salvar o pedido.')} finally {savingOrder.current=false}
     }
@@ -871,7 +1026,7 @@ function sz(): any {
                                             (0, b.jsx)(Sl, {
                                                 label: "Cliente",
                                                 value: n,
-                                                onValueChange: (D: any) => r(String(D)),
+                                                onValueChange: (D: any) => { r(String(D)); u(''); setPaymentChoice(undefined); },
                                                 options: e.customers
                                                     .filter((D: any) => !D.blocked)
                                                     .map((D: any) => ({
@@ -884,7 +1039,7 @@ function sz(): any {
                                                 label: "Vendedor",
                                                 value: l,
                                                 onValueChange: (D: any) => s(String(D)),
-                                                options: La(sellerNames(e)),
+                                                options: [...La(sellerNames(e)), ...(online ? lookups.sellers.map((seller: any) => ({ value: seller.id, label: seller.name })) : [])],
                                             }),
                                             (0, b.jsx)(ho, {
                                                 label: "Tipo de pedido",
@@ -1006,8 +1161,8 @@ function sz(): any {
                                                 (0, b.jsx)(Sl, {
                                                     label: "Condi\xE7\xE3o de pagamento",
                                                     value: i,
-                                                    options: La(commercialPaymentOptions(e, zp(e, n), businessDate())),
-                                                    onValueChange: (D: any) => u(String(D)),
+                                                    options: onlineOrder ? [...new Map([...(selectedPayment ? [selectedPayment] : []), ...paymentMenu.rows].map(row => [row['id'], row])).values()].map(row => ({ value: String(row['id']), label: String(row['label']) })) : La(commercialPaymentOptions(e, zp(e, n), businessDate())),
+                                                    onValueChange: (D: any) => { u(String(D)); if (onlineOrder) { const row = paymentMenu.rows.find(row => row['id'] === String(D)); setPaymentChoice(row ? { customerId: n, row } : undefined); } },
                                                     required: !0,
                                                 }),
                                                 (0, b.jsx)(Jd, {
@@ -1066,11 +1221,11 @@ function sz(): any {
                                         items: [
                                             { label: "Itens", value: h.length },
                                             { label: "Quantidade total", value: Zo(h, "qty") },
-                                            { label: "Produtos", value: rt(d1(h)) },
+                                            { label: "Produtos", value: rt(total(h)) },
                                             {
                                                 label: "Valor total",
                                                 value: (0, b.jsx)("strong", {
-                                                    children: rt(d1(h, L || 0)),
+                                                    children: rt(total(h, L || 0)),
                                                 }),
                                             },
                                         ],
@@ -1265,7 +1420,7 @@ function iz({ id: e }: any): any {
                                 (0, b.jsx)("a", {
                                     className: "font-medium ds-link",
                                     href: "#/clientes/" + r.customerId,
-                                    children: l?.name || "Cliente indispon\xEDvel",
+                                    children: l?.name || r.customerName || "Cliente indispon\xEDvel",
                                 }),
                                 (0, b.jsx)("p", {
                                     className: "text-body text-muted mt-2",
@@ -1308,19 +1463,19 @@ function iz({ id: e }: any): any {
                         toolbar: !1,
                         rows: r.items.map((f: any) => ({
                             ...f,
-                            id: f.productId,
-                            name: Ur(t, f.productId)?.name,
-                            code: Ur(t, f.productId)?.code,
-                            subtotal: f.qty * f.price,
+                            id: f.id ?? f.productId,
+                            name: f.name || f.erp?.product?.name || Ur(t, f.productId)?.name,
+                            code: f.code ?? f.erp?.product?.productCode ?? Ur(t, f.productId)?.code,
+                            subtotal: r.readOnly ? f.total : (f.total ?? f.qty * f.price),
                         })),
                         columns: [
                             z("code", "C\xF3digo"),
                             z("name", "Produto", void 0, { primary: !0, wide: !0 }),
-                            z("qty", "Quantidade", (f: any) => na(f.qty) + " " + (Ur(t, f.productId)?.unit || ""), { align: "right" }),
-                            z("price", "Pre\xE7o unit\xE1rio", (f: any) => rt(f.price), {
+                            z("qty", "Quantidade", (f: any) => f.qty == null ? pa : na(f.qty, 5) + " " + (f.unit || Ur(t, f.productId)?.unit || ""), { align: "right" }),
+                            z("price", "Pre\xE7o unit\xE1rio", (f: any) => f.price == null ? pa : rt(f.price), {
                                 align: "right",
                             }),
-                            z("subtotal", "Subtotal", (f: any) => rt(f.subtotal), {
+                            z("subtotal", "Subtotal", (f: any) => f.subtotal == null ? pa : rt(f.subtotal), {
                                 align: "right",
                             }),
                         ],
@@ -1339,7 +1494,7 @@ function iz({ id: e }: any): any {
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Quantidade",
-                        value: r.items ? na(Zo(r.items, "qty")) : "\u2014",
+                        value: r.items && r.items.every((item: any) => typeof item.qty === 'number') ? na(Zo(r.items, "qty"), 5) : "\u2014",
                     }),
                     (0, b.jsx)(Ha, { label: "Valor total", value: rt(r.total) }),
                 ],
@@ -1355,7 +1510,7 @@ function iz({ id: e }: any): any {
                         items: [
                             { label: "Tipo", value: r.type },
                             { label: "Tipo de Agenda", value: r.agenda || pa },
-                            { label: "pedido_erp", value: r.erp || pa },
+                            { label: "pedido_erp", value: typeof r.erp === 'string' || typeof r.erp === 'number' ? r.erp : pa },
                             {
                                 label: "Peso bruto",
                                 value: r.grossWeight != null ? na(r.grossWeight) + " kg" : pa,
@@ -1364,7 +1519,7 @@ function iz({ id: e }: any): any {
                                 label: "Frete",
                                 value: r.id === "2351"
                                     ? "N\xE3o informado na origem"
-                                    : rt(r.freight),
+                                    : r.freight == null ? pa : rt(r.freight),
                             },
                             { label: "Informa\xE7\xF5es adicionais", value: r.notes || pa },
                         ],
@@ -1375,7 +1530,8 @@ function iz({ id: e }: any): any {
     });
 }
 function uz(): any {
-    let { db: e, editor: t, update: a } = qa();
+    let { db: e, editor: t, update: a, online } = qa();
+    const remote = He.useMemo(() => online ? { client: online, resource: "customers" } : undefined, [online]);
     return (0, b.jsxs)(fa, {
         width: "wide",
         children: [
@@ -1396,7 +1552,8 @@ function uz(): any {
                 ],
             }),
             (0, b.jsx)(ya, {
-                rows: e.customers,
+                rows: online ? manualRows(e.customers) : e.customers,
+                remote,
                 label: "Clientes",
                 onRowClick: (o: any) => bn("/clientes/" + o.id),
                 columns: [
@@ -1426,6 +1583,7 @@ function uz(): any {
                 actions: (0, b.jsx)(Gp, {
                     rows: e.customers,
                     name: "clientes-sulbr",
+                    remoteResource: "customers",
                     columns: [
                         "code",
                         "name",
@@ -1560,11 +1718,38 @@ function k5(e: any, t: any, a: any, o: any = undefined): any {
         },
     });
 }
+function ERPDetail({ resource, id, component: Component }: any): any {
+    const context = qa();
+    const result = useERPRecord(context.online, resource, id);
+    useEffect(() => { if (result.error) go(result.error); }, [result.error]);
+    if (!result.enabled) return b.jsx(Component, { id });
+    if (result.record === undefined && !result.error) return null;
+    if (!result.record) return b.jsx(Wu, {});
+    const rejectUpdate = async () => {
+        const error = new Error("Cadastro ERP disponível somente para consulta.");
+        go(error.message);
+        throw error;
+    };
+    const db = { ...context.db, [resource]: [result.record] };
+    // Histórico e financeiro ainda não homologados; nenhum pedido local vira histórico ERP.
+    if (resource === "customers") Object.assign(db, { orders: [], titles: [], invoices: [] });
+    return b.jsx(I5.Provider, { value: { ...context, db, update: rejectUpdate }, children: b.jsx(Component, { id }) });
+}
+function ERPDocumentDetail({ id, component: Component }: any): any {
+    const context = qa(), result = useERPDocument(context.online, id);
+    useEffect(() => { if (result.error) go(result.error); }, [result.error]);
+    if (!result.enabled) return b.jsx(Component, { id });
+    if (result.record === undefined && !result.error) return null;
+    if (!result.record) return b.jsx(Wu, {});
+    const rejectUpdate = async () => { const error = new Error('Cadastro ERP disponível somente para consulta.'); go(error.message); throw error; };
+    const db = { ...context.db, orders: [result.record] };
+    return b.jsx(I5.Provider, { value: { ...context, db, update: rejectUpdate }, children: b.jsx(Component, { id }) });
+}
 function dz({ id: e }: any): any {
-    let { db: t, editor: a, update: o, confirm: n } = qa(), r: any = zp(t, e), [l, s] = (0, He.useState)("resumo"), [i, u] = (0, He.useState)(!1);
+    let { db: t, editor: a, update: o, confirm: n, online } = qa(), r: any = zp(t, e), [l, s] = (0, He.useState)("resumo"), [i, u] = (0, He.useState)(!1);
     if (!r)
         return (0, b.jsx)(Wu, {});
-    let c: any = t.orders.filter((p: any) => p.customerId === e), f: any = t.tasks.filter((p: any) => p.customerId === e), d: any = c.filter((p: any) => p.type === "Venda" && p.status === "Conclu\xEDdo"), m: any = Zo(d, "total");
+    let c: any = isERP(r) ? [] : t.orders.filter((p: any) => p.customerId === e), f: any = t.tasks.filter((p: any) => p.customerId === e), d: any = c.filter((p: any) => p.type === "Venda" && p.status === "Conclu\xEDdo"), m: any = Zo(d, "total");
     return (0, b.jsxs)(fa, {
         width: "wide",
         children: [
@@ -1711,7 +1896,7 @@ function dz({ id: e }: any): any {
                                                 },
                                                 {
                                                     label: "Limite dispon\xEDvel",
-                                                    value: r.credit != null
+                                                    value: isERP(r) ? pa : r.credit != null
                                                         ? rt(r.credit)
                                                         : "N\xE3o calculado",
                                                 },
@@ -1730,11 +1915,11 @@ function dz({ id: e }: any): any {
                         (0, b.jsxs)(_i, {
                             cols: 3,
                             children: [
-                                (0, b.jsx)(Ha, { label: "Compras no arquivo", value: rt(m) }),
-                                (0, b.jsx)(Ha, { label: "Pedidos de venda", value: d.length }),
+                                (0, b.jsx)(Ha, { label: "Compras no arquivo", value: isERP(r) ? pa : rt(m) }),
+                                (0, b.jsx)(Ha, { label: "Pedidos de venda", value: isERP(r) ? pa : d.length }),
                                 (0, b.jsx)(Ha, {
                                     label: "Ticket m\xE9dio",
-                                    value: d.length ? rt(m / d.length) : "\u2014",
+                                    value: isERP(r) ? pa : d.length ? rt(m / d.length) : "\u2014",
                                 }),
                             ],
                         }),
@@ -1776,6 +1961,7 @@ function dz({ id: e }: any): any {
                         (0, b.jsx)(ya, {
                             rows: c,
                             columns: jp(t),
+                            remote: isERP(r) && online ? { client: online, resource: 'orders', customerId: e } : undefined,
                             onRowClick: (p: any) => bn("/pedidos/" + p.id),
                         }),
                     ],
@@ -1860,6 +2046,7 @@ function dz({ id: e }: any): any {
                             title: "Notas fiscais",
                             children: (0, b.jsx)(ya, {
                                 rows: t.invoices.filter((p: any) => p.customerId === e),
+                                remote: isERP(r) && online ? { client: online, resource: 'invoices', customerId: e } : undefined,
                                 columns: [
                                     z("number", "Nota", void 0, { primary: !0 }),
                                     z("date", "Data", (p: any) => xo(p.date)),
@@ -1887,6 +2074,10 @@ function fz(): any {
     async function f(): Promise<any> {
         if (!a.length || !l)
             return;
+        if (a.some((id: any) => String(id).startsWith("sankhya:"))) {
+            go("Cadastro ERP disponível somente para consulta.");
+            return;
+        }
         let d: any = n === "Tabelas de pre\xE7o"
             ? "priceTables"
             : n === "Tags"
@@ -1987,7 +2178,9 @@ function fz(): any {
     });
 }
 function mz(): any {
-    let { db: e, update: t, editor: a, confirm: o } = qa(), [n, r] = (0, He.useState)(""), l: any = e.products.filter((s: any) => !n || s.category === n);
+    let { db: e, update: t, editor: a, confirm: o, online } = qa(), [n, r] = (0, He.useState)(""), l: any = (online ? manualRows(e.products) : e.products).filter((s: any) => !n || s.category === n);
+    const remote = He.useMemo(() => online ? { client: online, resource: "products", categoryName: n } : undefined, [online, n]);
+    const categoryLabels = useERPCategories(online, (error) => go(error));
     return (0, b.jsxs)(fa, {
         width: "wide",
         children: [
@@ -2031,7 +2224,7 @@ function mz(): any {
                         onValueChange: r,
                         options: La([
                             { value: "", label: "Todas as categorias" },
-                            ...Array.from(new Set(e.products.map((s: any) => s.category).filter(Boolean))).map((s: any) => ({ value: String(s), label: String(s) })),
+                            ...Array.from(new Set([...(online ? manualRows(e.products) : e.products).map((s: any) => s.category).filter(Boolean), ...categoryLabels])).map((s: any) => ({ value: String(s), label: String(s) })),
                         ]),
                     }),
                     (0, b.jsxs)(xt, {
@@ -2047,6 +2240,7 @@ function mz(): any {
                     (0, b.jsx)(Gp, {
                         rows: l,
                         name: "produtos-sulbr",
+                        remoteResource: "products",
                         columns: [
                             "code",
                             "name",
@@ -2061,6 +2255,7 @@ function mz(): any {
             }),
             (0, b.jsx)(ya, {
                 rows: l,
+                remote,
                 label: "Produtos",
                 onRowClick: (s: any) => bn("/produtos/" + s.id),
                 columns: [
@@ -2123,11 +2318,13 @@ function hz({ id: e }: any): any {
             go("Informe nome e pre\xE7o v\xE1lido", void 0, "bad");
             return;
         }
-        (await a((f: any) => Object.assign(Ur(f, e), r, {
-            source: "simulado",
-            priceSource: "Preço cadastrado no sistema",
-        })),
-            go("Produto alterado no sistema"));
+        try {
+            await a((f: any) => Object.assign(Ur(f, e), r, {
+                source: "simulado",
+                priceSource: "Preço cadastrado no sistema",
+            }));
+            go("Produto alterado no sistema");
+        } catch { /* A atualização já informou o erro pelo canal existente. */ }
     };
     return (0, b.jsxs)(fa, {
         width: "wide",
@@ -4746,8 +4943,9 @@ export interface SulAppProps {
     initialState: Record<string, any>;
     persist: (nextState: Record<string, any>) => Promise<Record<string, any>>;
     onSignOut: () => Promise<void>;
+    online?: ERPClient;
 }
-export default function SulApp({ initialState, persist, onSignOut }: SulAppProps): React.ReactElement {
+export default function SulApp({ initialState, persist, onSignOut, online }: SulAppProps): React.ReactElement {
     let [e, t] = (0, He.useState)(location.hash || "#/indicadores"), a: any = e.replace(/^#/, "").split("?")[0], [o, n] = (0, He.useState)(() => createAppState(initialState)), [r, l] = (0, He.useState)(null), [s, i] = (0, He.useState)(null), [u, c] = (0, He.useState)(!1), [f, d] = (0, He.useState)("");
     ((0, He.useEffect)(() => {
         location.hash || (location.hash = "/indicadores");
@@ -4766,6 +4964,7 @@ export default function SulApp({ initialState, persist, onSignOut }: SulAppProps
             return (addEventListener("keydown", g),
                 () => removeEventListener("keydown", g));
         }, []));
+    const queryMetadata: ERPQueryRef = useRef({});
     const current = useRef<Record<string, any>>(o);
     const persistRef = useRef(persist);
     persistRef.current = persist;
@@ -4775,6 +4974,8 @@ export default function SulApp({ initialState, persist, onSignOut }: SulAppProps
     const update = (mutator: (draft: Record<string, any>) => unknown) => queueRef.current!(mutator);
     let y: any = {
         db: o,
+        online,
+        queryMetadata,
         update,
         editor: l,
         confirm: (g: any, h: any, S: any = "A alteração será salva no banco da SulBR.") => i({ title: g, run: h, description: S }),
@@ -4795,19 +4996,19 @@ export default function SulApp({ initialState, persist, onSignOut }: SulAppProps
                         : a === "/pedidos/novo"
                             ? (C = (0, b.jsx)(sz, {}))
                             : x[0] === "pedidos"
-                                ? (C = (0, b.jsx)(iz, { id: x[1] }))
+                                ? (C = (0, b.jsx)(ERPDocumentDetail, { id: x[1], component: iz }, x[1]))
                                 : a === "/clientes"
                                     ? (C = (0, b.jsx)(uz, {}))
                                     : a === "/clientes/vinculos"
                                         ? (C = (0, b.jsx)(fz, {}))
                                         : x[0] === "clientes"
-                                            ? (C = (0, b.jsx)(dz, { id: x[1] }))
+                                            ? (C = (0, b.jsx)(ERPDetail, { resource: "customers", id: x[1], component: dz }, x[1]))
                                             : a === "/produtos"
                                                 ? (C = (0, b.jsx)(mz, {}))
                                                 : a === "/produtos/destaques"
                                                     ? (C = (0, b.jsx)(Iz, {}))
                                                     : x[0] === "produtos"
-                                                        ? (C = (0, b.jsx)(hz, { id: x[1] }))
+                                                        ? (C = (0, b.jsx)(ERPDetail, { resource: "products", id: x[1], component: hz }, x[1]))
                                                         : a === "/oportunidades"
                                                             ? (C = (0, b.jsx)(gz, {}))
                                                             : a === "/agenda"

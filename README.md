@@ -33,14 +33,14 @@ A senha é enviada pelo cliente oficial diretamente ao Supabase Auth; não há s
 
 ## Persistência e regras
 
-As seis migrações em `supabase/migrations` correspondem às versões instaladas. Treze tabelas públicas, perfis vinculados ao Auth, RLS e RPCs `get_workspace` / `save_workspace` mantêm os dados por empresa e vendedor. Gravações usam revisão e chave de idempotência. Itens e totais de pedidos são validados e calculados no servidor, mantendo preços históricos. A interface aguarda confirmação para navegar ou fechar gravações críticas.
+As sete migrações em `supabase/migrations` correspondem às versões instaladas. A sétima acrescenta o fluxo online sem reaplicar ou alterar as seis anteriores. Treze tabelas públicas, perfis vinculados ao Auth, RLS e RPCs `get_workspace` / `save_workspace` mantêm os dados por empresa e vendedor. Gravações usam revisão e chave de idempotência. Itens e totais de pedidos são validados e calculados no servidor, mantendo preços históricos. A interface aguarda confirmação para navegar ou fechar gravações críticas.
 
 Nenhuma carteira histórica ou simulação é carregada como operação real. Os 25 relatórios e 27 indicadores são catálogos estruturais; os resultados dependem dos registros persistidos. Agenda e Portal não aparecem na lateral. O menu e o layout do bundle são preservados, sem descontos, promoções ou Saldo Flex.
 
 ## Verificações realizadas
 
 - TypeScript e build de produção.
-- 75 testes locais do adaptador, fila, catálogos, identificação, metas, responsáveis, vínculo Auth e contrato comercial ERP.
+- 431 testes locais em 21 arquivos: adaptadores, fila, catálogos, identidade, metas, responsáveis, vínculo Auth, paginação, histórico documental, preços, precisão, condições e revalidação transacional.
 - 32 verificações SQL da compatibilidade ERP, mais recusa de perfil inativo, em transação revertida: preço exato/versão/unidade/vigência, filial e vínculo, precisão, parcelas, histórico não comercial, adulteração, idempotência, concorrência e regressão manual. A numeração real permaneceu em 8, sem fixtures restantes.
 - Vinte e seis verificações transacionais no Supabase: total de R$ 9.008,80 para 974 unidades em três itens, reenvio idempotente, conflito de revisão, duplicidade de documento, rollback, preço histórico, restrições de papel, isolamento de carteira, metas mensais e edição da própria conta/empresa.
 - Seis verificações adicionais do papel gestor no banco.
@@ -59,7 +59,22 @@ A migração adicional `20261022165600_sankhya_commercial_compatibility.sql` acr
 - Totais são calculados no servidor; pedidos guardam os snapshots comerciais. Edições não comerciais preservam o histórico, mas não autorizam mudar status/tipo ou reutilizar esse preço numa operação nova sem revalidação.
 - Metadados ERP e catálogos não podem ser alterados pelo snapshot do navegador. RLS, perfis ativos, revisão otimista, UUID idempotente, ledger e conflito HTTP 409 permanecem.
 
-Não houve carga comercial, integração automática com o ERP, conversão de unidades, geração financeira ou ativação das contas de Adilson e Raul. A carteira, os responsáveis, as regras de preço e a elegibilidade devem ser aprovados antes de qualquer carga futura. As contas existentes permanecem vendedores inativos, sem confirmação artificial de e-mail.
+Na publicação da compatibilidade comercial não houve carga ou consulta automática ao ERP. O fluxo online abaixo substitui a necessidade de carga, sem conversão de unidades ou geração financeira. Adilson e Raul permanecem vendedores inativos, sem confirmação artificial de e-mail.
+
+## Consulta online Sankhya
+
+A função existente `sankhya-online` consulta clientes, produtos, vendedores, preço contextual, condições elegíveis e histórico P/V nas empresas 1 e 4. Usa sessão Auth real e perfil ativo; sem vínculo ERP servidor confiável, gestor/vendedor não recebem acesso comercial. A chave de manutenção não autentica usuário comercial. Segredos `SANKHYA_CLIENT_ID`, `SANKHYA_CLIENT_SECRET` e `SANKHYA_X_TOKEN` ficam somente no servidor.
+
+- Consultas paginadas de até50 registros e dados transitórios, separados do estado canônico. P e V permanecem distintos; nenhum histórico é mesclado a pedidos locais sem vínculo documental.
+- Somente CODEMP explicitamente NULL adota empresa1; campo ausente/vazio não é NULL. Venda usa TOP1001 em1/4. Não há remapeamento da empresa3.
+- Quantidades online têm até5 casas, conforme DECQTD, bloqueio de fração e AGRUPMIN reais. Nenhuma conversão deriva do nome da embalagem. Preços transacionais precisam ser representáveis em centavos, sem arredondamento silencioso.
+- Preço vem da API nativa contextual com simularInclusao=false. A API não identifica tabela/versão: esses campos ficam explicitamente nulos. Data interna ISO é enviada em DD/MM/AAAA.
+- Antes de salvar, o estado, UUID e revisão são congelados. O backend revalida o ERP e atesta uma prova privada de5minutos, vinculada pelo PostgreSQL ao autor real e ao JSONB canônico. Só service_role atesta; o usuário comum grava pelo RPC normal.
+- Gravação, consumo da prova, revisão e ledger são atômicos. Replay do mesmo UUID precede validade/consumo da prova e não repete a cotação. Proprietário Auth e vendedor ERP são identidades distintas.
+- Snapshots e referências ficam somente nos pedidos locais. Não se criam clientes/produtos ERP para satisfazer FKs. Nomes e totais documentais são preservados; abertura/reabertura de ficha reconsulta o ERP.
+- A suíte SQL reversível da migração7 executa pelo menos40 assertivas e confere restauração de esquema, funções, perfis, revisão, numeração e fixtures. Gravação/reenvio/recarga por administrador Auth real também foram comprovados sem réplica de clientes/produtos.
+
+O frontend desta integração deve seguir commit, push e publicação no mesmo Lovable; backend implantado e teste local não substituem a conferência do pacote público e das telas autenticadas. Uma consulta bem-sucedida não homologa todos os contextos comerciais ou uma venda na empresa4. As três primeiras consultas exploratórias antigas usaram simularInclusao=true, sem garantia documental de ausência de efeitos; esse modo foi removido e não é reutilizado.
 
 ## Limites atuais
 

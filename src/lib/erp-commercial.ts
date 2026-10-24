@@ -41,11 +41,18 @@ export function quantityRules(product: unknown, unit?: string): { min: number; s
     const units = row(erp['units']);
     const configured = units[String(actual)] ?? (actual === p['unit'] ? erp['quantityDecimals'] : undefined);
     decimals = integer(configured);
-    if (decimals > 3) fail('Precisão da quantidade não representável neste contrato.');
+    if (decimals > 5) fail('Precisão da quantidade não representável neste contrato.');
+    if (erp['fractionBlocked'] === true) decimals = 0;
   }
   const multiple = p['multiple'] == null ? 0 : Number(p['multiple']);
   if (!Number.isFinite(multiple) || multiple < 0) fail('Múltiplo de venda inválido.');
-  const step = multiple > 0 ? multiple : 10 ** -decimals;
+  let step = multiple > 0 ? multiple : 1 / (10 ** decimals);
+  if (isERP(p) && decimals === 0 && multiple > 0) {
+    const grouped = scaled(multiple, 5); let a = grouped, b = 100000n;
+    while (b !== 0n) { const remainder = a % b; a = b; b = remainder; }
+    step = Number(grouped / a); // Interseção exata entre quantidade inteira e agrupamento; não arredonda entrada.
+    if (!Number.isSafeInteger(step)) fail('Múltiplo de venda não representável.');
+  }
   return { min: isERP(p) ? step : 1, step: isERP(p) ? step : 1, decimals };
 }
 export function validQuantity(product: unknown, value: unknown, unit?: string): boolean {
@@ -53,14 +60,14 @@ export function validQuantity(product: unknown, value: unknown, unit?: string): 
     const rules = quantityRules(product, unit), quantity = scaled(value, rules.decimals);
     if (quantity <= 0n || Number(value) > 100000000) return false;
     const multiple = row(product)['multiple'];
-    return multiple == null || scaled(value, 3) % scaled(multiple, 3) === 0n;
+    return multiple == null || scaled(value, 5) % scaled(multiple, 5) === 0n;
   } catch { return false; }
 }
 export function commercialTotal(items: unknown[], freight: unknown = 0): number {
   let cents = scaled(freight ?? 0, 2);
   for (const value of items) {
     const item = row(value);
-    cents += (scaled(item['qty'] ?? 0, 3) * scaled(item['price'] ?? 0, 2) + 500n) / 1000n;
+    cents += (scaled(item['qty'] ?? 0, 5) * scaled(item['price'] ?? 0, 2) + 50000n) / 100000n;
   }
   if (cents > BigInt(Number.MAX_SAFE_INTEGER)) fail('Total não representável com exatidão.');
   const result = Number(cents) / 100;
