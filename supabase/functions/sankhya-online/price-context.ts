@@ -78,13 +78,19 @@ export async function readPrice(gateway: Transport, input: PriceInput, scope: Re
   // Resolve apenas local/controle reais. O valor continua vindo exclusivamente do motor nativo.
   const tables = [...new Set([customerERP['tableCode'], term.tableCode].filter(v => v !== null && v !== 0).map(v => responseCode(v)))];
   const variants = tables.length ? await gateway.select(`WITH V AS (SELECT T.NUTAB,ROW_NUMBER() OVER (PARTITION BY T.CODTAB ORDER BY T.DTVIGOR DESC,T.DTALTER DESC,T.NUTAB DESC) AS RN FROM TGFTAB T JOIN TGFNTA N ON N.CODTAB=T.CODTAB WHERE T.CODTAB IN (${tables.join(',')}) AND N.ATIVO='S' AND T.DTVIGOR<=${asOf} AND (T.DTALTER IS NULL OR T.DTALTER<=${asOf})) SELECT DISTINCT E.CODLOCAL,E.CONTROLE FROM TGFEXC E JOIN V ON V.NUTAB=E.NUTAB AND V.RN=1 WHERE E.CODPROD=${productCode} AND E.TIPO='V' ORDER BY E.CODLOCAL,E.CONTROLE FETCH FIRST 2 ROWS ONLY`, 2) : await stockContext(gateway, companyCode, productCode);
-  if (variants.length !== 1) return fail('ERP_PRICE_AMBIGUOUS', 'Local e controle sem contexto único de preço.', 502);
-  const rawLocal = variants[0]!['CODLOCAL'], localCode = Number(rawLocal), control = variants[0]!['CONTROLE'];
-  if (!(typeof rawLocal === 'number' || typeof rawLocal === 'string' && /^\d+$/.test(rawLocal)) || !Number.isSafeInteger(localCode) || localCode < 0 || typeof control !== 'string' || control.length > 17) return fail('ERP_CONTEXT_REQUIRED', 'Local ou controle ERP não confirmado.');
-  const native = await gateway.contextPrices({ codigoEmpresa: companyCode, codigoCliente: integer(customerERP['partnerCode']), codigoVendedor: sellerCode, codigoTipoOperacao: operationCode, codigoTipoNegociacao: paymentCode, dataNegociacao: date, produtos: [{ codigoProduto: productCode, unidade: unit, quantidade: quantity, codigoLocalEstoque: localCode, controle: control }] });
+  // A descrição oficial permite consultar sem os filtros de local/controle. Nesse caso, o motor deve devolver um único contexto explícito.
+  const resolveNativeContext = !tables.length && variants.length !== 1;
+  if (variants.length !== 1 && !resolveNativeContext) return fail('ERP_PRICE_AMBIGUOUS', 'Local e controle sem contexto único de preço.', 502);
+  let localCode: number | undefined, control: string | undefined;
+  if (!resolveNativeContext) {
+    const rawLocal = variants[0]!['CODLOCAL'], rawControl = variants[0]!['CONTROLE'];
+    if (!(typeof rawLocal === 'number' || typeof rawLocal === 'string' && /^\d+$/.test(rawLocal)) || !Number.isSafeInteger(Number(rawLocal)) || Number(rawLocal) < 0 || typeof rawControl !== 'string' || rawControl.length > 17) return fail('ERP_CONTEXT_REQUIRED', 'Local ou controle ERP não confirmado.');
+    localCode = Number(rawLocal); control = rawControl;
+  }
+  const native = await gateway.contextPrices({ codigoEmpresa: companyCode, codigoCliente: integer(customerERP['partnerCode']), codigoVendedor: sellerCode, codigoTipoOperacao: operationCode, codigoTipoNegociacao: paymentCode, dataNegociacao: date, produtos: [{ codigoProduto: productCode, unidade: unit, quantidade: quantity, ...(localCode !== undefined && control !== undefined ? { codigoLocalEstoque: localCode, controle: control } : {}) }] });
   if (!Array.isArray(native['precos'])) return fail('ERP_INVALID_RESPONSE', 'Preço contextual não confirmado.', 502);
   const candidates = native['precos'].map(object), sameProduct = candidates.filter(p => responseCode(p['codigoProduto']) === productCode);
-  const matching = sameProduct.filter(p => (p['unidade'] === undefined || p['unidade'] === unit) && (p['codigoLocalEstoque'] === undefined || p['codigoLocalEstoque'] === localCode) && (p['controle'] === undefined || p['controle'] === control));
+  const matching = sameProduct.filter(p => (p['unidade'] === undefined || p['unidade'] === unit) && (resolveNativeContext || p['codigoLocalEstoque'] === undefined || p['codigoLocalEstoque'] === localCode) && (resolveNativeContext || p['controle'] === undefined || p['controle'] === control));
   // Somente repetição integral do mesmo objeto de transporte; nunca deduzir igualdade por nome, preço ou código isolado.
   const distinctMatching = [...new Map(matching.map(p => [JSON.stringify(p), p])).values()];
   if (distinctMatching.length !== 1) throw new SankhyaError('ERP_PRICE_AMBIGUOUS', 'Preço sem contexto único de produto, unidade, local e controle.', 502, undefined, {
@@ -103,6 +109,7 @@ export async function readPrice(gateway: Transport, input: PriceInput, scope: Re
   });
   const selected = distinctMatching[0]!, price = exactNativeAmount(selected['valor']);
   const local = selected['codigoLocalEstoque'];
+  if (resolveNativeContext && (local === undefined || selected['controle'] === undefined)) return fail('ERP_CONTEXT_REQUIRED', 'Local ou controle ERP não confirmado.');
   if (local !== undefined && (typeof local !== 'number' || !Number.isSafeInteger(local) || local < 0)) return fail('ERP_INVALID_RESPONSE', 'Local de preço ERP incompatível.', 502);
   if (selected['controle'] !== undefined && (typeof selected['controle'] !== 'string' || selected['controle'].length > 17)) return fail('ERP_INVALID_RESPONSE', 'Controle de preço ERP incompatível.', 502);
   return { source: 'sankhya' as const, readOnly: true as const, readAt: new Date().toISOString(), customer, product, seller: sellerResult.record, companyCode, operationCode, operationVersion: operations[0]!['OPERATION_VERSION'], quantity, payment: { code: paymentCode, label: term.label, version: term.version }, price: { amount: price, unit, localCode: local ?? null, control: selected['controle'] ?? null, tableVersion: null, provider: 'native-context-api' } };
