@@ -1,3 +1,4 @@
+import { BILLING_COLUMNS, billingOriginFlags } from './billing-source.ts';
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
 import { STANDARD_SALES_REPORT_POLICY, STANDARD_BILLING_REPORT_POLICY } from './policy.ts';
 
@@ -149,12 +150,7 @@ async function readBillingDiagnostic(gateway: Transport, input: Row) {
   const companyCode = company(input['companyCode']), from = day(input['from']), to = day(input['to']), offset = integer(input['offset'] ?? 0, 0);
   const span = Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z');
   if (span < 0 || span > 366 * 86400000 || offset > 2147483597) return invalid();
-  const required = {
-    TGFCAB: { CODEMP:'NUMBER',NUNOTA:'NUMBER',CODTIPOPER:'NUMBER',DHTIPOPER:'DATE',CODNAT:'NUMBER',DTFATUR:'DATE',TIPMOV:'text',STATUSNOTA:'text',STATUSNFE:'text',VLRNOTA:'NUMBER' },
-    TGFTOP: { CODTIPOPER:'NUMBER',DHALTER:'DATE',TIPMOV:'text',GOLSINAL:'NUMBER',GOLDEV:'NUMBER',BONIFICACAO:'text' },
-    TGFVAR: { NUNOTA:'NUMBER',NUNOTAORIG:'NUMBER',SEQUENCIA:'NUMBER',SEQUENCIAORIG:'NUMBER' },
-    TGFITE: { NUNOTA:'NUMBER',SEQUENCIA:'NUMBER' },
-  } as const;
+  const required = BILLING_COLUMNS;
   const names = [...new Set(Object.values(required).flatMap(fields => Object.keys(fields)))];
   const columns = await gateway.select(`SELECT TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME IN (${literals(Object.keys(required))}) AND COLUMN_NAME IN (${literals(names)}) ORDER BY TABLE_NAME,COLUMN_NAME FETCH FIRST 50 ROWS ONLY`, 50);
   for (const [table, fields] of Object.entries(required)) for (const [name, type] of Object.entries(fields))
@@ -173,17 +169,7 @@ async function readBillingDiagnostic(gateway: Transport, input: Row) {
   // Sem data não há como atribuir mês. Esse contador não pertence ao período selecionado.
   const undated = await gateway.select(`SELECT COUNT(*) AS UNDATED_DOCUMENT_COUNT FROM ${join} WHERE ${candidate} AND H.DTFATUR IS NULL AND ((${commercial}) OR (${invalidTop}))`, 1);
   const undatedDocumentCount = oneCount(undated, 'UNDATED_DOCUMENT_COUNT');
-  const originJoin = 'TGFVAR R LEFT JOIN TGFCAB P ON P.NUNOTA=R.NUNOTAORIG LEFT JOIN TGFTOP O ON O.CODTIPOPER=P.CODTIPOPER AND O.DHALTER=P.DHTIPOPER';
-  const standard = `P.TIPMOV='${sale.movement}' AND P.CODTIPOPER=${sale.operationCode} AND P.CODNAT=${sale.natureCode} AND P.STATUSNOTA='${sale.statusCode}' AND O.TIPMOV='P' AND O.BONIFICACAO='N' AND O.GOLDEV=1`;
-  const unknown = "P.NUNOTA IS NULL OR P.TIPMOV IS NULL OR P.TIPMOV<>'P' OR P.CODNAT IS NULL OR P.STATUSNOTA IS NULL OR O.CODTIPOPER IS NULL OR O.TIPMOV IS NULL OR O.TIPMOV<>P.TIPMOV OR O.BONIFICACAO IS NULL OR O.BONIFICACAO NOT IN ('N','S') OR O.GOLDEV IS NULL OR O.GOLDEV NOT IN (-1,1) OR NOT EXISTS(SELECT 1 FROM TGFITE PI WHERE PI.NUNOTA=P.NUNOTA AND PI.SEQUENCIA=R.SEQUENCIAORIG) OR NOT EXISTS(SELECT 1 FROM TGFITE DI WHERE DI.NUNOTA=R.NUNOTA AND DI.SEQUENCIA=R.SEQUENCIA)";
-  const flags = {
-    HAS_STANDARD_ORIGIN: `EXISTS(SELECT 1 FROM ${originJoin} WHERE R.NUNOTA=H.NUNOTA AND ${standard})`,
-    HAS_OTHER_ORIGIN: `EXISTS(SELECT 1 FROM ${originJoin} WHERE R.NUNOTA=H.NUNOTA AND CASE WHEN ${standard} THEN 1 ELSE 0 END=0)`,
-    HAS_UNRESOLVED_ORIGIN: `EXISTS(SELECT 1 FROM ${originJoin} WHERE R.NUNOTA=H.NUNOTA AND (${unknown}))`,
-    HAS_UNLINKED_ITEM: 'EXISTS(SELECT 1 FROM TGFITE I WHERE I.NUNOTA=H.NUNOTA AND NOT EXISTS(SELECT 1 FROM TGFVAR R WHERE R.NUNOTA=I.NUNOTA AND R.SEQUENCIA=I.SEQUENCIA))',
-    HAS_ITEMS: 'EXISTS(SELECT 1 FROM TGFITE I WHERE I.NUNOTA=H.NUNOTA)',
-    HAS_CROSS_COMPANY_ORIGIN: `EXISTS(SELECT 1 FROM ${originJoin} WHERE R.NUNOTA=H.NUNOTA AND (P.CODEMP IS NULL OR P.CODEMP<>H.CODEMP))`,
-  };
+  const flags = billingOriginFlags('H');
   const dimensions = ['CODTIPOPER','OPERATION_VERSION','CODNAT',...Object.keys(flags)];
   const detail = `SELECT H.NUNOTA,H.CODTIPOPER,TO_CHAR(H.DHTIPOPER,'YYYY-MM-DD"T"HH24:MI:SS') AS OPERATION_VERSION,H.CODNAT,H.VLRNOTA,H.DTFATUR,${Object.entries(flags).map(([name, sql]) => `CASE WHEN ${sql} THEN 1 ELSE 0 END AS ${name}`).join(',')} FROM ${join} WHERE ${period} AND ${commercial}`;
   // A consulta externa contém uma linha por cabeçalho, sem multiplicar valores por TGFVAR/itens.

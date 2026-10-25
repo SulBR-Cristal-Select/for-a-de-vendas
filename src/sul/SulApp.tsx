@@ -365,7 +365,7 @@ function w5(e: any): any {
             ((!o.from || l.date >= o.from) && (!o.to || l.date <= o.to))));
     return { open: t, setOpen: a, f: o, setF: n, rows: r };
 }
-function E5({ filter: e, rows: t, customerReport = false, salesReport = false, localOwners }: any): any {
+function E5({ filter: e, rows: t, customerReport = false, salesReport = false, billingReport = false, localOwners }: any): any {
     let { db: a, online } = qa(), [o, n] = (0, He.useState)(e.f);
     const remoteFilters = customerReport || salesReport;
     const lookups = useERPCustomerReportLookups(remoteFilters && e.open ? online : undefined, o.customer || '', o.seller || '');
@@ -379,7 +379,7 @@ function E5({ filter: e, rows: t, customerReport = false, salesReport = false, l
         open: e.open,
         onClose: () => e.setOpen(!1),
         title: "Filtros",
-        kicker: "Consulta local",
+        kicker: billingReport ? "Consulta ERP" : "Consulta local",
         footer: (0, b.jsxs)(b.Fragment, {
             children: [
                 (0, b.jsx)(xt, {
@@ -430,15 +430,15 @@ function E5({ filter: e, rows: t, customerReport = false, salesReport = false, l
                     options: La(["", ...new Set(t.map((l: any) => l.status).filter(Boolean))]),
                 }),
                 (0, b.jsx)(Xt, {
-                    children: "Os filtros consultam os registros salvos na SulBR.",
+                    children: billingReport ? "Os filtros consultam as notas fiscais do ERP." : "Os filtros consultam os registros salvos na SulBR.",
                 }),
             ],
         }),
     });
 }
-function jp(e: any): any {
+function jp(e: any, billing = false): any {
     return [
-        z("number", "Pedido", (t: any) => (0, b.jsxs)("div", {
+        z("number", billing ? "Documento ERP" : "Pedido", (t: any) => (0, b.jsxs)("div", {
             className: "space-y-1",
             children: [
                 (0, b.jsxs)("a", {
@@ -449,7 +449,7 @@ function jp(e: any): any {
                 (0, b.jsx)("div", { children: (0, b.jsx)(qr, { row: t }) }),
             ],
         }), { primary: !0 }),
-        z("date", "Emiss\xE3o", (t: any) => xo(t.date)),
+        z("date", billing ? "Faturamento" : "Emiss\xE3o", (t: any) => xo(t.date)),
         z("customer", "Cliente", (t: any) => t.customerName || Un(e, t.customerId), {
             wide: !0,
             get: (t: any) => t.customerName || Un(e, t.customerId),
@@ -460,7 +460,7 @@ function jp(e: any): any {
             className: "tabular-nums",
             children: rt(t.total),
         }), { align: "right" }),
-        z("cargoStatus", "Status", (t: any) => t.cargoStatus ? (0, b.jsx)(qn, { value: t.cargoStatus }) : pa),
+        z("cargoStatus", billing ? "Status da carga" : "Status", (t: any) => t.cargoStatus ? (0, b.jsx)(qn, { value: t.cargoStatus }) : pa),
     ];
 }
 function Ui({ area: e, items: t }: any): any {
@@ -1376,7 +1376,7 @@ function iz({ id: e }: any): any {
         width: "wide",
         children: [
             (0, b.jsx)(Ua, {
-                title: "Pedido #" + r.number,
+                title: (r.erp?.movement === 'V' ? "Nota fiscal #" : "Pedido #") + r.number,
                 description: r.integration,
                 back: { label: "Pedidos", to: "/pedidos" },
                 actions: (0, b.jsxs)(b.Fragment, {
@@ -3018,6 +3018,8 @@ function bz({ id: e }: any): any {
     let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
     const customerReport = e === 'clientes' && !!online;
     const salesReport = e === 'vendas' && !!online;
+    const billingReport = e === 'faturamento' && !!online;
+    const commercialReport = salesReport || billingReport;
     const completionReport = e === 'tarefas';
     const completionExport = He.useRef(undefined);
     const completions = He.useMemo(() => completionReport ? completionRecords(t) : [], [completionReport, t.activities, t.tasks, t.customers]);
@@ -3025,7 +3027,9 @@ function bz({ id: e }: any): any {
     const [salesResult, setSalesResult] = He.useState(undefined);
     const onSalesSummary = He.useCallback((summary: ERPSalesSummary | undefined) => setSalesResult({ key: salesKey, summary }), [salesKey]);
     const salesSummary: ERPSalesSummary | undefined = salesResult?.key === salesKey ? salesResult.summary : undefined;
-    const remote = He.useMemo(() => salesReport
+    const remote = He.useMemo(() => billingReport
+        ? { client: online, resource:'invoices',billingReport:salesReportQuery(r.f,l),onSummary:onSalesSummary }
+        : salesReport
         ? { client: online, resource: 'orders', salesReport: salesReportQuery(r.f, l), onSummary: onSalesSummary }
         : customerReport && remoteCustomerReport(r.f)
         ? { client: online, resource: 'customers', filters: customerReportFilters(r.f) } : undefined,
@@ -3042,18 +3046,18 @@ function bz({ id: e }: any): any {
         "faturamento",
     ].includes(e)) {
         if (((m = d),
-            (p = jp(t)),
+            (p = jp(t,billingReport)),
             (e === "faturados" || e === "faturamento") &&
                 ((p = [
                     ...p,
                     z("invoiced", "Valor faturado", (h: any) => (h.invoiced != null ? rt(h.invoiced) : pa), { align: "right" }),
-                    z("nf", "Nota fiscal", (h: any) => t.invoices
+                    z("nf", "Nota fiscal", (h: any) => billingReport ? h.nf ?? pa : t.invoices
                         .filter((S: any) => S.orderId === h.id)
                         .map((S: any) => S.number)
                         .join(", ") || pa),
                 ]),
                     (y =
-                        "Somente pedidos com documentos fiscais disponíveis. A integração fiscal não está configurada; vendas não são apresentadas como faturamento.")),
+                        billingReport ? "Notas fiscais aprovadas vinculadas à venda padrão, por data de faturamento. Pedidos e notas não são somados." : "Somente pedidos com documentos fiscais disponíveis. A integração fiscal não está configurada; vendas não são apresentadas como faturamento.")),
             l !== "nenhum")) {
             let h: any = {};
             (d.forEach((S: any) => {
@@ -3066,7 +3070,7 @@ function bz({ id: e }: any): any {
                         primary: !0,
                         wide: !0,
                     }),
-                    z("count", "Pedidos"),
+                    z("count", billingReport ? "Notas" : "Pedidos"),
                     z("total", "Valor", (S: any) => rt(S.total), { align: "right" }),
                 ]));
         }
@@ -3556,7 +3560,7 @@ function bz({ id: e }: any): any {
             ],
         });
     if (customerReport) m = localCustomerReportRows(t.customers, r.f);
-    if (salesReport) m = [];
+    if (commercialReport) m = [];
     let g: any = p.filter((h: any) => !c.includes(h.key));
     return (0, b.jsxs)(fa, {
         width: "wide",
@@ -3580,16 +3584,16 @@ function bz({ id: e }: any): any {
                     cols: 3,
                     children: [
                         (0, b.jsx)(Ha, {
-                            label: "Pedidos no recorte filtrado",
-                            value: salesReport ? salesSummary?.documentCount ?? pa : d.length,
+                            label: billingReport ? "Notas no recorte filtrado" : "Pedidos no recorte filtrado",
+                            value: commercialReport ? salesSummary?.documentCount ?? pa : d.length,
                         }),
                         (0, b.jsx)(Ha, {
-                            label: "Valor em pedidos",
-                            value: salesReport ? rt(salesSummary?.documentAmount) : rt(Zo(d, "total")),
+                            label: billingReport ? "Valor faturado" : "Valor em pedidos",
+                            value: commercialReport ? rt(salesSummary?.documentAmount) : rt(Zo(d, "total")),
                         }),
                         (0, b.jsx)(Ha, {
-                            label: "Ticket m\xE9dio em pedidos",
-                            value: salesReport ? salesSummary ? formatERPAmount(salesSummary.documentAmount, salesSummary.documentCount) ?? (salesSummary.documentCount === 0 ? "\u2014" : pa) : pa : d.length ? rt(Zo(d, "total") / d.length) : "\u2014",
+                            label: billingReport ? "Ticket médio em notas" : "Ticket m\xE9dio em pedidos",
+                            value: commercialReport ? salesSummary ? formatERPAmount(salesSummary.documentAmount, salesSummary.documentCount) ?? (salesSummary.documentCount === 0 ? "\u2014" : pa) : pa : d.length ? rt(Zo(d, "total") / d.length) : "\u2014",
                         }),
                     ],
                 }),
@@ -3614,7 +3618,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : salesReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport, localOwners: completionReport ? completionOwners(completions, t.users) : undefined }),
+            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : commercialReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : undefined }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),
