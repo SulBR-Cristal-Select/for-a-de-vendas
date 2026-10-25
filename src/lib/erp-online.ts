@@ -1,4 +1,5 @@
 import type { ERPSortKey } from './erp-order';
+import { erpDecimal } from './erp-decimal';
 // Leitura online apenas. A identidade abaixo invalida trabalho; a sessão Supabase autentica.
 export type ERPResource = 'customers' | 'products' | 'sellers';
 export type ERPRow = Record<string, unknown>;
@@ -11,13 +12,16 @@ export type ERPWindow<T = ERPRow> = ERPObservation & { items: T[]; total: number
 export type ERPPage<T = ERPRow> = ERPObservation & { items: T[]; total: number; totalWithoutSearch: number; page: number; pageSize: 10 | 20 | 50; hasMore: boolean };
 export type ERPRecord<T = ERPRow> = ERPObservation & { record: T | null };
 export type ERPHistoryQuery = { resource: 'orders' | 'invoices'; offset: number; limit: number; customerId?: string; search?: string; sort?: string; direction?: 'asc' | 'desc'; from?: string; to?: string; companyCode?: 1 | 4 };
+export type ERPSalesQuery = ERPHistoryQuery & { resource: 'orders'; sellerCode?: number; groupBy?: 'seller' | 'customer'; status?: 'confirmado' };
+export type ERPSalesSummary = { documentCount: number; documentAmount: string | null; missingAmountCount: number; amountField: 'TGFCAB.VLRNOTA'; headerCountedOnce: true; atomicSnapshot: false };
+export type ERPSalesWindow = ERPWindow & { summary: ERPSalesSummary; groupBy: 'seller' | 'customer' | null; companyCodes: (1 | 4)[] };
 export type ERPDocumentQuery = { resource?: never; id: string; offset?: number; limit?: number };
 export type ERPDocument = ERPObservation & { record: ERPRow | null; items: ERPRow[]; total: number; totalWithoutSearch: number; offset: number; limit: number; hasMore: boolean };
 export type ERPPriceQuery = { resource?: never; customerId: string; productId: string; paymentCode: number; type: 'Venda'; sellerCode?: number; quantity?: number; unit?: string; date?: string };
 export type ERPPaymentQuery = { resource?: never; customerId: string; offset: number; limit: number; search?: string; date?: string };
 export type ERPPrice = ERPObservation & { customer: ERPRow; product: ERPRow; seller: ERPRow; companyCode: 1 | 4; operationCode: 1001; operationVersion: string; quantity: number; payment: { code: number; label: string; version: string }; price: { amount: number; unit: string; localCode: number | null; control: string | null; tableVersion: number | null; provider: 'native-context-api' } };
-export type ERPOperation = 'page' | 'window' | 'record' | 'facets' | 'history' | 'document' | 'price-query' | 'payment-options';
-type ERPQuery = ERPPageQuery | ERPWindowQuery | ERPRecordQuery | ERPFacetQuery | ERPHistoryQuery | ERPDocumentQuery | ERPPriceQuery | ERPPaymentQuery;
+export type ERPOperation = 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'document' | 'price-query' | 'payment-options';
+type ERPQuery = ERPPageQuery | ERPWindowQuery | ERPRecordQuery | ERPFacetQuery | ERPHistoryQuery | ERPSalesQuery | ERPDocumentQuery | ERPPriceQuery | ERPPaymentQuery;
 export type ERPTransport = (body: { operation: ERPOperation; query: ERPQuery }, signal: AbortSignal) => Promise<{ data: unknown; error: unknown }>;
 const messages = {
   AUTH_REQUIRED: 'Sessão não autorizada. Entre novamente.',
@@ -78,7 +82,7 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
   const items = data['items'], total = data['total'], unfiltered = data['totalWithoutSearch'];
   if (!Array.isArray(items) || !items.every(object) || !natural(total) || !natural(unfiltered) || total > unfiltered) invalid();
   let offset: number, limit: number;
-  if (operation === 'window' || operation === 'history' || operation === 'payment-options') {
+  if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'payment-options') {
     const q = query as ERPWindowQuery | ERPHistoryQuery | ERPPaymentQuery;
     if (data['offset'] !== q.offset) invalid();
     offset = q.offset; limit = q.limit;
@@ -89,6 +93,25 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
     if (data['hasMore'] !== (offset + items.length < total)) invalid();
   }
   if (items.length !== Math.min(limit, Math.max(0, total - offset))) invalid();
+  if (operation === 'sales-report') {
+    const q = query as ERPSalesQuery, summary = data['summary'], policy = data['salesPolicy'], companies = data['companyCodes'];
+    if (!object(summary) || !natural(summary['documentCount']) || !natural(summary['missingAmountCount']) || summary['missingAmountCount'] > summary['documentCount'] || summary['amountField'] !== 'TGFCAB.VLRNOTA' || summary['headerCountedOnce'] !== true || summary['atomicSnapshot'] !== false) invalid();
+    const amount = summary['documentAmount'];
+    if (summary['missingAmountCount'] ? amount !== null : typeof amount !== 'string' || erpDecimal(amount) !== amount) invalid();
+    if (data['groupBy'] !== (q.groupBy ?? null) || (!q.groupBy && total !== summary['documentCount']) || q.groupBy && total > summary['documentCount']) invalid();
+    if (!Array.isArray(companies) || !companies.length || new Set(companies).size !== companies.length || companies.some(c => c !== 1 && c !== 4) || q.companyCode !== undefined && (companies.length !== 1 || companies[0] !== q.companyCode)) invalid();
+    if (!object(policy) || policy['movement'] !== 'P' || policy['operationCode'] !== 1001 || policy['natureCode'] !== 10100000 || policy['statusCode'] !== 'L' || policy['dateField'] !== 'DTNEG' || policy['bonification'] !== 'N' || policy['devolution'] !== 1) invalid();
+    if (new Set(items.map(row => row['id'])).size !== items.length) invalid();
+    for (const row of items) {
+      if (row['total'] !== null && (typeof row['total'] !== 'string' || erpDecimal(row['total']) !== row['total'])) invalid();
+      if (q.groupBy) {
+        if (!natural(row['count']) || row['count'] < 1 || row['groupBy'] !== q.groupBy || !((row['groupCode'] === null) || natural(row['groupCode'])) || row['id'] !== `sankhya:sales:${q.groupBy}:${row['groupCode'] ?? 'unknown'}`) invalid();
+      } else {
+        const erp = row['erp'];
+        if (!object(erp) || erp['movement'] !== 'P' || erp['operationCode'] !== 1001 || erp['statusCode'] !== 'L' || !companies.includes(erp['companyCode']) || row['id'] !== `sankhya:order:${erp['documentCode']}` || q.customerId && row['customerId'] !== q.customerId || q.sellerCode !== undefined && row['sellerCode'] !== q.sellerCode) invalid();
+      }
+    }
+  }
   return data;
 }
 async function errorCode(value: unknown): Promise<string> {
@@ -128,8 +151,8 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
         const p = q as ERPPriceQuery;
         if (!/^sankhya:product:[1-9]\d*$/.test(p.productId) || !natural(p.paymentCode) || p.paymentCode < 1 || p.type !== 'Venda') throw new ERPOnlineError('INVALID_REQUEST');
       }
-    } else if (!(operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(query.resource!)) throw new ERPOnlineError('INVALID_REQUEST');
-    if (operation === 'window' || operation === 'history' || operation === 'payment-options') {
+    } else if (!(operation === 'sales-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(query.resource!)) throw new ERPOnlineError('INVALID_REQUEST');
+    if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'payment-options') {
       const q = query as ERPWindowQuery | ERPHistoryQuery | ERPPaymentQuery;
       if (!natural(q.offset) || !natural(q.limit) || q.limit < 1 || q.limit > 50) throw new ERPOnlineError('INVALID_REQUEST');
     }
@@ -158,6 +181,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     record: <T = ERPRow>(query: ERPRecordQuery) => request<ERPRecord<T>>('record', query),
     facets: <T = ERPRow>(query: ERPFacetQuery) => request<ERPPage<T>>('facets', query),
     history: <T = ERPRow>(query: ERPHistoryQuery) => request<ERPWindow<T>>('history', query),
+    salesReport: (query: ERPSalesQuery) => request<ERPSalesWindow>('sales-report', query),
     document: (query: ERPDocumentQuery) => request<ERPDocument>('document', query),
     price: (query: ERPPriceQuery) => request<ERPPrice>('price-query', query),
     paymentOptions: <T = ERPRow>(query: ERPPaymentQuery) => request<ERPWindow<T>>('payment-options', query),
