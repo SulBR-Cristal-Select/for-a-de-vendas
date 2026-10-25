@@ -1,5 +1,5 @@
 import type { ERPSortKey } from './erp-order';
-import { erpDecimal } from './erp-decimal';
+import { erpDecimal, sumERPDecimals } from './erp-decimal';
 // Leitura online apenas. A identidade abaixo invalida trabalho; a sessão Supabase autentica.
 export type ERPResource = 'customers' | 'products' | 'sellers';
 export type ERPRow = Record<string, unknown>;
@@ -16,13 +16,16 @@ export type ERPSalesQuery = ERPHistoryQuery & { resource: 'orders'; sellerCode?:
 export type ERPBillingQuery = Omit<ERPSalesQuery, 'resource'> & { resource: 'invoices' };
 export type ERPSalesSummary = { documentCount: number; documentAmount: string | null; missingAmountCount: number; amountField: 'TGFCAB.VLRNOTA'; headerCountedOnce: true; atomicSnapshot: false };
 export type ERPSalesWindow = ERPWindow & { summary: ERPSalesSummary; groupBy: 'seller' | 'customer' | null; companyCodes: (1 | 4)[] };
+export type ERPOrderItemsQuery = Omit<ERPSalesQuery,'groupBy'>;
+export type ERPItemSummary = {lineCount:number;subtotal:string|null;missingSubtotalCount:number;quantityField:'TGFITE.QTDNEG';unitPriceField:'TGFITE.VLRUNIT';subtotalField:'TGFITE.VLRTOT';calculatedSubtotal:false;headerAmountsAdded:false;atomicSnapshot:false};
+export type ERPOrderItemsWindow = ERPWindow & {summary:ERPItemSummary;companyCodes:(1|4)[]};
 export type ERPDocumentQuery = { resource?: never; id: string; offset?: number; limit?: number };
 export type ERPDocument = ERPObservation & { record: ERPRow | null; items: ERPRow[]; total: number; totalWithoutSearch: number; offset: number; limit: number; hasMore: boolean };
 export type ERPPriceQuery = { resource?: never; customerId: string; productId: string; paymentCode: number; type: 'Venda'; sellerCode?: number; quantity?: number; unit?: string; date?: string };
 export type ERPPaymentQuery = { resource?: never; customerId: string; offset: number; limit: number; search?: string; date?: string };
 export type ERPPrice = ERPObservation & { customer: ERPRow; product: ERPRow; seller: ERPRow; companyCode: 1 | 4; operationCode: 1001; operationVersion: string; quantity: number; payment: { code: number; label: string; version: string }; price: { amount: number; unit: string; localCode: number | null; control: string | null; tableVersion: number | null; provider: 'native-context-api' } };
-export type ERPOperation = 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'billing-report' | 'document' | 'price-query' | 'payment-options';
-type ERPQuery = ERPPageQuery | ERPWindowQuery | ERPRecordQuery | ERPFacetQuery | ERPHistoryQuery | ERPSalesQuery | ERPBillingQuery | ERPDocumentQuery | ERPPriceQuery | ERPPaymentQuery;
+export type ERPOperation = 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'billing-report' | 'order-items-report' | 'document' | 'price-query' | 'payment-options';
+type ERPQuery = ERPPageQuery | ERPWindowQuery | ERPRecordQuery | ERPFacetQuery | ERPHistoryQuery | ERPSalesQuery | ERPBillingQuery | ERPOrderItemsQuery | ERPDocumentQuery | ERPPriceQuery | ERPPaymentQuery;
 export type ERPTransport = (body: { operation: ERPOperation; query: ERPQuery }, signal: AbortSignal) => Promise<{ data: unknown; error: unknown }>;
 const messages = {
   AUTH_REQUIRED: 'Sessão não autorizada. Entre novamente.',
@@ -83,7 +86,7 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
   const items = data['items'], total = data['total'], unfiltered = data['totalWithoutSearch'];
   if (!Array.isArray(items) || !items.every(object) || !natural(total) || !natural(unfiltered) || total > unfiltered) invalid();
   let offset: number, limit: number;
-  if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'payment-options') {
+  if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'order-items-report' || operation === 'payment-options') {
     const q = query as ERPWindowQuery | ERPHistoryQuery | ERPPaymentQuery;
     if (data['offset'] !== q.offset) invalid();
     offset = q.offset; limit = q.limit;
@@ -94,6 +97,26 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
     if (data['hasMore'] !== (offset + items.length < total)) invalid();
   }
   if (items.length !== Math.min(limit, Math.max(0, total - offset))) invalid();
+  if(operation==='order-items-report') {
+    const q=query as ERPOrderItemsQuery,summary=data['summary'],policy=data['salesPolicy'],companies=data['companyCodes'];
+    if(!object(summary)||summary['lineCount']!==total||!natural(summary['missingSubtotalCount'])||summary['missingSubtotalCount']>total||summary['quantityField']!=='TGFITE.QTDNEG'||summary['unitPriceField']!=='TGFITE.VLRUNIT'||summary['subtotalField']!=='TGFITE.VLRTOT'||summary['calculatedSubtotal']!==false||summary['headerAmountsAdded']!==false||summary['atomicSnapshot']!==false)invalid();
+    if(summary['missingSubtotalCount']?summary['subtotal']!==null:typeof summary['subtotal']!=='string'||erpDecimal(summary['subtotal'])!==summary['subtotal'])invalid();
+    if(total===0&&summary['subtotal']!=='0')invalid();
+    if(!object(policy)||policy['movement']!=='P'||policy['operationCode']!==1001||policy['natureCode']!==10100000||policy['statusCode']!=='L'||policy['dateField']!=='DTNEG'||policy['bonification']!=='N'||policy['devolution']!==1)invalid();
+    if(!Array.isArray(companies)||!companies.length||new Set(companies).size!==companies.length||companies.some(c=>c!==1&&c!==4)||q.companyCode!==undefined&&(companies.length!==1||companies[0]!==q.companyCode))invalid();
+    if(new Set(items.map(r=>r['id'])).size!==items.length)invalid();
+    for(const row of items){
+      const e=row['erp'];
+      if(!object(e)||!natural(e['documentCode'])||e['documentCode']<1||e['documentCode']>2147483647||typeof e['sequence']!=='number'||!Number.isInteger(e['sequence'])||e['sequence']< -2147483648||e['sequence']>2147483647||!companies.includes(e['companyCode'])||e['itemCompanyCode']!==e['companyCode']||e['movement']!=='P'||e['operationCode']!==1001||e['natureCode']!==10100000||e['statusCode']!=='L'||e['dateField']!=='DTNEG'||row['id']!==`sankhya:order:${e['documentCode']}:item:${e['sequence']}`||row['source']!=='observado'||row['readOnly']!==true)invalid();
+      for(const key of ['price','qty','total'])if(row[key]!==null&&(typeof row[key]!=='string'||erpDecimal(row[key])!==row[key]))invalid();
+      for(const key of ['name','number','customer','unit'])if(row[key]!==null&&typeof row[key]!=='string')invalid();
+      if(typeof row['productId']!=='string'||!/^sankhya:product:[1-9]\d{0,9}$/.test(row['productId'])||typeof row['customerId']!=='string'||!/^sankhya:customer:[1-9]\d{0,9}$/.test(row['customerId']))invalid();
+      if(row['sellerCode']!==null&&(!natural(row['sellerCode'])||row['sellerCode']>2147483647)||Number(row['productId'].slice(16))>2147483647||Number(row['customerId'].slice(17))>2147483647)invalid();
+      const day=row['date'];if(day!==null&&(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day+'T00:00:00Z'))||new Date(day+'T00:00:00Z').toISOString().slice(0,10)!==day))invalid();
+      if(q.customerId!==undefined&&row['customerId']!==q.customerId||q.sellerCode!==undefined&&row['sellerCode']!==q.sellerCode||q.from&&(!day||String(day)<q.from)||q.to&&(!day||String(day)>q.to))invalid();
+    }
+    if(offset===0&&items.length===total&&(items.filter(r=>r['total']===null).length!==summary['missingSubtotalCount']||summary['subtotal']!==null&&sumERPDecimals(items.map(r=>String(r['total'])))!==summary['subtotal']))invalid();
+  }
   if (operation === 'sales-report' || operation === 'billing-report') {
     const billing = operation === 'billing-report';
     const q = query as ERPSalesQuery | ERPBillingQuery, summary = data['summary'], policy = data[billing ? 'billingPolicy' : 'salesPolicy'], companies = data['companyCodes'];
@@ -155,8 +178,8 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
         const p = q as ERPPriceQuery;
         if (!/^sankhya:product:[1-9]\d*$/.test(p.productId) || !natural(p.paymentCode) || p.paymentCode < 1 || p.type !== 'Venda') throw new ERPOnlineError('INVALID_REQUEST');
       }
-    } else if (!(operation === 'billing-report' ? ['invoices'] : operation === 'sales-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(query.resource!)) throw new ERPOnlineError('INVALID_REQUEST');
-    if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'payment-options') {
+    } else if (!(operation === 'billing-report' ? ['invoices'] : operation === 'sales-report' || operation === 'order-items-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(query.resource!)) throw new ERPOnlineError('INVALID_REQUEST');
+    if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'order-items-report' || operation === 'payment-options') {
       const q = query as ERPWindowQuery | ERPHistoryQuery | ERPPaymentQuery;
       if (!natural(q.offset) || !natural(q.limit) || q.limit < 1 || q.limit > 50) throw new ERPOnlineError('INVALID_REQUEST');
     }
@@ -186,6 +209,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     facets: <T = ERPRow>(query: ERPFacetQuery) => request<ERPPage<T>>('facets', query),
     history: <T = ERPRow>(query: ERPHistoryQuery) => request<ERPWindow<T>>('history', query),
     salesReport: (query: ERPSalesQuery) => request<ERPSalesWindow>('sales-report', query),
+    orderItemsReport: (query: ERPOrderItemsQuery) => request<ERPOrderItemsWindow>('order-items-report', query),
     billingReport: (query: ERPBillingQuery) => request<ERPSalesWindow>('billing-report', query),
     document: (query: ERPDocumentQuery) => request<ERPDocument>('document', query),
     price: (query: ERPPriceQuery) => request<ERPPrice>('price-query', query),
