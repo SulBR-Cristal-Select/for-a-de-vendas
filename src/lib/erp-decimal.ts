@@ -16,6 +16,16 @@ export function sumERPDecimals(values: readonly string[]): string {
   const fraction = String(absolute % 1000000000n).padStart(9, '0').replace(/0+$/, '');
   return `${units < 0n ? '-' : ''}${absolute / 1000000000n}${fraction ? '.' + fraction : ''}`;
 }
+/** Participação racional, arredondada apenas para a apresentação existente sem casas. */
+export function formatERPShare(value: unknown, total: unknown): string | null {
+  if (erpDecimal(value) === null || erpDecimal(total) === null) return null;
+  const numerator = decimalUnits(value as string) * 100n, denominator = decimalUnits(total as string);
+  if (denominator === 0n) return null;
+  const negative = (numerator < 0n) !== (denominator < 0n);
+  const a = numerator < 0n ? -numerator : numerator, d = denominator < 0n ? -denominator : denominator;
+  const rounded = (2n * a + d) / (2n * d);
+  return `${negative ? '-' : ''}${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(rounded)}%`;
+}
 /** Arredondamento exclusivamente de apresentação (duas casas), inclusive ticket racional. */
 export function formatERPAmount(value: unknown, divisor = 1): string | null {
   if (erpDecimal(value) === null || !Number.isSafeInteger(divisor) || divisor < 1) return null;
