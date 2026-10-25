@@ -210,9 +210,10 @@ async function readBillingDiagnostic(gateway: Transport, input: Row) {
   if (!Number.isSafeInteger(pageDocumentCount) || pageDocumentCount > commercialDocumentCount || offset === 0 && !hasMore && pageDocumentCount !== commercialDocumentCount) return incompatible();
   // Origem mista/indireta/incompleta não é excluída silenciosamente nem vira zero financeiro.
   const unresolved = rows.some(r => r.unresolvedOrigin || r.standardOrigin && (!r.eligible));
-  const complete = offset === 0 && !hasMore && !unresolved && undatedDocumentCount === 0;
+  // DTFATUR nula não pertence ao período escolhido. O diagnóstico histórico é informativo, sem fallback de data.
+  const complete = offset === 0 && !hasMore && !unresolved;
   return { ...observation(), supported:true, companyCode,from,to,offset,hasMore,dateField:p.dateField,billingPolicy:p,
-    linkMode:'direct-item-reference' as const,approvedDocumentCount,commercialDocumentCount,atomicSnapshot:false,headerCountedOnce:true,quantitiesAllocated:false,undatedDocumentCount,undatedScope:'all-dates' as const,
+    linkMode:'direct-item-reference' as const,approvedDocumentCount,commercialDocumentCount,atomicSnapshot:false,headerCountedOnce:true,quantitiesAllocated:false,undatedDocumentCount,undatedScope:'all-dates' as const,undatedTreatment:'excluded-without-date-fallback' as const,
     qualificationComplete:complete,rows,totals:complete ? { documentCount:rows.filter(r=>r.eligible).reduce((n,r)=>n+r.documentCount,0),documentAmount:sumBillingDecimals(rows.filter(r=>r.eligible).map(r=>r.documentAmount!)),amountField:'TGFCAB.VLRNOTA' } : null,
     rulesInferred:false,ordersAdded:false };
 }

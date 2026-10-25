@@ -76,8 +76,8 @@ describe('faturamento aprovado e vinculado à venda padrão, sem somar P/V',()=>
   const g=transport([{...row,DOCUMENT_COUNT:1,DOCUMENT_AMOUNT:'0.1'},{...row,CODTIPOPER:1102,DOCUMENT_COUNT:1,DOCUMENT_AMOUNT:'0.2'}]);
   expect(await readCommercialDictionary(g,query,admin)).toMatchObject({totals:{documentCount:2,documentAmount:'0.3'}});
  });
- it('documento aprovado sem data fica explicitamente fora do período e impede resultado completo',async()=>{
-  const g=transport([row],2,1);expect(await readCommercialDictionary(g,query,admin)).toMatchObject({qualificationComplete:false,totals:null,undatedDocumentCount:1,undatedScope:'all-dates'});
+ it('documento histórico sem data fica fora do período, sem bloquear notas datadas ou substituir DTFATUR',async()=>{
+  const g=transport([row],2,1);expect(await readCommercialDictionary(g,query,admin)).toMatchObject({qualificationComplete:true,totals:{documentCount:2,documentAmount:'9007199254740993.01'},undatedDocumentCount:1,undatedScope:'all-dates',undatedTreatment:'excluded-without-date-fallback'});
   const sql=g.select.mock.calls[2]![0];expect(sql).toContain('H.DTFATUR IS NULL');expect(sql).not.toContain('TO_DATE');
  });
  it('preserva fração Oracle sem zero à esquerda por normalização exata, mantendo o valor nativo',async()=>{
