@@ -179,3 +179,13 @@ A operação fixa `order-items-report` lê os itens de pedidos P/TOP1001/naturez
 Quantidade, preço unitário histórico e subtotal vêm de QTDNEG/VLRUNIT/VLRTOT nativos em texto Oracle e são validados como decimais exatos. FLOAT Oracle desses campos é conferido; BINARY_FLOAT/BINARY_DOUBLE não entram no contrato. VLRTOT não é reconstruído por preço×quantidade, não se somam cabeçalhos e preço histórico não é cotação atual. Ausência fica nula; zero observado continua zero. Unidade é preservada no DTO, sem nova coluna ou agregação de unidades. Nenhum item/histórico é copiado para arrays do workspace.
 
 A tela mantém sete colunas, controles, textos, classes e CSS. Filtros usam códigos técnicos; busca/ordenação/páginas10/20/50 e CSV integral usam o leitor limitado a50 por janela. O CSV recusa mudança de contagem/resumo financeiro entre leituras; não é snapshot atômico. Não altera preço contextual, persistência, perfis, metas, faturamento ou permissões.850 testes/36 arquivos,39 novos (30 SQL estrutural em SQLite adaptado e9 de UI/contrato), TypeScript app/handler e builds aprovados. Auditoria preserva680 propriedades visuais/638 chamadas JSX e dois CSS à base793dce2. Casos simulados não substituem validação runtime Oracle/Auth.
+
+### Resumo de vendas e versão anterior online
+
+As duas vistas reutilizam `sales-report` (P1001/10100000/L, TOP histórica exata, DTNEG), sem período padrão nem comparação temporal presumida. Tabela, filtros por códigos, agrupamentos, CSV e KPIs existentes usam os cabeçalhos e o agregado integral do servidor; pedidos manuais e notas V não são adicionados.
+
+O gráfico lê apenas agregados por código de vendedor em janelas até50, preserva homônimos e confere filial, resumo, contagem e soma BigInt de todos os grupos. Busca e filtros são os da tabela; agrupar a tabela por cliente não transforma a dimensão do gráfico. Falha, fonte trocada ou ausência monetária descartam pontos anteriores/parciais, sem inventar valor zero. Leituras separadas não são snapshot atômico.
+
+O DS0.9.0 aceita somente números para coordenadas. A conversão é exclusiva da apresentação e exige percurso decimal reversível; totais nativos textuais são preservados e nunca somados como ponto flutuante. O zero da escala nativa do gráfico não é um indicador financeiro extraído. Sem controles/textos/classes/CSS novos, mudança no DS, backend, migração, perfil ou registro comercial.
+
+Validação local:878 testes/36 arquivos (28 novos); TypeScript/build/diff aprovados;680 propriedades e638 chamadas JSX/CSS iguais à baseeee23da. Casos positivos reais/publicação têm recibo separado; testes de componente não são login comercial ou operação integral homologada.
