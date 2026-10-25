@@ -38,6 +38,14 @@ describe('faturamento aprovado e vinculado à venda padrão, sem somar P/V',()=>
   const g={select:vi.fn().mockResolvedValue(columns.filter(c=>c.TABLE_NAME!=='TGFVAR'||c.COLUMN_NAME!=='SEQUENCIAORIG'))};
   await expect(readCommercialDictionary(g,query,admin)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});expect(g.select).toHaveBeenCalledTimes(1);
  });
+ it('aceita FLOAT Oracle somente no valor nativo da nota, mantendo transporte textual',async()=>{
+  const g=transport();g.select.mockReset().mockResolvedValueOnce(columns.map(c=>c.TABLE_NAME==='TGFCAB'&&c.COLUMN_NAME==='VLRNOTA'?{...c,DATA_TYPE:'FLOAT'}:c)).mockResolvedValueOnce([{APPROVED_DOCUMENT_COUNT:2,COMMERCIAL_DOCUMENT_COUNT:2,MISSING_CONTEXT_COUNT:0}]).mockResolvedValueOnce([{UNDATED_DOCUMENT_COUNT:0}]).mockResolvedValueOnce([row]);
+  expect(await readCommercialDictionary(g,query,admin)).toMatchObject({qualificationComplete:true,totals:{documentAmount:'9007199254740993.01'}});
+ });
+ it.each(['BINARY_FLOAT','BINARY_DOUBLE','VARCHAR2'])('não generaliza o campo monetário para %s',async DATA_TYPE=>{
+  const g={select:vi.fn().mockResolvedValue(columns.map(c=>c.TABLE_NAME==='TGFCAB'&&c.COLUMN_NAME==='VLRNOTA'?{...c,DATA_TYPE}:c))};
+  await expect(readCommercialDictionary(g,query,admin)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});expect(g.select).toHaveBeenCalledTimes(1);
+ });
  it('rejeita TOP histórica ausente ou inválida antes de classificar notas',async()=>{
   const g={select:vi.fn().mockResolvedValueOnce(columns).mockResolvedValueOnce([{APPROVED_DOCUMENT_COUNT:5,COMMERCIAL_DOCUMENT_COUNT:2,MISSING_CONTEXT_COUNT:1}])};
   await expect(readCommercialDictionary(g,query,admin)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});expect(g.select).toHaveBeenCalledTimes(2);
