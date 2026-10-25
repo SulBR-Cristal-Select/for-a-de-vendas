@@ -156,9 +156,9 @@ export async function readDocument(gateway: Transport, input: DocumentInput, sco
   }), total, totalWithoutSearch: total, offset: page.offset, limit: page.limit, hasMore: page.offset + items.length < total };
 }
 
-type CommercialReportInput = HistoryInput & { sellerCode?: number; groupBy?: 'seller' | 'customer'; status?: 'confirmado' };
+type CommercialReportInput = HistoryInput & { sellerCode?: number; groupBy?: 'seller' | 'customer'; status?: 'confirmado'; productMix?: true };
 export type SalesReportInput = CommercialReportInput & { resource: 'orders' };
-export type BillingReportInput = CommercialReportInput & { resource: 'invoices' };
+export type BillingReportInput = Omit<CommercialReportInput,'productMix'> & { resource: 'invoices' };
 const unsupportedSales = (): never => { throw new SankhyaError('ERP_CONTEXT_REQUIRED', 'Estrutura comercial do ERP não confirmada.'); };
 const salesAmount = (value: unknown): string => erpDecimal(value) ?? incompatible();
 function salesCount(row: Row | undefined, field: string): number {
@@ -178,8 +178,9 @@ function salesSummary(row: Row | undefined) {
 export async function readSalesReport(gateway: Transport, input: SalesReportInput, scope: ReadScope) { return readCommercialReport(gateway,input,scope,false); }
 export async function readBillingReport(gateway: Transport, input: BillingReportInput, scope: ReadScope) { return readCommercialReport(gateway,input,scope,true); }
 async function readCommercialReport(gateway: Transport, input: CommercialReportInput, scope: ReadScope, billing: boolean) {
-  keys(input, ['resource','offset','limit','customerId','sellerCode','status','search','sort','direction','from','to','companyCode','groupBy']);
-  if (input.resource !== (billing ? 'invoices' : 'orders') || input.groupBy !== undefined && !['seller','customer'].includes(input.groupBy) || input.status !== undefined && input.status !== 'confirmado') return invalid();
+  keys(input, ['resource','offset','limit','customerId','sellerCode','status','search','sort','direction','from','to','companyCode','groupBy','productMix']);
+  if (input.resource !== (billing ? 'invoices' : 'orders') || input.groupBy !== undefined && !['seller','customer'].includes(input.groupBy) || input.status !== undefined && input.status !== 'confirmado' || input.productMix !== undefined && (input.productMix !== true || billing || input.groupBy !== 'customer')) return invalid();
+  const mix = input.productMix === true;
   const allowed = scopeOf(scope), page = windowOf(input.offset, input.limit), policy = STANDARD_SALES_REPORT_POLICY, bp = STANDARD_BILLING_REPORT_POLICY, movement = billing ? 'V' : 'P', dateField = billing ? 'DTFATUR' : 'DTNEG';
   let companies = allowed.companies;
   if (input.companyCode !== undefined) {
@@ -189,7 +190,7 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
   }
   const group = input.groupBy, sort = input.sort ?? (group ? 'name' : 'date'), direction = input.direction ?? (group ? 'asc' : 'desc');
   const groupCode = group === 'seller' ? 'C.CODVEND' : 'C.CODPARC', groupName = group === 'seller' ? 'V.APELIDO' : 'P.RAZAOSOCIAL';
-  const groupSorts: Record<string,string> = { name: foldSQL(groupName), count: 'COUNT(*)', total: 'SUM(C.VLRNOTA)' };
+  const groupSorts: Record<string,string> = mix ? { name:foldSQL('C.RAZAOSOCIAL'),qty:'PRODUCT_COUNT',total:'SUM(C.VLRNOTA)' } : { name: foldSQL(groupName), count: 'COUNT(*)', total: 'SUM(C.VLRNOTA)' };
   const reportSorts = billing ? { ...sorts,date:'C.DTFATUR',number:'C.NUNOTA',nf:'C.NUMNOTA',invoiced:'C.VLRNOTA' } : sorts;
   if (typeof sort !== 'string' || !Object.hasOwn(group ? groupSorts : reportSorts, sort) || !['asc','desc'].includes(direction)) return invalid();
   const start = dateInput(input.from), end = dateInput(input.to), search = searchText(input.search);
@@ -208,6 +209,10 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
     TGFTOP: { CODTIPOPER:'NUMBER',DHALTER:'DATE',TIPMOV:'text',BONIFICACAO:'text',GOLDEV:'NUMBER' },
     TGFPAR: { CODPARC:'NUMBER',CODVEND:'NUMBER',CODEMP:'NUMBER',CLIENTE:'text' },
   };
+  if (mix) {
+    required['TGFITE'] = {NUNOTA:'NUMBER',CODEMP:'NUMBER',CODPROD:'NUMBER'};
+    required['TGFPAR']!['RAZAOSOCIAL'] = 'text';
+  }
   if (billing) {
     for (const [table,columns] of Object.entries(BILLING_COLUMNS)) required[table] = { ...required[table],...columns };
     required['TGFCAB']!['VLRNOTA'] = 'amount';
@@ -247,11 +252,16 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
   if (total > totalWithoutSearch || group && total > summary.documentCount) return incompatible();
   let items: Row[];
   if (group) {
-    const rows = await gateway.select(`SELECT ${groupCode} AS GROUP_CODE,${groupName} AS GROUP_NAME,${salesAggregate} FROM ${fromSQL} WHERE ${where.join(' AND ')} GROUP BY ${groupCode},${groupName} ORDER BY ${groupSorts[sort]} ${direction.toUpperCase()} NULLS LAST,${groupCode} ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`, page.limit);
+    // O cabeçalho financeiro não participa do join de itens: cada pedido soma uma vez.
+    // SKU repetido em pedidos/unidades diferentes conta uma vez por cliente, não é quantidade.
+    const mixSQL = mix ? `WITH MIX_SOURCE AS (SELECT C.NUNOTA,C.CODEMP,C.CODPARC,C.VLRNOTA,P.RAZAOSOCIAL FROM ${fromSQL} WHERE ${where.join(' AND ')}) SELECT C.CODPARC AS GROUP_CODE,C.RAZAOSOCIAL AS GROUP_NAME,${salesAggregate},(SELECT CASE WHEN COUNT(DISTINCT H.NUNOTA)<>COUNT(DISTINCT I.NUNOTA) OR COUNT(CASE WHEN I.CODPROD IS NULL OR I.CODPROD<1 OR I.CODPROD>2147483647 OR I.CODPROD<>ROUND(I.CODPROD,0) OR I.CODEMP IS NULL OR I.CODEMP<>H.CODEMP THEN 1 END)>0 THEN NULL ELSE COUNT(DISTINCT I.CODPROD) END FROM MIX_SOURCE H LEFT JOIN TGFITE I ON I.NUNOTA=H.NUNOTA WHERE H.CODPARC=C.CODPARC OR (H.CODPARC IS NULL AND C.CODPARC IS NULL)) AS PRODUCT_COUNT FROM MIX_SOURCE C GROUP BY C.CODPARC,C.RAZAOSOCIAL ORDER BY ${groupSorts[sort]} ${direction.toUpperCase()} NULLS LAST,C.CODPARC ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY` : undefined;
+    const rows = await gateway.select(mixSQL ?? `SELECT ${groupCode} AS GROUP_CODE,${groupName} AS GROUP_NAME,${salesAggregate} FROM ${fromSQL} WHERE ${where.join(' AND ')} GROUP BY ${groupCode},${groupName} ORDER BY ${groupSorts[sort]} ${direction.toUpperCase()} NULLS LAST,${groupCode} ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`, page.limit);
     items = rows.map(r => {
       const code = nullableCode(r['GROUP_CODE']), subtotal = salesSummary(r);
       if (subtotal.documentCount < 1) return incompatible();
-      return { id: `sankhya:${billing ? 'billing' : 'sales'}:${group}:${code ?? 'unknown'}`, source:'observado',readOnly:true,name:text(r['GROUP_NAME']),count:subtotal.documentCount,total:subtotal.documentAmount,groupCode:code,groupBy:group,missingAmountCount:subtotal.missingAmountCount };
+      const qty = mix ? r['PRODUCT_COUNT'] === null ? null : salesCount(r,'PRODUCT_COUNT') : undefined;
+      if (mix && qty !== null && (!qty || qty < 1)) return incompatible();
+      return { id: `sankhya:${billing ? 'billing' : 'sales'}:${group}:${code ?? 'unknown'}`, source:'observado',readOnly:true,name:text(r['GROUP_NAME']),count:subtotal.documentCount,total:subtotal.documentAmount,groupCode:code,groupBy:group,missingAmountCount:subtotal.missingAmountCount,...(mix ? {qty} : {}) };
     });
   } else {
     const order = `${reportSorts[sort]} ${direction.toUpperCase()} NULLS LAST${sort !== 'code' ? `,C.NUNOTA ${direction.toUpperCase()} NULLS LAST` : ''}`;
@@ -273,10 +283,10 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
       if (items.some(r => r['total'] === null) || decimalUnits(sumERPDecimals(items.map(r => salesAmount(r['total'])))) !== decimalUnits(summary.documentAmount)) return incompatible();
     }
   }
-  return { ...observed(),items,total,totalWithoutSearch,offset:page.offset,summary,...(billing ? {billingPolicy:bp,linkMode:'direct-item-reference',quantitiesAllocated:false,ordersAdded:false,undatedTreatment:'excluded-without-date-fallback'} : {salesPolicy:policy}),companyCodes:companies,groupBy:group ?? null };
+  return { ...observed(),items,total,totalWithoutSearch,offset:page.offset,summary,...(billing ? {billingPolicy:bp,linkMode:'direct-item-reference',quantitiesAllocated:false,ordersAdded:false,undatedTreatment:'excluded-without-date-fallback'} : {salesPolicy:policy}),...(mix ? {productCountPolicy:{field:'TGFITE.CODPROD',distinctPerCustomer:true,quantitiesAdded:false,missingItems:'unavailable'}} : {}),companyCodes:companies,groupBy:group ?? null };
 }
 
-export type OrderItemsReportInput = Omit<SalesReportInput,'groupBy'>;
+export type OrderItemsReportInput = Omit<SalesReportInput,'groupBy'|'productMix'>;
 const itemAggregate = `COUNT(*) AS LINE_COUNT,COUNT(DISTINCT TO_CHAR(I.NUNOTA)||':'||TO_CHAR(I.SEQUENCIA)) AS UNIQUE_LINE_COUNT,COUNT(CASE WHEN I.VLRTOT IS NULL THEN 1 END) AS MISSING_SUBTOTAL_COUNT,TO_CHAR(SUM(I.VLRTOT),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS ITEM_SUBTOTAL`;
 function itemSummary(row: Row | undefined) {
   const lineCount=salesCount(row,'LINE_COUNT'),missingSubtotalCount=salesCount(row,'MISSING_SUBTOTAL_COUNT');

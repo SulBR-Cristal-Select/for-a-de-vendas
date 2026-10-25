@@ -60,7 +60,7 @@ function queryFor(descriptor: ERPDescriptor, search: string, sort: Sort): ERPTab
     // Entrega/carga não foram extraídas: todos os valores são desconhecidos e empatam pelo código.
     const candidate = sort && (['delivery', 'cargoStatus'].includes(sort.key) ? 'code' : sort.key);
     const report = descriptor.billingReport || descriptor.salesReport;
-    const supported = descriptor.orderItemsReport ? ['name','date','number','customer','price','qty','total'] : report?.groupBy ? ['name', 'count', 'total', ...(descriptor.salesParticipation ? ['share'] : [])] : ['code', 'number', 'date', 'customer', 'seller', 'total', 'status', 'operation', 'company',...(descriptor.billingReport ? ['nf','invoiced'] : [])];
+    const supported = descriptor.orderItemsReport ? ['name','date','number','customer','price','qty','total'] : descriptor.salesReport?.productMix ? ['name','qty','total'] : report?.groupBy ? ['name', 'count', 'total', ...(descriptor.salesParticipation ? ['share'] : [])] : ['code', 'number', 'date', 'customer', 'seller', 'total', 'status', 'operation', 'company',...(descriptor.billingReport ? ['nf','invoiced'] : [])];
     const key = (report || descriptor.orderItemsReport) && candidate && !supported.includes(candidate) ? undefined : candidate;
     return { resource: descriptor.resource, ...(descriptor.orderItemsReport || report), search, ...(descriptor.customerId ? { customerId: descriptor.customerId } : {}), ...(sort && key ? { sort: key, direction: sort.dir } : {}) };
   }
