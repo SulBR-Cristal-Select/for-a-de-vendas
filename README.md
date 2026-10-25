@@ -189,3 +189,11 @@ O gráfico lê apenas agregados por código de vendedor em janelas até50, prese
 O DS0.9.0 aceita somente números para coordenadas. A conversão é exclusiva da apresentação e exige percurso decimal reversível; totais nativos textuais são preservados e nunca somados como ponto flutuante. O zero da escala nativa do gráfico não é um indicador financeiro extraído. Sem controles/textos/classes/CSS novos, mudança no DS, backend, migração, perfil ou registro comercial.
 
 Validação local:878 testes/36 arquivos (28 novos); TypeScript/build/diff aprovados;680 propriedades e638 chamadas JSX/CSS iguais à baseeee23da. Casos positivos reais/publicação têm recibo separado; testes de componente não são login comercial ou operação integral homologada.
+
+### Valores e participação na vista ABC
+
+A tela existente de ABC reutiliza `sales-report`, agrupado no ERP por código de cliente, sobre pedidos da venda padrão (P/1001/10100000/L e versão exata da TOP). Mantém filtros existentes, escopo de carteira/equipe/filiais no servidor e histórico sem período presumido. Não inclui pedidos manuais nem notas V; clientes sem pedidos nesse recorte não recebem linhas ou valores sintéticos.
+
+O valor textual de cada grupo vem do servidor. A participação é a razão entre esse valor e o agregado financeiro **integral do mesmo recorte**, não a soma da página. A divisão usa BigInt; apenas a apresentação preserva as zero casas do DS. Percentuais arredondados não são redistribuídos para somar100%. Denominador zero/ausente ou valor ausente deixa a participação indisponível. A ordenação dessa razão usa o valor nativo; se o denominador for negativo, consulta a janela invertida e recusa mudança de resumo, contagens ou filiais. Isso não constitui snapshot atômico.
+
+O CSV integral mantém as quatro colunas existentes, incluindo a participação de cada janela calculada com seu resumo conferido. A classe continua **Não verificada**: não há limiares A/B/C confirmados, classificação acumulada nem regra80/20 presumida. A ligação dos valores não conclui a classificação ABC ou toda a frente de relatórios. Sem novos controles, mudanças de estilo, migração ou implantação de backend.

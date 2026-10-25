@@ -3020,7 +3020,8 @@ function bz({ id: e }: any): any {
     let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
     const customerReport = e === 'clientes' && !!online;
     const chartReport = ['resumo','vendas-anterior'].includes(e) && !!online;
-    const salesReport = (e === 'vendas' || chartReport) && !!online;
+    const abcReport = e === 'abc' && !!online;
+    const salesReport = (e === 'vendas' || chartReport || abcReport) && !!online;
     const billingReport = e === 'faturamento' && !!online;
     const commercialReport = salesReport || billingReport;
     const itemReport = e === 'produtos-pedido' && !!online;
@@ -3040,7 +3041,7 @@ function bz({ id: e }: any): any {
         : billingReport
         ? { client: online, resource:'invoices',billingReport:salesReportQuery(r.f,l),onSummary:onSalesSummary }
         : salesReport
-        ? { client: online, resource: 'orders', salesReport: salesReportQuery(r.f, l), onSummary: onSalesSummary }
+        ? { client: online, resource: 'orders', salesReport: salesReportQuery(r.f, abcReport ? 'cliente' : l), ...(abcReport ? { salesParticipation:true } : {}), onSummary: onSalesSummary }
         : customerReport && remoteCustomerReport(r.f)
         ? { client: online, resource: 'customers', filters: customerReportFilters(r.f) } : undefined,
         [online, e, l, salesKey, onSalesSummary]);
@@ -3310,7 +3311,7 @@ function bz({ id: e }: any): any {
                         z("document", "Documento"),
                     ]))
                 : ["clientes", "carteira", "positivacao", "abc", "mix"].includes(e)
-                    ? ((m = t.customers.map((h: any) => {
+                    ? ((m = (abcReport ? [] : t.customers).map((h: any) => {
                         let S: any = d
                             .filter((R: any) => R.customerId === h.id && R.type === "Venda")
                             .sort((R: any, E: any) => E.date.localeCompare(R.date)), L: any = S[0], I: any = L
@@ -3352,7 +3353,7 @@ function bz({ id: e }: any): any {
                                 z("total", "Valor no recorte", (h: any) => rt(h.total), {
                                     align: "right",
                                 }),
-                                z("share", "Participa\xE7\xE3o no recorte", (h: any) => Zo(m, "total")
+                                z("share", "Participa\xE7\xE3o no recorte", (h: any) => abcReport ? h.share ?? "\u2014" : Zo(m, "total")
                                     ? na((100 * h.total) / Zo(m, "total")) + "%"
                                     : "\u2014"),
                             ]),

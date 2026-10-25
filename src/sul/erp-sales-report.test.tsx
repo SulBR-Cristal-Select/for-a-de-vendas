@@ -2,7 +2,7 @@ import React from 'react';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createERPClient, type ERPRow, type ERPSalesQuery } from '../lib/erp-online';
-import { sumERPDecimals } from '../lib/erp-decimal';
+import { decimalUnits, formatERPShare, sumERPDecimals } from '../lib/erp-decimal';
 import { foldERPText } from '../lib/erp-order';
 import { STANDARD_SALES_REPORT_POLICY } from '../../supabase/functions/sankhya-online/policy';
 import { salesReportQuery } from './erp-sales-report';
@@ -21,12 +21,12 @@ function fakeERP(rows=Array.from({length:65},(_,i)=>order(i+1))) {
   if(operation==='window') {const r=[...(query.resource==='sellers'?sellers:customers)].sort((a,b)=>Number(a.code)-Number(b.code));return{error:null,data:{...observation,items:r.slice(query.offset,query.offset+query.limit),offset:query.offset,total:r.length,totalWithoutSearch:r.length}};}
   if(operation!=='sales-report')throw Error('Operação não esperada no relatório');
   let filtered=rows.filter(r=>(!query.customerId||r['customerId']===query.customerId)&&(!query.sellerCode||r['sellerCode']===query.sellerCode)&&(!query.from||String(r['date'])>=query.from)&&(!query.to||String(r['date'])<=query.to));
-  const group=(source:ERPRow[]):ERPRow[]=>{if(!query.groupBy)return source;const groups=new Map<any,ERPRow[]>();for(const r of source){const code=query.groupBy==='seller'?r['sellerCode']:Number(String(r['customerId']).split(':').at(-1));groups.set(code,[...(groups.get(code)||[]),r]);}return [...groups].map(([code,records])=>({id:`sankhya:sales:${query.groupBy}:${code}`,groupBy:query.groupBy,groupCode:code,name:query.groupBy==='seller'?'Homônimo':`Cliente documental ${code}`,count:records.length,total:sumERPDecimals(records.map(r=>String(r['total'])))}));};
+  const group=(source:ERPRow[]):ERPRow[]=>{if(!query.groupBy)return source;const groups=new Map<any,ERPRow[]>();for(const r of source){const code=query.groupBy==='seller'?r['sellerCode']:Number(String(r['customerId']).split(':').at(-1));groups.set(code,[...(groups.get(code)||[]),r]);}return [...groups].map(([code,records])=>({id:`sankhya:sales:${query.groupBy}:${code}`,groupBy:query.groupBy,groupCode:code,name:query.groupBy==='seller'?'Homônimo':`Cliente documental ${code}`,count:records.length,total:records.some(r=>r['total']===null)?null:sumERPDecimals(records.map(r=>String(r['total'])))}));};
   const totalWithoutSearch=group(filtered).length;
   if(query.search)filtered=filtered.filter(r=>foldERPText([r['number'],r['customerName'],r['sellerName']].join(' ')).includes(foldERPText(query.search)));
   const missing=filtered.filter(r=>r['total']===null).length;
   const summary={documentCount:filtered.length,documentAmount:missing?null:sumERPDecimals(filtered.map(r=>String(r['total']))),missingAmountCount:missing,amountField:'TGFCAB.VLRNOTA',headerCountedOnce:true,atomicSnapshot:false};
-  let selected=group(filtered);if(query.sort){const key=query.sort==='customer'?'customerName':query.sort==='seller'?'sellerName':query.sort;selected=[...selected].sort((a,b)=>String(a[key]).localeCompare(String(b[key]),'pt-BR',{numeric:true})*(query.direction==='desc'?-1:1));}
+  let selected=group(filtered);if(query.sort){const key=query.sort==='customer'?'customerName':query.sort==='seller'?'sellerName':query.sort;selected=[...selected].sort((a,b)=>(key==='total' && typeof a[key]==='string' && typeof b[key]==='string' ? (decimalUnits(a[key])<decimalUnits(b[key])?-1:decimalUnits(a[key])>decimalUnits(b[key])?1:0) : String(a[key]).localeCompare(String(b[key]),'pt-BR',{numeric:true}))*(query.direction==='desc'?-1:1));}
   return{error:null,data:{...observation,items:selected.slice(query.offset,query.offset+query.limit),total:selected.length,totalWithoutSearch,offset:query.offset,summary,salesPolicy:STANDARD_SALES_REPORT_POLICY,companyCodes:[1],groupBy:query.groupBy??null}};
  });
  return{client:createERPClient(transport),transport,rows};
@@ -97,4 +97,48 @@ describe('Resumo e versão anterior usam a fonte remota, sem redesenho',()=>{
  it('mudar grupo da tabela para cliente não muda a dimensão por vendedor do gráfico',async()=>{const f=mount(undefined,'resumo');await waitFor(()=>expect(chartData()).toHaveLength(2));await selectGroup('Cliente');await waitFor(()=>expect(f.transport.mock.calls.some(([b])=>b.query.groupBy==='customer')).toBe(true));await waitFor(()=>expect(chartData()).toHaveLength(2));expect(chartData().every(r=>r.id.startsWith('sankhya:sales:seller:'))).toBe(true);expect(screen.getByText('R$ 6,50')).toBeInTheDocument();});
  it('falha na nova busca limpa gráfico/indicadores antigos sem mostrar dinheiro zero',async()=>{const f=mount(undefined,'resumo');await waitFor(()=>expect(chartData()).toHaveLength(2));f.transport.mockRejectedValue(Error('falha sintética'));fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'novo'}});await screen.findByText('Consulta ERP indisponível. Tente novamente.');expect(chartData()).toEqual([]);expect(screen.queryByText('R$ 6,50')).not.toBeInTheDocument();expect(screen.queryAllByText('R$ 0,00').filter(el=>el.tagName==='DIV')).toHaveLength(0);});
  it('CSV do resumo conserva65 detalhes e sete campos usando exportação existente',async()=>{const create=vi.fn((_blob:Blob)=>'blob:csv-resumo');Object.defineProperty(URL,'createObjectURL',{configurable:true,value:create});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});const f=mount(undefined,'resumo');await waitFor(()=>expect(chartData()).toHaveLength(2));fireEvent.click(screen.getByRole('button',{name:'Exportar CSV'}));await waitFor(()=>expect(create).toHaveBeenCalledOnce());const text=await new Promise<string>(resolve=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.readAsText(create.mock.calls[0]![0]);});expect(text.split('\r\n')).toHaveLength(66);expect(text).toContain('number;date;customer;seller;delivery;total;cargoStatus');expect(text).not.toContain('MANUAL-NÃO-SOMAR');expect(f.persist).not.toHaveBeenCalled();});
+});
+
+// Participação não é classificação ABC. Casos sintéticos, sem Auth ou escrita ERP.
+describe('Valores e participação da vista ABC, sem limiares inventados',()=>{
+ it.each([
+  ['1','3','33%'],['1','8','13%'],['-1','8','-13%'],['1','-8','-13%'],['-1','-8','13%'],
+  ['0','2','0%'],['1','1000','0%'],['-1','1000','-0%'],['1','0',null],
+  [null,'2',null],['1',null,null],[1,'2',null],['NaN','2',null],['1e2','2',null],
+  ['4999999999999999999999999999','1000000000000000000000000000000','0%'],
+ ] as const)('razão textual %s / %s sem ponto flutuante', (value,total,expected)=>{expect(formatERPShare(value,total)).toBe(expected);});
+ const many=()=>Array.from({length:65},(_,i)=>({...order(i+1),customerId:`sankhya:customer:${i+1}`,customerName:`Cliente documental ${i+1}`}));
+ it('pagina65 clientes com denominador integral6,5, nunca soma da página ou dados manuais',async()=>{
+  const f=mount(many(),'abc');await screen.findByText('Cliente documental 1');expect(screen.getAllByText('2%')).toHaveLength(10);expect(screen.getAllByText('Não verificada')).toHaveLength(10);expect(screen.getByText(/Limiares A\/B\/C não foram confirmados/)).toBeInTheDocument();expect(f.transport.mock.calls.every(([b])=>b.operation==='sales-report'&&b.query.groupBy==='customer'&&b.query.from===undefined&&b.query.to===undefined&&b.query.limit<=50)).toBe(true);expect(screen.queryByRole('combobox',{name:'Agrupar por'})).not.toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:/Próxima/}));await waitFor(()=>expect(f.transport.mock.calls.some(([b])=>b.query.offset===10)).toBe(true));await waitFor(()=>expect(screen.getAllByText('2%')).toHaveLength(10));expect(f.state['customers']).toEqual([]);
+ });
+ it('busca recompõe participação pelo novo agregado, sem curvaA/B/C automática',async()=>{
+  const f=mount(many(),'abc');await screen.findByText('Cliente documental 1');fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'Cliente documental 65'}});await screen.findByText('100%');expect(screen.queryByText('2%')).not.toBeInTheDocument();expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({groupBy:'customer',search:'Cliente documental 65'});expect(screen.getByText('Não verificada')).toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();
+ });
+ it('cliente selecionado usa código e mesma venda padrão; não importa a carteira inteira',async()=>{
+  const f=mount(undefined,'abc');await screen.findByText('49%');fireEvent.click(screen.getByRole('button',{name:'Filtros'}));fireEvent.click(await screen.findByRole('combobox',{name:'Cliente'}));fireEvent.click(await screen.findByRole('option',{name:'Cliente documental 1 (1)'}));fireEvent.click(screen.getByRole('button',{name:'Aplicar filtros'}));await screen.findByText('100%');expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({customerId:'sankhya:customer:1',groupBy:'customer'});expect(f.persist).not.toHaveBeenCalled();
+ });
+ it('denominador ausente deixa participação indisponível, sem0% ou classificação',async()=>{
+  const f=mount([{...order(1),total:null},order(2)],'abc');await screen.findByText('Cliente documental 1');expect(screen.queryByText('0%')).not.toBeInTheDocument();expect(screen.queryByText('100%')).not.toBeInTheDocument();expect(screen.getAllByText('Não verificada')).toHaveLength(2);expect(f.persist).not.toHaveBeenCalled();
+ });
+ it('erro na busca limpa valores e participação anteriores sem fabricar zeros',async()=>{
+  const f=mount(many(),'abc');await screen.findByText('Cliente documental 1');f.transport.mockRejectedValue(Error('falha sintética'));fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'novo'}});await screen.findByText('Consulta ERP indisponível. Tente novamente.');expect(screen.queryByText('2%')).not.toBeInTheDocument();expect(screen.queryByText('0%')).not.toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();
+ });
+ it('ordenação por participação é nativa por valor, não ordenação textual da página',async()=>{
+  const f=mount([{...order(1),total:'1'},{...order(2),total:'3'}],'abc');await screen.findByText('25%');fireEvent.click(screen.getByRole('button',{name:/Participação no recorte/}));await waitFor(()=>expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({sort:'total',direction:'asc',groupBy:'customer'}));expect(f.transport.mock.calls.every(([b])=>b.query.sort!=='share')).toBe(true);
+ });
+ it('CSV integral contém65 grupos e quatro campos, preserva participação arredondada sem normalizar para100',async()=>{
+  const create=vi.fn((_blob:Blob)=>'blob:csv-abc');Object.defineProperty(URL,'createObjectURL',{configurable:true,value:create});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
+  const f=mount(many(),'abc');await screen.findByText('Cliente documental 1');fireEvent.click(screen.getByRole('button',{name:'Exportar CSV'}));await waitFor(()=>expect(create).toHaveBeenCalledOnce());const text=await new Promise<string>(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.readAsText(create.mock.calls[0]![0]);});expect(text.split('\r\n')).toHaveLength(66);expect(text).toContain('name;curve;total;share');expect(text).toContain('"Cliente documental 65";"Não verificada";"0.1";"2%"');expect(f.transport.mock.calls.filter(([b])=>b.query.limit===50).map(([b])=>b.query.offset)).toEqual([0,50]);expect(f.persist).not.toHaveBeenCalled();
+ });
+ it('exportação mantém códigos distintos de clientes homônimos e razão correta para denominador negativo',async()=>{
+  const f=fakeERP([{...order(1),total:'-1'},{...order(2),total:'-3'}]),original=f.client.salesReport.bind(f.client);vi.spyOn(f.client,'salesReport').mockImplementation(async q=>{const w=await original(q);return{...w,items:w.items.map(row=>({...row,name:'Homônimo'}))};});
+  const rows=await exportERPRows({client:f.client,resource:'orders',salesReport:{groupBy:'customer'},salesParticipation:true},{resource:'orders',groupBy:'customer',sort:'share',direction:'asc'},[],()=>{});expect(rows.map(r=>[r['id'],r['total'],r['share']])).toEqual([['sankhya:sales:customer:2','-1','25%'],['sankhya:sales:customer:1','-3','75%']]);expect(rows.map(r=>r['name'])).toEqual(['Homônimo','Homônimo']);expect(f.transport.mock.calls.slice(0,2).map(([b])=>[b.query.sort,b.query.direction])).toEqual([['total','asc'],['total','desc']]);
+ });
+ it('mudança financeira na janela invertida é recusada sem CSV parcial',async()=>{
+  const f=fakeERP([{...order(1),total:'-1'}]),original=f.client.salesReport.bind(f.client);vi.spyOn(f.client,'salesReport').mockImplementation(async q=>{const w=await original(q);return q.direction==='desc'?{...w,summary:{...w.summary,documentAmount:'-2'}}:w;});await expect(exportERPRows({client:f.client,resource:'orders',salesReport:{groupBy:'customer'},salesParticipation:true},{resource:'orders',groupBy:'customer',sort:'share',direction:'asc'},[],()=>{})).rejects.toMatchObject({code:'INVALID_RESPONSE'});
+ });
+ it('projeção fora de agrupamento por cliente falha antes de consultar outra fonte',async()=>{
+  const f=fakeERP();await expect(exportERPRows({client:f.client,resource:'orders',salesReport:{groupBy:'seller'},salesParticipation:true},{resource:'orders',groupBy:'seller'},[],()=>{})).rejects.toMatchObject({code:'INVALID_RESPONSE'});expect(f.transport).not.toHaveBeenCalled();
+ });
 });
