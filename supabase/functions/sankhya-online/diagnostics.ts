@@ -158,7 +158,7 @@ async function readBillingDiagnostic(gateway: Transport, input: Row) {
   const names = [...new Set(Object.values(required).flatMap(fields => Object.keys(fields)))];
   const columns = await gateway.select(`SELECT TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME IN (${literals(Object.keys(required))}) AND COLUMN_NAME IN (${literals(names)}) ORDER BY TABLE_NAME,COLUMN_NAME FETCH FIRST 50 ROWS ONLY`, 50);
   for (const [table, fields] of Object.entries(required)) for (const [name, type] of Object.entries(fields))
-    if (!columns.some(c => c['TABLE_NAME'] === table && c['COLUMN_NAME'] === name && (type === 'text' ? textTypes.includes(String(c['DATA_TYPE'])) : c['DATA_TYPE'] === type))) return unsupported();
+    if (!columns.some(c => c['TABLE_NAME'] === table && c['COLUMN_NAME'] === name && (type === 'text' ? textTypes.includes(String(c['DATA_TYPE'])) : c['DATA_TYPE'] === type || table === 'TGFCAB' && name === 'VLRNOTA' && c['DATA_TYPE'] === 'FLOAT'))) return unsupported();
   const p = STANDARD_BILLING_REPORT_POLICY, sale = p.origin;
   const join = 'TGFCAB H LEFT JOIN TGFTOP T ON T.CODTIPOPER=H.CODTIPOPER AND T.DHALTER=H.DHTIPOPER';
   const candidate = `H.CODEMP=${companyCode} AND H.TIPMOV='${p.movement}' AND H.STATUSNOTA='${p.statusCode}' AND H.STATUSNFE='${p.fiscalStatusCode}'`;
