@@ -19,6 +19,19 @@ export const STANDARD_SALES_REPORT_POLICY = Object.freeze({
   dateField: 'DTNEG' as const,
 });
 
+// Faturamento confirmado em25/10/2026 às05h57 (America/Sao_Paulo).
+// Notas V e pedidos P permanecem bases separadas; vínculo não soma os documentos.
+export const STANDARD_BILLING_REPORT_POLICY = Object.freeze({
+  movement: 'V' as const,
+  dateField: 'DTFATUR' as const,
+  statusCode: 'L' as const,
+  fiscalStatusCode: 'A' as const,
+  salesSignal: -1 as const,
+  bonification: 'N' as const,
+  devolution: 1 as const,
+  origin: STANDARD_SALES_REPORT_POLICY,
+});
+
 export function partnerCompany(code: unknown): 1 | 4 {
   if (code === null) return COMMERCIAL_POLICY.sharedPartnerCompany;
   if (code === 1 || code === 4) return code;

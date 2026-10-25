@@ -1,5 +1,5 @@
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
-import { STANDARD_SALES_REPORT_POLICY } from './policy.ts';
+import { STANDARD_SALES_REPORT_POLICY, STANDARD_BILLING_REPORT_POLICY } from './policy.ts';
 
 type Row = Record<string, unknown>;
 type Transport = Pick<SankhyaGateway, 'select'>;
@@ -68,6 +68,7 @@ export async function readCommercialDiagnostic(gateway: Transport, value: unknow
     return { ...observation(), supported: true, companyCode, productCode, columns, variants, cardinality: variants.length === 0 ? 'absent' : variants.length === 1 ? 'single' : 'multiple', minimumVariants: variants.length, hasMore: variants.length === 2, priceQueried: false };
   }
   if (input['kind'] !== 'analytics') return invalid();
+  if (input['section'] === 'billing') return readBillingDiagnostic(gateway, input);
   if (input['section'] === 'metadata') {
     keys(input, ['kind', 'section', 'after']);
     const after = input['after'] ?? '';
@@ -125,4 +126,93 @@ export async function readCommercialDiagnostic(gateway: Transport, value: unknow
   const select = ['H.CODEMP','H.TIPMOV','H.STATUSNOTA','H.CODTIPOPER',`${dimensions[4]} AS OPERATION_VERSION`,'H.CODNAT',...extras.map(name => `T.${name} AS TOP_${name}`)];
   const rows = await gateway.select(`SELECT ${select.join(',')},COUNT(*) AS DOCUMENT_COUNT,TO_CHAR(MIN(H.DTNEG),'YYYY-MM-DD') AS FIRST_DATE,TO_CHAR(MAX(H.DTNEG),'YYYY-MM-DD') AS LAST_DATE FROM ${join} WHERE ${where} GROUP BY ${dimensions.join(',')} ORDER BY H.TIPMOV,H.CODTIPOPER,OPERATION_VERSION,H.CODNAT,H.STATUSNOTA OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`, 50);
   return { ...observation(), supported: true, companyCode, from, to, dateField: 'DTNEG', observedTopFields: extras, rows, offset, hasMore: rows.length === 50, rulesInferred: false, ...(standardSales ? { salesPolicy: report } : {}) };
+}
+
+// Valores monetários vindos de TO_CHAR no ERP, nunca números binários nem preço calculado.
+function billingDecimal(value: unknown): string {
+  if (typeof value !== 'string') return incompatible();
+  const decimal = value.startsWith('-.') ? '-0' + value.slice(1) : value.startsWith('.') ? '0' + value : value;
+  return /^-?(?:0|[1-9]\d*)(?:\.\d{1,9})?$/.test(decimal) && decimal.length <= 40 ? decimal : incompatible();
+}
+function sumBillingDecimals(values: string[]): string {
+  const units = values.reduce((sum, value) => {
+    const negative = value.startsWith('-'), [whole, fraction = ''] = (negative ? value.slice(1) : value).split('.');
+    const n = BigInt(whole!) * 1000000000n + BigInt(fraction.padEnd(9, '0'));
+    return sum + (negative ? -n : n);
+  }, 0n);
+  const negative = units < 0n, absolute = negative ? -units : units;
+  const fraction = String(absolute % 1000000000n).padStart(9, '0').replace(/0+$/, '');
+  return `${negative ? '-' : ''}${absolute / 1000000000n}${fraction ? '.' + fraction : ''}`;
+}
+async function readBillingDiagnostic(gateway: Transport, input: Row) {
+  keys(input, ['kind', 'section', 'companyCode', 'from', 'to', 'offset']);
+  const companyCode = company(input['companyCode']), from = day(input['from']), to = day(input['to']), offset = integer(input['offset'] ?? 0, 0);
+  const span = Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z');
+  if (span < 0 || span > 366 * 86400000 || offset > 2147483597) return invalid();
+  const required = {
+    TGFCAB: { CODEMP:'NUMBER',NUNOTA:'NUMBER',CODTIPOPER:'NUMBER',DHTIPOPER:'DATE',CODNAT:'NUMBER',DTFATUR:'DATE',TIPMOV:'text',STATUSNOTA:'text',STATUSNFE:'text',VLRNOTA:'NUMBER' },
+    TGFTOP: { CODTIPOPER:'NUMBER',DHALTER:'DATE',TIPMOV:'text',GOLSINAL:'NUMBER',GOLDEV:'NUMBER',BONIFICACAO:'text' },
+    TGFVAR: { NUNOTA:'NUMBER',NUNOTAORIG:'NUMBER',SEQUENCIA:'NUMBER',SEQUENCIAORIG:'NUMBER' },
+    TGFITE: { NUNOTA:'NUMBER',SEQUENCIA:'NUMBER' },
+  } as const;
+  const names = [...new Set(Object.values(required).flatMap(fields => Object.keys(fields)))];
+  const columns = await gateway.select(`SELECT TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME IN (${literals(Object.keys(required))}) AND COLUMN_NAME IN (${literals(names)}) ORDER BY TABLE_NAME,COLUMN_NAME FETCH FIRST 50 ROWS ONLY`, 50);
+  for (const [table, fields] of Object.entries(required)) for (const [name, type] of Object.entries(fields))
+    if (!columns.some(c => c['TABLE_NAME'] === table && c['COLUMN_NAME'] === name && (type === 'text' ? textTypes.includes(String(c['DATA_TYPE'])) : c['DATA_TYPE'] === type))) return unsupported();
+  const p = STANDARD_BILLING_REPORT_POLICY, sale = p.origin;
+  const join = 'TGFCAB H LEFT JOIN TGFTOP T ON T.CODTIPOPER=H.CODTIPOPER AND T.DHALTER=H.DHTIPOPER';
+  const candidate = `H.CODEMP=${companyCode} AND H.TIPMOV='${p.movement}' AND H.STATUSNOTA='${p.statusCode}' AND H.STATUSNFE='${p.fiscalStatusCode}'`;
+  const period = `${candidate} AND H.DTFATUR>=TO_DATE('${from}','YYYY-MM-DD') AND H.DTFATUR<TO_DATE('${to}','YYYY-MM-DD')+1`;
+  const invalidTop = "T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'V' OR T.GOLSINAL IS NULL OR T.GOLSINAL NOT IN (-1,0,1) OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1) OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S')";
+  const commercial = `T.TIPMOV='V' AND T.GOLSINAL=${p.salesSignal} AND T.GOLDEV=${p.devolution} AND T.BONIFICACAO='${p.bonification}'`;
+  const counts = await gateway.select(`SELECT COUNT(*) AS APPROVED_DOCUMENT_COUNT,COUNT(CASE WHEN ${invalidTop} THEN 1 END) AS MISSING_CONTEXT_COUNT,COUNT(CASE WHEN ${commercial} THEN 1 END) AS COMMERCIAL_DOCUMENT_COUNT FROM ${join} WHERE ${period}`, 1);
+  const approvedDocumentCount = oneCount(counts, 'APPROVED_DOCUMENT_COUNT'), commercialDocumentCount = oneCount(counts, 'COMMERCIAL_DOCUMENT_COUNT');
+  const missingContextCount = oneCount(counts, 'MISSING_CONTEXT_COUNT');
+  if (commercialDocumentCount > approvedDocumentCount || missingContextCount > approvedDocumentCount) return incompatible();
+  if (missingContextCount !== 0) return unsupported();
+  // Sem data não há como atribuir mês. Esse contador não pertence ao período selecionado.
+  const undated = await gateway.select(`SELECT COUNT(*) AS UNDATED_DOCUMENT_COUNT FROM ${join} WHERE ${candidate} AND H.DTFATUR IS NULL AND ((${commercial}) OR (${invalidTop}))`, 1);
+  const undatedDocumentCount = oneCount(undated, 'UNDATED_DOCUMENT_COUNT');
+  const originJoin = 'TGFVAR R LEFT JOIN TGFCAB P ON P.NUNOTA=R.NUNOTAORIG LEFT JOIN TGFTOP O ON O.CODTIPOPER=P.CODTIPOPER AND O.DHALTER=P.DHTIPOPER';
+  const standard = `P.TIPMOV='${sale.movement}' AND P.CODTIPOPER=${sale.operationCode} AND P.CODNAT=${sale.natureCode} AND P.STATUSNOTA='${sale.statusCode}' AND O.TIPMOV='P' AND O.BONIFICACAO='N' AND O.GOLDEV=1`;
+  const unknown = "P.NUNOTA IS NULL OR P.TIPMOV IS NULL OR P.TIPMOV<>'P' OR P.CODNAT IS NULL OR P.STATUSNOTA IS NULL OR O.CODTIPOPER IS NULL OR O.TIPMOV IS NULL OR O.TIPMOV<>P.TIPMOV OR O.BONIFICACAO IS NULL OR O.BONIFICACAO NOT IN ('N','S') OR O.GOLDEV IS NULL OR O.GOLDEV NOT IN (-1,1) OR NOT EXISTS(SELECT 1 FROM TGFITE PI WHERE PI.NUNOTA=P.NUNOTA AND PI.SEQUENCIA=R.SEQUENCIAORIG) OR NOT EXISTS(SELECT 1 FROM TGFITE DI WHERE DI.NUNOTA=R.NUNOTA AND DI.SEQUENCIA=R.SEQUENCIA)";
+  const flags = {
+    HAS_STANDARD_ORIGIN: `EXISTS(SELECT 1 FROM ${originJoin} WHERE R.NUNOTA=H.NUNOTA AND ${standard})`,
+    HAS_OTHER_ORIGIN: `EXISTS(SELECT 1 FROM ${originJoin} WHERE R.NUNOTA=H.NUNOTA AND CASE WHEN ${standard} THEN 1 ELSE 0 END=0)`,
+    HAS_UNRESOLVED_ORIGIN: `EXISTS(SELECT 1 FROM ${originJoin} WHERE R.NUNOTA=H.NUNOTA AND (${unknown}))`,
+    HAS_UNLINKED_ITEM: 'EXISTS(SELECT 1 FROM TGFITE I WHERE I.NUNOTA=H.NUNOTA AND NOT EXISTS(SELECT 1 FROM TGFVAR R WHERE R.NUNOTA=I.NUNOTA AND R.SEQUENCIA=I.SEQUENCIA))',
+    HAS_ITEMS: 'EXISTS(SELECT 1 FROM TGFITE I WHERE I.NUNOTA=H.NUNOTA)',
+    HAS_CROSS_COMPANY_ORIGIN: `EXISTS(SELECT 1 FROM ${originJoin} WHERE R.NUNOTA=H.NUNOTA AND (P.CODEMP IS NULL OR P.CODEMP<>H.CODEMP))`,
+  };
+  const dimensions = ['CODTIPOPER','OPERATION_VERSION','CODNAT',...Object.keys(flags)];
+  const detail = `SELECT H.NUNOTA,H.CODTIPOPER,TO_CHAR(H.DHTIPOPER,'YYYY-MM-DD"T"HH24:MI:SS') AS OPERATION_VERSION,H.CODNAT,H.VLRNOTA,H.DTFATUR,${Object.entries(flags).map(([name, sql]) => `CASE WHEN ${sql} THEN 1 ELSE 0 END AS ${name}`).join(',')} FROM ${join} WHERE ${period} AND ${commercial}`;
+  // A consulta externa contém uma linha por cabeçalho, sem multiplicar valores por TGFVAR/itens.
+  const sql = `SELECT ${dimensions.join(',')},COUNT(*) AS DOCUMENT_COUNT,SUM(CASE WHEN VLRNOTA IS NULL THEN 1 ELSE 0 END) AS MISSING_AMOUNT_COUNT,TO_CHAR(SUM(VLRNOTA),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS DOCUMENT_AMOUNT,TO_CHAR(MIN(DTFATUR),'YYYY-MM-DD') AS FIRST_DATE,TO_CHAR(MAX(DTFATUR),'YYYY-MM-DD') AS LAST_DATE FROM (${detail}) D GROUP BY ${dimensions.join(',')} ORDER BY ${dimensions.join(',')} OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`;
+  const nativeRows = await gateway.select(sql, 50);
+  const rows = nativeRows.map(row => {
+    const flag = (name: string) => { const n = observedInteger(row[name]); return n === 0 ? false : n === 1 ? true : incompatible(); };
+    const count = observedInteger(row['DOCUMENT_COUNT']), missingAmount = observedInteger(row['MISSING_AMOUNT_COUNT']);
+    if (count < 1 || missingAmount > count) return incompatible();
+    const observedDay = (value: unknown): string => {
+      if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return incompatible();
+      const d = new Date(value + 'T00:00:00Z');
+      return Number.isFinite(d.valueOf()) && d.toISOString().slice(0,10) === value ? value : incompatible();
+    };
+    const first = observedDay(row['FIRST_DATE']), last = observedDay(row['LAST_DATE']);
+    if (first < from || last > to || first > last) return incompatible();
+    const standardOrigin = flag('HAS_STANDARD_ORIGIN'), otherOrigin = flag('HAS_OTHER_ORIGIN'), unresolvedOrigin = flag('HAS_UNRESOLVED_ORIGIN'), unlinkedItem = flag('HAS_UNLINKED_ITEM'), hasItems = flag('HAS_ITEMS'), crossCompanyOrigin = flag('HAS_CROSS_COMPANY_ORIGIN');
+    const eligible = standardOrigin && !otherOrigin && !unresolvedOrigin && !unlinkedItem && hasItems && !crossCompanyOrigin && missingAmount === 0;
+    const amount = row['DOCUMENT_AMOUNT'] === null && missingAmount === count ? null : billingDecimal(row['DOCUMENT_AMOUNT']);
+    return { ...row, documentCount: count, missingAmountCount: missingAmount, documentAmount: amount, standardOrigin, otherOrigin, unresolvedOrigin, unlinkedItem, hasItems, crossCompanyOrigin, eligible };
+  });
+  const hasMore = rows.length === 50;
+  const pageDocumentCount = rows.reduce((n,r)=>n+r.documentCount,0);
+  if (!Number.isSafeInteger(pageDocumentCount) || pageDocumentCount > commercialDocumentCount || offset === 0 && !hasMore && pageDocumentCount !== commercialDocumentCount) return incompatible();
+  // Origem mista/indireta/incompleta não é excluída silenciosamente nem vira zero financeiro.
+  const unresolved = rows.some(r => r.unresolvedOrigin || r.standardOrigin && (!r.eligible));
+  const complete = offset === 0 && !hasMore && !unresolved && undatedDocumentCount === 0;
+  return { ...observation(), supported:true, companyCode,from,to,offset,hasMore,dateField:p.dateField,billingPolicy:p,
+    linkMode:'direct-item-reference' as const,approvedDocumentCount,commercialDocumentCount,atomicSnapshot:false,headerCountedOnce:true,quantitiesAllocated:false,undatedDocumentCount,undatedScope:'all-dates' as const,
+    qualificationComplete:complete,rows,totals:complete ? { documentCount:rows.filter(r=>r.eligible).reduce((n,r)=>n+r.documentCount,0),documentAmount:sumBillingDecimals(rows.filter(r=>r.eligible).map(r=>r.documentAmount!)),amountField:'TGFCAB.VLRNOTA' } : null,
+    rulesInferred:false,ordersAdded:false };
 }
