@@ -26,6 +26,12 @@ export function formatERPShare(value: unknown, total: unknown): string | null {
   const rounded = (2n * a + d) / (2n * d);
   return `${negative ? '-' : ''}${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(rounded)}%`;
 }
+/** Mantém as zero casas existentes da tabela; CSV/DTO continuam textuais e exatos. */
+export function formatERPQuantity(value: unknown): string | null {
+  if (erpDecimal(value) === null) return null;
+  const units=decimalUnits(value as string),absolute=units<0n?-units:units;
+  return `${units<0n?'-':''}${new Intl.NumberFormat('pt-BR',{maximumFractionDigits:0}).format((absolute+500000000n)/1000000000n)}`;
+}
 /** Arredondamento exclusivamente de apresentação (duas casas), inclusive ticket racional. */
 export function formatERPAmount(value: unknown, divisor = 1): string | null {
   if (erpDecimal(value) === null || !Number.isSafeInteger(divisor) || divisor < 1) return null;
