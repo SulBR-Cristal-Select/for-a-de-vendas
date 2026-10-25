@@ -12,11 +12,11 @@ export type ERPWindow<T = ERPRow> = ERPObservation & { items: T[]; total: number
 export type ERPPage<T = ERPRow> = ERPObservation & { items: T[]; total: number; totalWithoutSearch: number; page: number; pageSize: 10 | 20 | 50; hasMore: boolean };
 export type ERPRecord<T = ERPRow> = ERPObservation & { record: T | null };
 export type ERPHistoryQuery = { resource: 'orders' | 'invoices'; offset: number; limit: number; customerId?: string; search?: string; sort?: string; direction?: 'asc' | 'desc'; from?: string; to?: string; companyCode?: 1 | 4 };
-export type ERPSalesQuery = ERPHistoryQuery & { resource: 'orders'; sellerCode?: number; groupBy?: 'seller' | 'customer'; status?: 'confirmado' };
-export type ERPBillingQuery = Omit<ERPSalesQuery, 'resource'> & { resource: 'invoices' };
+export type ERPSalesQuery = ERPHistoryQuery & { resource: 'orders'; sellerCode?: number; groupBy?: 'seller' | 'customer'; status?: 'confirmado'; productMix?: true };
+export type ERPBillingQuery = Omit<ERPSalesQuery, 'resource'|'productMix'> & { resource: 'invoices' };
 export type ERPSalesSummary = { documentCount: number; documentAmount: string | null; missingAmountCount: number; amountField: 'TGFCAB.VLRNOTA'; headerCountedOnce: true; atomicSnapshot: false };
 export type ERPSalesWindow = ERPWindow & { summary: ERPSalesSummary; groupBy: 'seller' | 'customer' | null; companyCodes: (1 | 4)[] };
-export type ERPOrderItemsQuery = Omit<ERPSalesQuery,'groupBy'>;
+export type ERPOrderItemsQuery = Omit<ERPSalesQuery,'groupBy'|'productMix'>;
 export type ERPItemSummary = {lineCount:number;subtotal:string|null;missingSubtotalCount:number;quantityField:'TGFITE.QTDNEG';unitPriceField:'TGFITE.VLRUNIT';subtotalField:'TGFITE.VLRTOT';calculatedSubtotal:false;headerAmountsAdded:false;atomicSnapshot:false};
 export type ERPOrderItemsWindow = ERPWindow & {summary:ERPItemSummary;companyCodes:(1|4)[]};
 export type ERPDocumentQuery = { resource?: never; id: string; offset?: number; limit?: number };
@@ -119,7 +119,9 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
   }
   if (operation === 'sales-report' || operation === 'billing-report') {
     const billing = operation === 'billing-report';
-    const q = query as ERPSalesQuery | ERPBillingQuery, summary = data['summary'], policy = data[billing ? 'billingPolicy' : 'salesPolicy'], companies = data['companyCodes'];
+    const q = query as ERPSalesQuery, summary = data['summary'], policy = data[billing ? 'billingPolicy' : 'salesPolicy'], companies = data['companyCodes'];
+    const mix = q.productMix === true, productPolicy = data['productCountPolicy'];
+    if (mix ? billing || q.groupBy !== 'customer' || !object(productPolicy) || productPolicy['field'] !== 'TGFITE.CODPROD' || productPolicy['distinctPerCustomer'] !== true || productPolicy['quantitiesAdded'] !== false || productPolicy['missingItems'] !== 'unavailable' : productPolicy !== undefined) invalid();
     if (!object(summary) || !natural(summary['documentCount']) || !natural(summary['missingAmountCount']) || summary['missingAmountCount'] > summary['documentCount'] || summary['amountField'] !== 'TGFCAB.VLRNOTA' || summary['headerCountedOnce'] !== true || summary['atomicSnapshot'] !== false) invalid();
     const amount = summary['documentAmount'];
     if (summary['missingAmountCount'] ? amount !== null : typeof amount !== 'string' || erpDecimal(amount) !== amount) invalid();
@@ -132,7 +134,7 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
     for (const row of items) {
       if (row['total'] !== null && (typeof row['total'] !== 'string' || erpDecimal(row['total']) !== row['total'])) invalid();
       if (q.groupBy) {
-        if (!natural(row['count']) || row['count'] < 1 || row['groupBy'] !== q.groupBy || !((row['groupCode'] === null) || natural(row['groupCode'])) || row['id'] !== `sankhya:${billing ? 'billing' : 'sales'}:${q.groupBy}:${row['groupCode'] ?? 'unknown'}`) invalid();
+        if (!natural(row['count']) || row['count'] < 1 || row['groupBy'] !== q.groupBy || !((row['groupCode'] === null) || natural(row['groupCode'])) || row['id'] !== `sankhya:${billing ? 'billing' : 'sales'}:${q.groupBy}:${row['groupCode'] ?? 'unknown'}` || mix && row['qty'] !== null && (!natural(row['qty']) || row['qty'] < 1)) invalid();
       } else {
         const erp = row['erp'];
         if (!object(erp) || erp['movement'] !== (billing ? 'V' : 'P') || (billing ? !natural(erp['operationCode']) || erp['operationCode'] < 1 || erp['dateField'] !== 'DTFATUR' || erp['fiscalStatusCode'] !== 'A' : erp['operationCode'] !== 1001) || erp['statusCode'] !== 'L' || !companies.includes(erp['companyCode']) || row['id'] !== `sankhya:${billing ? 'invoice' : 'order'}:${erp['documentCode']}` || q.customerId && row['customerId'] !== q.customerId || q.sellerCode !== undefined && row['sellerCode'] !== q.sellerCode) invalid();
@@ -168,6 +170,8 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
   }
   async function request<T>(operation: ERPOperation, query: ERPQuery): Promise<T> {
     if (!query) throw new ERPOnlineError('INVALID_REQUEST');
+    const mix = (query as {productMix?:unknown;groupBy?:unknown}).productMix;
+    if (mix !== undefined && (operation !== 'sales-report' || mix !== true || (query as ERPSalesQuery).groupBy !== 'customer')) throw new ERPOnlineError('INVALID_REQUEST');
     if (operation === 'document') {
       const q = query as ERPDocumentQuery;
       if (!/^sankhya:(order|invoice):[1-9]\d*$/.test(q.id) || !natural(q.offset ?? 0) || !natural(q.limit ?? 50) || (q.limit ?? 50) < 1 || (q.limit ?? 50) > 50) throw new ERPOnlineError('INVALID_REQUEST');

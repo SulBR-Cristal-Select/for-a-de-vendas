@@ -3021,7 +3021,8 @@ function bz({ id: e }: any): any {
     const customerReport = e === 'clientes' && !!online;
     const chartReport = ['resumo','vendas-anterior'].includes(e) && !!online;
     const abcReport = e === 'abc' && !!online;
-    const salesReport = (e === 'vendas' || chartReport || abcReport) && !!online;
+    const mixReport = e === 'mix' && !!online;
+    const salesReport = (e === 'vendas' || chartReport || abcReport || mixReport) && !!online;
     const billingReport = e === 'faturamento' && !!online;
     const commercialReport = salesReport || billingReport;
     const itemReport = e === 'produtos-pedido' && !!online;
@@ -3041,7 +3042,7 @@ function bz({ id: e }: any): any {
         : billingReport
         ? { client: online, resource:'invoices',billingReport:salesReportQuery(r.f,l),onSummary:onSalesSummary }
         : salesReport
-        ? { client: online, resource: 'orders', salesReport: salesReportQuery(r.f, abcReport ? 'cliente' : l), ...(abcReport ? { salesParticipation:true } : {}), onSummary: onSalesSummary }
+        ? { client: online, resource: 'orders', salesReport: { ...salesReportQuery(r.f, abcReport || mixReport ? 'cliente' : l), ...(mixReport ? {productMix:true} : {}) }, ...(abcReport ? { salesParticipation:true } : {}), onSummary: onSalesSummary }
         : customerReport && remoteCustomerReport(r.f)
         ? { client: online, resource: 'customers', filters: customerReportFilters(r.f) } : undefined,
         [online, e, l, salesKey, onSalesSummary]);
@@ -3311,7 +3312,7 @@ function bz({ id: e }: any): any {
                         z("document", "Documento"),
                     ]))
                 : ["clientes", "carteira", "positivacao", "abc", "mix"].includes(e)
-                    ? ((m = (abcReport ? [] : t.customers).map((h: any) => {
+                    ? ((m = (abcReport || mixReport ? [] : t.customers).map((h: any) => {
                         let S: any = d
                             .filter((R: any) => R.customerId === h.id && R.type === "Venda")
                             .sort((R: any, E: any) => E.date.localeCompare(R.date)), L: any = S[0], I: any = L
@@ -3362,7 +3363,7 @@ function bz({ id: e }: any): any {
                         e === "mix" &&
                             ((p = [
                                 z("name", "Raz\xE3o social", void 0, { primary: !0, wide: !0 }),
-                                z("qty", "Produtos diferentes com itens extra\xEDdos", (h: any) => new Set(d
+                                z("qty", "Produtos diferentes com itens extra\xEDdos", (h: any) => mixReport ? h.qty ?? pa : new Set(d
                                     .filter((S: any) => S.customerId === h.id)
                                     .flatMap((S: any) => (S.items || []).map((L: any) => L.productId))).size),
                                 z("total", "Valor em pedidos", (h: any) => rt(h.total), {
