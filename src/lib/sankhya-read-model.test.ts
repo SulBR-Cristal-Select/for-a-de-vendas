@@ -206,3 +206,38 @@ describe('roteamento sem substituição da sessão comercial', () => {
     expect(indexSource.slice(auth)).not.toContain('maintenance(request)');
   });
 });
+
+
+describe('cadastro atual no relatório de clientes', () => {
+  it.each(['all', 'S', 'N'] as const)('filtra ATIVO=%s sem trocar a carteira nem o histórico autorizado', async active => {
+    const g = transport([{ CODPARC: 10, CODEMP: null, ATIVO: active === 'all' ? null : active }], 1);
+    const result = await readWindow(g, { resource: 'customers', offset: 0, limit: 10, filters: { active, customerCode: 10, sellerCode: 12 } }, seller);
+    expect(result.items[0]).toMatchObject({ id: 'sankhya:customer:10', active: active === 'all' ? null : active === 'S' });
+    for (const [sql, limit] of g.select.mock.calls) {
+      expect(sql).toContain('P.CODVEND=12'); expect(sql).toContain('P.CODPARC=10');
+      expect(sql).toContain('P.CODEMP IN (4)'); expect(limit).toBeLessThanOrEqual(50);
+      if (active === 'all') expect(sql).not.toMatch(/P\.ATIVO=/);
+      else expect(sql).toContain(`P.ATIVO='${active}'`);
+    }
+  });
+  it('gestor só reduz o escopo explícito; o filtro não concede outro vendedor', async () => {
+    const g = transport([], 0), scope = { role: 'gestor' as const, sellerCode: 34, companyCodes: [1, 4], teamSellerCodes: [12] };
+    await readWindow(g, { resource: 'customers', offset: 0, limit: 50, filters: { active: 'all', sellerCode: 12 } }, scope);
+    expect(g.select.mock.calls[0]![0]).toContain('P.CODVEND IN (34,12)');
+    expect(g.select.mock.calls[0]![0]).toContain('P.CODVEND=12');
+    g.select.mockClear();
+    await expect(readWindow(g, { resource: 'customers', offset: 0, limit: 10, filters: { active: 'all', sellerCode: 99 } }, scope)).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
+    expect(g.select).not.toHaveBeenCalled();
+  });
+  it.each([
+    { filters: { active: 'Ativo' } }, { filters: { active: null } }, { filters: { active: true } },
+    { filters: { customerCode: 0 } }, { filters: { customerCode: '10' } }, { filters: { customerCode: 1.5 } },
+    { filters: { customerCode: 2147483648 } }, { filters: { customerCode: '1 OR 1=1' } },
+    { resource: 'products', filters: { active: 'all' } }, { resource: 'sellers', filters: { active: 'N' } },
+    { resource: 'products', filters: { customerCode: 10 } }, { resource: 'sellers', filters: { customerCode: 10 } },
+  ])('recusa filtro incompatível sem consultar o ERP: %j', async bad => {
+    const g = transport();
+    await expect(readWindow(g, { resource: 'customers', offset: 0, limit: 10, ...bad } as WindowInput, admin)).rejects.toBeDefined();
+    expect(g.select).not.toHaveBeenCalled();
+  });
+});

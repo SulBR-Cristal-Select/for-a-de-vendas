@@ -8,7 +8,8 @@ import { Badge as bi, Button as Ft, PageHeading as Hp, PageToolbar as nv, TableT
 import catalogo from './catalogo.json';
 import { assertManualMutation, manualRows, useERPCategories, useERPRecord, useERPDocument, useERPTable } from './erp-hooks';
 import type { ERPClient, ERPQueryRef } from './erp-hooks';
-import { useERPOrderLookups } from './erp-order-lookups';
+import { useERPCustomerReportLookups, useERPOrderLookups } from './erp-order-lookups';
+import { customerReportFilters, localCustomerReportRows, remoteCustomerReport } from './erp-customer-report';
 import { ERPCombobox as Sl } from './erp-combobox';
 import type { ERPPrice, ERPRow } from '../lib/erp-online';
 import { workspaceERPSeller } from '../lib/erp-identity';
@@ -322,7 +323,7 @@ function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r
 function z(e: any, t: any, a: any = undefined, o: any = {}): any {
     return { key: e, header: t, cell: a || ((n: any) => n[e] ?? pa), ...o };
 }
-function Gp({ rows: e, name: t, columns: a, remoteResource }: any): any {
+function Gp({ rows: e, name: t, columns: a, remoteResource, transformRows }: any): any {
     const { online, queryMetadata } = qa();
     return (0, b.jsxs)(xt, {
         onClick: async () => {
@@ -333,6 +334,7 @@ function Gp({ rows: e, name: t, columns: a, remoteResource }: any): any {
                 if (!metadata) throw new Error("Consulta ERP indisponível. Tente novamente.");
                 rows = await metadata.exportRows();
             }
+            if (transformRows) rows = transformRows(rows);
             let o: any = a ||
                 Object.keys(rows[0] || {}).filter((s: any) => !["items", "variants"].includes(s)), n: any = (s: any) => '"' + String(s ?? "").replaceAll('"', '""') + '"', r: any = "\uFEFF" +
                 [
@@ -359,8 +361,11 @@ function w5(e: any): any {
             ((!o.from || l.date >= o.from) && (!o.to || l.date <= o.to))));
     return { open: t, setOpen: a, f: o, setF: n, rows: r };
 }
-function E5({ filter: e, rows: t }: any): any {
-    let { db: a } = qa(), [o, n] = (0, He.useState)(e.f);
+function E5({ filter: e, rows: t, customerReport = false }: any): any {
+    let { db: a, online } = qa(), [o, n] = (0, He.useState)(e.f);
+    const lookups = useERPCustomerReportLookups(customerReport && e.open ? online : undefined, o.customer || '', o.seller || '');
+    const lookupError = lookups.customers.error || lookups.sellers.error;
+    (0, He.useEffect)(() => { if (lookupError) go(lookupError); }, [lookupError]);
     (0, He.useEffect)(() => {
         e.open && n(e.f);
     }, [e.open]);
@@ -395,21 +400,23 @@ function E5({ filter: e, rows: t }: any): any {
                     placeholder: "Todos os clientes",
                     value: o.customer,
                     onValueChange: (l: any) => r("customer", l),
-                    options: a.customers.map((l: any) => ({
+                    options: (customerReport ? [...manualRows(a.customers), ...lookups.customers.rows] : a.customers).map((l: any) => ({
                         value: l.id,
                         label: l.name + " (" + l.code + ")",
                     })),
+                    remote: customerReport ? lookups.customers.matches : undefined,
                 }),
                 (0, b.jsx)(Sl, {
                     label: "Vendedor",
                     placeholder: "Todos os vendedores",
                     value: o.seller,
                     onValueChange: (l: any) => r("seller", l),
-                    options: La([
+                    options: customerReport ? La(['', ...lookups.sellers.rows.map((l: any) => ({ value: l.id, label: l.name }))]) : La([
                         "",
                         ...new Set(a.orders.map((l: any) => l.seller)),
                         a.company.user,
                     ]),
+                    remote: customerReport ? lookups.sellers.matches : undefined,
                 }),
                 (0, b.jsx)(ho, {
                     label: "Situa\xE7\xE3o",
@@ -3003,7 +3010,11 @@ function xz(): any {
     });
 }
 function bz({ id: e }: any): any {
-    let { db: t, editor: a, update: o } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
+    let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
+    const customerReport = e === 'clientes' && !!online;
+    const remote = He.useMemo(() => customerReport && remoteCustomerReport(r.f)
+        ? { client: online, resource: 'customers', filters: customerReportFilters(r.f) } : undefined,
+        [online, e, r.f.customer, r.f.seller, r.f.status]);
     if (!n)
         return (0, b.jsx)(Wu, {});
     const reportMonth=r.f.from?.slice(0,7) || r.f.to?.slice(0,7) || businessDate().slice(0,7);
@@ -3529,6 +3540,7 @@ function bz({ id: e }: any): any {
                 }),
             ],
         });
+    if (customerReport) m = localCustomerReportRows(t.customers, r.f);
     let g: any = p.filter((h: any) => !c.includes(h.key));
     return (0, b.jsxs)(fa, {
         width: "wide",
@@ -3540,6 +3552,8 @@ function bz({ id: e }: any): any {
                 actions: (0, b.jsx)(Gp, {
                     rows: csvRows(m, p.filter((h: any) => !h.action)),
                     name: "relatorio-" + e,
+                    remoteResource: remote ? 'customers' : undefined,
+                    transformRows: remote ? (rows: any[]) => csvRows(rows, p.filter((h: any) => !h.action)) : undefined,
                     columns: p.filter((h: any) => !h.action).map((h: any) => h.key),
                 }),
             }),
@@ -3565,6 +3579,7 @@ function bz({ id: e }: any): any {
             C,
             (0, b.jsx)(ya, {
                 rows: m,
+                remote,
                 label: n.name,
                 columns: g,
                 actions: (0, b.jsxs)(b.Fragment, {
@@ -3581,7 +3596,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: t.orders }),
+            (0, b.jsx)(E5, { filter: r, rows: customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),

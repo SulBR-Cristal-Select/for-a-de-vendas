@@ -6,7 +6,7 @@ export type ReadScope = { role: 'administrador' | 'gestor' | 'vendedor'; sellerC
 export type Resource = 'customers' | 'products' | 'sellers';
 export type SortKey = 'code' | 'name' | 'city' | 'state' | 'seller' | 'blocked' | 'source' | 'icon' | 'category' | 'unit' | 'price';
 export type WindowInput = Omit<PageInput, 'page' | 'pageSize'> & { offset: number; limit: number };
-export type PageInput = { resource: Resource; page?: number; pageSize?: 10 | 20 | 50; search?: string; sort?: SortKey; direction?: 'asc' | 'desc'; filters?: { companyCode?: number; sellerCode?: number; managerCode?: number; categoryCode?: number; categoryName?: string; cityCode?: number } };
+export type PageInput = { resource: Resource; page?: number; pageSize?: 10 | 20 | 50; search?: string; sort?: SortKey; direction?: 'asc' | 'desc'; filters?: { companyCode?: number; sellerCode?: number; managerCode?: number; categoryCode?: number; categoryName?: string; cityCode?: number; customerCode?: number; active?: 'S' | 'N' | 'all' } };
 export type RecordInput = { resource: Resource; id: number | string };
 export type FacetInput = PageInput & { facet: 'category' | 'seller' | 'company' | 'city' };
 type Row = Record<string, unknown>;
@@ -89,14 +89,20 @@ function queryParts(input: PageInput & Partial<WindowInput>, trustedScope: ReadS
   const sort = input.sort ?? 'code', direction = input.direction ?? 'asc';
   if (typeof sort !== 'string' || !Object.hasOwn(sortFields[r], sort) || !['asc', 'desc'].includes(direction)) invalid();
   const filters = input.filters ?? {};
-  keys(filters, ['companyCode', 'sellerCode', 'managerCode', 'categoryCode', 'categoryName', 'cityCode']);
+  keys(filters, ['companyCode', 'sellerCode', 'managerCode', 'categoryCode', 'categoryName', 'cityCode', 'customerCode', 'active']);
+  if (filters.active !== undefined && (r !== 'customers' || !['S', 'N', 'all'].includes(filters.active))) invalid();
+  if (filters.customerCode !== undefined && r !== 'customers') invalid();
   let companies = scope.companies;
   if (filters.companyCode !== undefined) {
     const company = integer(filters.companyCode);
     if (!companies.includes(company)) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
     companies = [company];
   }
-  const where = baseWhere(r, scope, true, companies);
+  // O relatório consulta o cadastro atual inteiro sem somar carteiras de filiais.
+  // Catálogo e seletores mantêm ATIVO=S quando o filtro não é informado.
+  const where = baseWhere(r, scope, filters.active !== 'N' && filters.active !== 'all', companies);
+  if (filters.active === 'N') where.push("P.ATIVO='N'");
+  if (filters.customerCode !== undefined) where.push(`P.CODPARC=${integer(filters.customerCode)}`);
   if (filters.sellerCode !== undefined) {
     const seller = integer(filters.sellerCode);
     if (r === 'products') invalid();
@@ -145,7 +151,7 @@ const num = (v: unknown): number | null => {
 function dto(r: Resource, row: Row) {
   if (r === 'customers' && (row['CODEMP'] === undefined || row['CODEMP'] === '')) throw new SankhyaError('ERP_INVALID_RESPONSE', 'Filial ERP não confirmada.');
   const common = { source: 'observado', readOnly: true, active: row['ATIVO'] === 'S' };
-  if (r === 'customers') return { ...common, id: `sankhya:customer:${row['CODPARC']}`, code: text(row['CODPARC']), name: text(row['RAZAOSOCIAL']), fantasy: text(row['NOMEPARC']), cnpj: text(row['CGC_CPF']), ie: row['TIPPESSOA'] === 'J' ? text(row['IDENTINSCESTAD']) : null, credit: num(row['LIMCRED']), city: text(row['NOMECID']), state: text(row['UF']), district: text(row['NOMEBAI']), address: [[row['TIPO'], row['NOMEEND']].filter(Boolean).join(' '), row['NUMEND'], row['COMPLEMENTO'], row['NOMEBAI']].filter(Boolean).join(', ') || null, number: text(row['NUMEND']), complement: text(row['COMPLEMENTO']), cep: text(row['CEP']), phone: text(row['TELEFONE']), email: text(row['EMAIL']), seller: text(row['APELIDO']), sellerCode: num(row['CODVEND']), creditBlocked: row['BLOQUEAR'] === 'S', erp: { source: 'sankhya', readOnly: true, partnerCode: num(row['CODPARC']), sellerCode: num(row['CODVEND']), companyCode: num(row['CODEMP']), tableCode: num(row['CODTAB']), personType: text(row['TIPPESSOA']), creditBlocked: row['BLOQUEAR'] === 'S', contexts: [] } };
+  if (r === 'customers') return { ...common, active: row['ATIVO'] === 'S' ? true : row['ATIVO'] === 'N' ? false : null, id: `sankhya:customer:${row['CODPARC']}`, code: text(row['CODPARC']), name: text(row['RAZAOSOCIAL']), fantasy: text(row['NOMEPARC']), cnpj: text(row['CGC_CPF']), ie: row['TIPPESSOA'] === 'J' ? text(row['IDENTINSCESTAD']) : null, credit: num(row['LIMCRED']), city: text(row['NOMECID']), state: text(row['UF']), district: text(row['NOMEBAI']), address: [[row['TIPO'], row['NOMEEND']].filter(Boolean).join(' '), row['NUMEND'], row['COMPLEMENTO'], row['NOMEBAI']].filter(Boolean).join(', ') || null, number: text(row['NUMEND']), complement: text(row['COMPLEMENTO']), cep: text(row['CEP']), phone: text(row['TELEFONE']), email: text(row['EMAIL']), seller: text(row['APELIDO']), sellerCode: num(row['CODVEND']), creditBlocked: row['BLOQUEAR'] === 'S', erp: { source: 'sankhya', readOnly: true, partnerCode: num(row['CODPARC']), sellerCode: num(row['CODVEND']), companyCode: num(row['CODEMP']), tableCode: num(row['CODTAB']), personType: text(row['TIPPESSOA']), creditBlocked: row['BLOQUEAR'] === 'S', contexts: [] } };
   if (r === 'products') {
     if (row['AGRUPMIN'] === undefined || ![null, 'S', 'N'].includes(row['BLOQVENDAFRAC'] as null | string)) throw new SankhyaError('ERP_INVALID_RESPONSE', 'Regras de quantidade ERP não confirmadas.');
     const grouping = num(row['AGRUPMIN']);
