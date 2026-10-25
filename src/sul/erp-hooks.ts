@@ -5,7 +5,7 @@ import { compareERP, foldERPText, type ERPSortKey } from '../lib/erp-order';
 import { paginateERP, type ERPMergedPage } from '../lib/erp-paging';
 
 export type ERPClient = ReturnType<typeof createERPClient>;
-export type ERPDescriptor = { client: ERPClient; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string };
+export type ERPDescriptor = { client: ERPClient; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters'] };
 export type ERPQueryMetadata = { exportRows: () => Promise<ERPRow[]> };
 export type ERPQueryRef = MutableRefObject<Partial<Record<ERPResource | 'orders' | 'invoices', ERPQueryMetadata>>>;
 type ERPTableQuery = ERPPageQuery | Omit<ERPHistoryQuery, 'offset' | 'limit'>;
@@ -39,7 +39,7 @@ function queryFor(descriptor: ERPDescriptor, search: string, sort: Sort): ERPTab
     const key = sort && (['delivery', 'cargoStatus'].includes(sort.key) ? 'code' : sort.key);
     return { resource: descriptor.resource, search, ...(descriptor.customerId ? { customerId: descriptor.customerId } : {}), ...(sort && key ? { sort: key, direction: sort.dir } : {}) };
   }
-  return { resource: descriptor.resource, search, ...(sort ? { sort: sort.key as ERPSortKey, direction: sort.dir } : {}), ...(descriptor.categoryName ? { filters: { categoryName: descriptor.categoryName } } : {}) };
+  return { resource: descriptor.resource, search, ...(sort ? { sort: sort.key as ERPSortKey, direction: sort.dir } : {}), ...(descriptor.filters || descriptor.categoryName ? { filters: { ...descriptor.filters, ...(descriptor.categoryName ? { categoryName: descriptor.categoryName } : {}) } } : {}) };
 }
 const message = (error: unknown): string => error instanceof Error ? error.message : new ERPOnlineError('ERP_UNAVAILABLE').message;
 
@@ -74,7 +74,7 @@ export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[
   const client = descriptor?.client, resource = descriptor?.resource;
   const locals = useMemo(() => historyResource(resource) ? emptyRows : manualRows(rows), [rowsKey, resource]);
   const categoryName = descriptor?.categoryName, customerId = descriptor?.customerId;
-  const scopeKey = JSON.stringify([resource, categoryName, customerId, rowsKey]);
+  const scopeKey = JSON.stringify([resource, categoryName, customerId, descriptor?.filters, rowsKey]);
   const baseKey = JSON.stringify([scopeKey, search, sort]);
   const current = useRef({ key: baseKey, client });
   current.current = { key: baseKey, client };

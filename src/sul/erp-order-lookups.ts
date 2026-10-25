@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ERPClient } from "./erp-hooks";
-import type { ERPResource, ERPRow } from "../lib/erp-online";
+import type { ERPPageQuery, ERPResource, ERPRow } from "../lib/erp-online";
 import type { ERPMatches } from "./erp-combobox";
 
 const recursos = ["customers", "products", "sellers"] as const;
@@ -39,7 +39,7 @@ function unir(linhas: ERPRow[], selecionados: ERPRow[]): ERPRow[] {
   return [...new Map([...selecionados, ...linhas].map((linha) => [linha["id"], linha])).values()];
 }
 
-function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: readonly string[]) {
+function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: readonly string[], filters?: ERPPageQuery['filters']) {
   const [estado, definirEstado] = useState<Consulta>({
     rows: [],
     loading: !!client,
@@ -89,6 +89,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
       try {
         const pagina = await client!.window({
           resource: recurso,
+          ...(filters ? { filters } : {}),
           search: consulta,
           sort: "name",
           direction: "asc",
@@ -160,7 +161,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
       document.removeEventListener("focusin", entrada, true);
       document.removeEventListener("scroll", rolagem, true);
     };
-  }, [client, recurso]);
+  }, [client, recurso, JSON.stringify(filters)]);
 
   useEffect(() => {
     if (!client) return;
@@ -221,6 +222,13 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
     total: pagina?.total,
     hasMore: pagina?.hasMore ?? false,
   };
+}
+
+/** Filtros do relatório existente: somente os dois cadastros necessários, por código. */
+export function useERPCustomerReportLookups(client: ERPClient | undefined, customerId: string, sellerId: string) {
+  const customers = useConsulta(client, 'customers', customerId ? [customerId] : [], { active: 'all' });
+  const sellers = useConsulta(client, 'sellers', sellerId ? [sellerId] : []);
+  return { customers, sellers };
 }
 
 /** Cadastros de pedido exclusivamente transitórios; a autenticação permanece no servidor. */

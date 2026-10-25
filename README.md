@@ -125,3 +125,11 @@ O diagnóstico administrativo fixo `analytics/customers` reutiliza a carteira de
 A atividade local existente é registrada com status `Realizada` e `data.date`. Porém `workspace_records.customer_id` referencia clientes locais e o proprietário é validado pelo contrato transacional: não há vínculo ERP persistível comprovado. Por isso a cobertura ERP permanece nula/indisponível, mesmo com denominador ativo conhecido. Nenhum cliente foi clonado, nenhuma FK/guarda de proprietário afrouxada e nenhuma migração aplicada para contornar a limitação.
 
 647 testes/27 arquivos,34 casos novos (incluindo execução da lógica SQL em SQLite local com adaptação explícita de datas/paginação, não Oracle). TypeScript app/handler, builds e invariância dos três pacotes públicos aprovados. As telas e homologações comerciais continuam pendentes; este delta não altera UI, preço, identidade, equipe ou faturamento.
+
+### Relatório de clientes online
+
+O relatório `clientes` usa o cadastro ERP atual, contado uma vez por parceiro no conjunto de filiais autorizado. Não soma carteiras de filiais compartilhadas, não depende de compras no período e não acrescenta dados ERP ao workspace. Catálogo e seletores de pedidos continuam com `ATIVO=S` por padrão; o relatório admite o cadastro inteiro ou os códigos nativos `S`/`N` no controle de situação existente. ATIVO desconhecido permanece nulo no DTO, não inativo.
+
+Busca, ordenação e páginas10/20/50 usam o leitor já existente. Os filtros de cliente/vendedor usam códigos técnicos; homônimos não se fundem, e o filtro nunca amplia o próprio vendedor/equipe privada. Cadastros manuais continuam separados e não ganham vínculo ERP por nome/documento. O CSV percorre apenas o recorte solicitado, em janelas de até50, confirma contagens e preserva as três colunas originais. Nenhum histórico é carregado para calcular a lista.
+
+Delta validado com673 testes/28 arquivos (26 novos), TypeScript do aplicativo/handler e builds. As588 propriedades visuais estáticas, componentes e CSS foram comparados à base08cf251: sem novos controles, textos ou classes. Isso conecta somente o relatório de clientes; não conclui os demais relatórios e os27 indicadores, nem homologação comercial, cobertura ERP ou ativação de perfis.
