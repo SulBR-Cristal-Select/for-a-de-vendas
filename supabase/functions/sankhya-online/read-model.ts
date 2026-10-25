@@ -71,6 +71,13 @@ function baseWhere(r: Resource, scope: ReturnType<typeof scopeOf>, active: boole
   }
   return where;
 }
+// Os indicadores reutilizam a carteira de leitura vigente; isso não resolve filial de pedido novo.
+export function currentCustomerWhere(trustedScope: ReadScope, companyCode: number, active = false): string[] {
+  const scope = scopeOf(trustedScope);
+  if ((companyCode !== 1 && companyCode !== 4) || !scope.companies.includes(companyCode))
+    throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
+  return baseWhere('customers', scope, active, [companyCode]);
+}
 function queryParts(input: PageInput & Partial<WindowInput>, trustedScope: ReadScope, extraKeys: string[] = [], window = false) {
   keys(input, ['resource', ...(window ? ['offset', 'limit'] : ['page', 'pageSize']), 'search', 'sort', 'direction', 'filters', ...extraKeys]);
   const r = resource(input.resource), scope = scopeOf(trustedScope);

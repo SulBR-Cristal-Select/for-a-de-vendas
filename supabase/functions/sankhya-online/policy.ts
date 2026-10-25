@@ -32,6 +32,13 @@ export const STANDARD_BILLING_REPORT_POLICY = Object.freeze({
   origin: STANDARD_SALES_REPORT_POLICY,
 });
 
+// Conceitos confirmados em25/10/2026 às07h25 (America/Sao_Paulo).
+export const CUSTOMER_INDICATOR_POLICY = Object.freeze({
+  newCustomer: Object.freeze({ event: 'first-recorded-standard-purchase' as const, dateField: 'DTNEG' as const, origin: STANDARD_SALES_REPORT_POLICY }),
+  activeCustomer: Object.freeze({ field: 'TGFPAR.ATIVO' as const, value: 'S' as const, ownership: 'current-CODVEND' as const, purchaseRequired: false }),
+  coverage: Object.freeze({ source: 'workspace_records' as const, kind: 'activities' as const, status: 'Realizada' as const, dateField: 'data.date' as const, distinctCustomers: true, denominator: 'active-current-wallet' as const }),
+});
+
 export function partnerCompany(code: unknown): 1 | 4 {
   if (code === null) return COMMERCIAL_POLICY.sharedPartnerCompany;
   if (code === 1 || code === 4) return code;
