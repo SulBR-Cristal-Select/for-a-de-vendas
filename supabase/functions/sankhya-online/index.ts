@@ -6,7 +6,7 @@ import { readPrice } from './price-context.ts';
 import { readCommercialDictionary } from './dictionary.ts';
 import { readPaymentOptions } from './payments.ts';
 import { revalidateOrderRequest } from './transactions.ts';
-import { readHistory, readDocument } from './history.ts';
+import { readHistory, readDocument, readSalesReport } from './history.ts';
 import { readWindow, readPage, readRecord, readFacets } from './read-model.ts';
 import { actorScope } from './identity.ts';
 
@@ -111,6 +111,7 @@ Deno.serve(async (request: Request) => {
     if (input.operation === 'prepare-order-save') return reply(await revalidateOrderRequest({ ...commercialGateway, contextPrices: q => gateway.contextPrices(q) }, input.query, profile, async (name, args) => await profile.client.rpc(name, args), attestOrder));
     if (input.operation === 'payment-options') return reply(await readPaymentOptions(commercialGateway, input.query, scope));
     if (input.operation === 'history') return reply(await readHistory(commercialGateway, input.query, scope));
+    if (input.operation === 'sales-report') return reply(await readSalesReport(commercialGateway, input.query, scope));
     if (input.operation === 'document') return reply(await readDocument(commercialGateway, input.query, scope));
     if (input.operation === 'commercial-options') return reply(await readOperationOptions(commercialGateway, input.query, scope));
     if (input.operation === 'commercial-dictionary') return reply(await readCommercialDictionary(commercialGateway, input.query, scope));

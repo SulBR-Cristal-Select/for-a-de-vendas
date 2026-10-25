@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
-import { ERPOnlineError, type createERPClient, type ERPPageQuery, type ERPHistoryQuery, type ERPResource, type ERPRow } from '../lib/erp-online';
+import { ERPOnlineError, type createERPClient, type ERPPageQuery, type ERPHistoryQuery, type ERPSalesQuery, type ERPSalesSummary, type ERPResource, type ERPRow } from '../lib/erp-online';
 import { compareERP, foldERPText, type ERPSortKey } from '../lib/erp-order';
 import { paginateERP, type ERPMergedPage } from '../lib/erp-paging';
 
 export type ERPClient = ReturnType<typeof createERPClient>;
-export type ERPDescriptor = { client: ERPClient; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters'] };
+export type ERPDescriptor = { client: ERPClient; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters']; salesReport?: Omit<ERPSalesQuery, 'resource' | 'offset' | 'limit'>; onSummary?: (summary: ERPSalesSummary | undefined) => void };
 export type ERPQueryMetadata = { exportRows: () => Promise<ERPRow[]> };
 export type ERPQueryRef = MutableRefObject<Partial<Record<ERPResource | 'orders' | 'invoices', ERPQueryMetadata>>>;
-type ERPTableQuery = ERPPageQuery | Omit<ERPHistoryQuery, 'offset' | 'limit'>;
+type ERPTableQuery = ERPPageQuery | Omit<ERPHistoryQuery, 'offset' | 'limit'> | Omit<ERPSalesQuery, 'offset' | 'limit'>;
 const historyResource = (resource: string | undefined) => resource === 'orders' || resource === 'invoices';
 export function historyPresentation(row: ERPRow): ERPRow {
   const erp = row['erp'] as ERPRow | undefined;
@@ -17,7 +17,9 @@ export function historyPresentation(row: ERPRow): ERPRow {
 }
 async function tableWindow(descriptor: ERPDescriptor, query: ERPTableQuery, offset: number, limit: number) {
   if (query.resource === 'orders' || query.resource === 'invoices') {
-    const result = await descriptor.client.history({ ...query, offset, limit });
+    const result = descriptor.salesReport
+      ? await descriptor.client.salesReport({ ...query, resource: 'orders', offset, limit })
+      : await descriptor.client.history({ ...query, offset, limit });
     return { ...result, items: result.items.map(historyPresentation) };
   }
   return descriptor.client.window({ ...query as ERPPageQuery, offset, limit });
@@ -36,8 +38,10 @@ function filtered(rows: ERPRow[], _resource: ERPDescriptor['resource'], search: 
 function queryFor(descriptor: ERPDescriptor, search: string, sort: Sort): ERPTableQuery {
   if (descriptor.resource === 'orders' || descriptor.resource === 'invoices') {
     // Entrega/carga não foram extraídas: todos os valores são desconhecidos e empatam pelo código.
-    const key = sort && (['delivery', 'cargoStatus'].includes(sort.key) ? 'code' : sort.key);
-    return { resource: descriptor.resource, search, ...(descriptor.customerId ? { customerId: descriptor.customerId } : {}), ...(sort && key ? { sort: key, direction: sort.dir } : {}) };
+    const candidate = sort && (['delivery', 'cargoStatus'].includes(sort.key) ? 'code' : sort.key);
+    const supported = descriptor.salesReport?.groupBy ? ['name', 'count', 'total'] : ['code', 'number', 'date', 'customer', 'seller', 'total', 'status', 'operation', 'company'];
+    const key = descriptor.salesReport && candidate && !supported.includes(candidate) ? undefined : candidate;
+    return { resource: descriptor.resource, ...descriptor.salesReport, search, ...(descriptor.customerId ? { customerId: descriptor.customerId } : {}), ...(sort && key ? { sort: key, direction: sort.dir } : {}) };
   }
   return { resource: descriptor.resource, search, ...(sort ? { sort: sort.key as ERPSortKey, direction: sort.dir } : {}), ...(descriptor.filters || descriptor.categoryName ? { filters: { ...descriptor.filters, ...(descriptor.categoryName ? { categoryName: descriptor.categoryName } : {}) } } : {}) };
 }
@@ -46,13 +50,14 @@ const message = (error: unknown): string => error instanceof Error ? error.messa
 /** Exportação explícita: janelas limitadas e contagens coerentes, sem fallback parcial. */
 export async function exportERPRows(descriptor: ERPDescriptor, query: ERPTableQuery, locals: ERPRow[], assertCurrent: () => void): Promise<ERPRow[]> {
   const rows: ERPRow[] = [], ids = new Set<unknown>();
-  let total: number | undefined, unfiltered: number | undefined;
+  let total: number | undefined, unfiltered: number | undefined, summaryKey: string | undefined;
   for (let offset = 0;; offset += 50) {
     assertCurrent();
     const result = await tableWindow(descriptor, query, offset, 50);
     assertCurrent();
-    if (total !== undefined && (total !== result.total || unfiltered !== result.totalWithoutSearch)) throw new ERPOnlineError('INVALID_RESPONSE');
-    total = result.total; unfiltered = result.totalWithoutSearch;
+    const nextSummary = 'summary' in result ? JSON.stringify(result.summary) : undefined;
+    if (total !== undefined && (total !== result.total || unfiltered !== result.totalWithoutSearch || summaryKey !== nextSummary)) throw new ERPOnlineError('INVALID_RESPONSE');
+    total = result.total; unfiltered = result.totalWithoutSearch; summaryKey = nextSummary;
     for (const row of result.items) {
       if (ids.has(row['id'])) throw new ERPOnlineError('INVALID_RESPONSE');
       ids.add(row['id']); rows.push(row);
@@ -62,7 +67,7 @@ export async function exportERPRows(descriptor: ERPDescriptor, query: ERPTableQu
   // Verifica a contagem novamente antes de permitir criar o arquivo.
   const check = await tableWindow(descriptor, query, 0, 1);
   assertCurrent();
-  if (check.total !== total || check.totalWithoutSearch !== unfiltered || rows.length !== total) throw new ERPOnlineError('INVALID_RESPONSE');
+  if (check.total !== total || check.totalWithoutSearch !== unfiltered || rows.length !== total || summaryKey !== ('summary' in check ? JSON.stringify(check.summary) : undefined)) throw new ERPOnlineError('INVALID_RESPONSE');
   // P/V são universos documentais separados, nunca mesclados a pedidos locais sem vínculo.
   if (historyResource(descriptor.resource)) return rows;
   const all = [...locals, ...rows];
@@ -74,7 +79,7 @@ export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[
   const client = descriptor?.client, resource = descriptor?.resource;
   const locals = useMemo(() => historyResource(resource) ? emptyRows : manualRows(rows), [rowsKey, resource]);
   const categoryName = descriptor?.categoryName, customerId = descriptor?.customerId;
-  const scopeKey = JSON.stringify([resource, categoryName, customerId, descriptor?.filters, rowsKey]);
+  const scopeKey = JSON.stringify([resource, categoryName, customerId, descriptor?.filters, descriptor?.salesReport, rowsKey]);
   const baseKey = JSON.stringify([scopeKey, search, sort]);
   const current = useRef({ key: baseKey, client });
   current.current = { key: baseKey, client };
@@ -103,16 +108,22 @@ export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[
     };
   }, [resource, exportMetadata, metadata]);
   useEffect(() => {
+    descriptor?.onSummary?.(undefined);
     if (!descriptor || !query || search !== debounced) return;
-    let alive = true;
+    let alive = true, summary: ERPSalesSummary | undefined;
     void paginateERP({ localRows: localFiltered, localTotalWithoutSearch: locals.length, skip: (page - 1) * pageSize, pageSize,
-      getWindow: (offset, limit) => tableWindow(descriptor, query, offset, limit),
+      getWindow: async (offset, limit) => {
+        const window = await tableWindow(descriptor, query, offset, limit);
+        if ('summary' in window) summary = window.summary as ERPSalesSummary;
+        return window;
+      },
       ...(sort ? { compare: compareERP(sort.key as ERPSortKey, sort.dir) } : {}),
     }).then(data => {
       if (!alive) return;
       const last = Math.max(1, Math.ceil(data.total / pageSize));
       if (page > last) { setNavigation({ key: baseKey, page: last, size: pageSize }); return; }
       setResult({ key: requestKey, scope: scopeKey, client: descriptor.client, data });
+      descriptor.onSummary?.(summary);
     }).catch(error => { if (alive) setResult({ key: requestKey, scope: scopeKey, client: descriptor.client, error: message(error) }); });
     return () => { alive = false; };
   }, [client, requestKey, debounced]);

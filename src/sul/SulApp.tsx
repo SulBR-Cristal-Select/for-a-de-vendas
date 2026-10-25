@@ -11,8 +11,10 @@ import type { ERPClient, ERPQueryRef } from './erp-hooks';
 import { useERPCustomerReportLookups, useERPOrderLookups } from './erp-order-lookups';
 import { customerReportFilters, localCustomerReportRows, remoteCustomerReport } from './erp-customer-report';
 import { completionOwners, completionRecords, filterCompletions } from './completion-report';
+import { salesReportQuery } from './erp-sales-report';
+import { formatERPAmount } from '../lib/erp-decimal';
 import { ERPCombobox as Sl } from './erp-combobox';
-import type { ERPPrice, ERPRow } from '../lib/erp-online';
+import type { ERPPrice, ERPRow, ERPSalesSummary } from '../lib/erp-online';
 import { workspaceERPSeller } from '../lib/erp-identity';
 import './sul.css';
 const He: any = React;
@@ -219,7 +221,7 @@ export function createMutationQueue(current: {
         return pending;
     };
 }
-var bo: any = businessDate(), pa: any = "N\xE3o extra\xEDdo", Xu: any = (e: any) => JSON.parse(JSON.stringify(e)), rt: any = (e: any) => (e == null ? pa : Vd(e)), xo: any = (e: any) => (e ? oI(e) : pa), La: any = (e: any) => e.map((t: any) => typeof t == "string" ? { value: t, label: t || "Todos" } : t), zp: any = (e: any, t: any) => e.customers.find((a: any) => a.id === t), Un: any = (e: any, t: any) => zp(e, t)?.name || "Cliente indispon\xEDvel", Ur: any = (e: any, t: any) => e.products.find((a: any) => a.id === t), Zo: any = (e: any, t: any) => e.reduce((a: any, o: any) => a + (Number(o[t]) || 0), 0), y5: any = (e: any) => Math.round(e * 100), d1: any = (items: any[], freight: any = 0) => commercialTotal(items, freight), I5: any = (0, He.createContext)(null), qa: any = () => (0, He.useContext)(I5);
+var bo: any = businessDate(), pa: any = "N\xE3o extra\xEDdo", Xu: any = (e: any) => JSON.parse(JSON.stringify(e)), rt: any = (e: any) => (e == null ? pa : typeof e === 'string' ? formatERPAmount(e) ?? pa : Vd(e)), xo: any = (e: any) => (e ? oI(e) : pa), La: any = (e: any) => e.map((t: any) => typeof t == "string" ? { value: t, label: t || "Todos" } : t), zp: any = (e: any, t: any) => e.customers.find((a: any) => a.id === t), Un: any = (e: any, t: any) => zp(e, t)?.name || "Cliente indispon\xEDvel", Ur: any = (e: any, t: any) => e.products.find((a: any) => a.id === t), Zo: any = (e: any, t: any) => e.reduce((a: any, o: any) => a + (Number(o[t]) || 0), 0), y5: any = (e: any) => Math.round(e * 100), d1: any = (items: any[], freight: any = 0) => commercialTotal(items, freight), I5: any = (0, He.createContext)(null), qa: any = () => (0, He.useContext)(I5);
 function sellerNames(db: any): string[] { return [...new Set<string>([db.company.user, ...(db.users || []).filter((u: any) => u.active !== false).map((u: any) => u.name)].filter(Boolean))]; }
 function qr({ row: e }: any): any {
     const source = e?.source;
@@ -363,9 +365,10 @@ function w5(e: any): any {
             ((!o.from || l.date >= o.from) && (!o.to || l.date <= o.to))));
     return { open: t, setOpen: a, f: o, setF: n, rows: r };
 }
-function E5({ filter: e, rows: t, customerReport = false, localOwners }: any): any {
+function E5({ filter: e, rows: t, customerReport = false, salesReport = false, localOwners }: any): any {
     let { db: a, online } = qa(), [o, n] = (0, He.useState)(e.f);
-    const lookups = useERPCustomerReportLookups(customerReport && e.open ? online : undefined, o.customer || '', o.seller || '');
+    const remoteFilters = customerReport || salesReport;
+    const lookups = useERPCustomerReportLookups(remoteFilters && e.open ? online : undefined, o.customer || '', o.seller || '');
     const lookupError = lookups.customers.error || lookups.sellers.error;
     (0, He.useEffect)(() => { if (lookupError) go(lookupError); }, [lookupError]);
     (0, He.useEffect)(() => {
@@ -402,23 +405,23 @@ function E5({ filter: e, rows: t, customerReport = false, localOwners }: any): a
                     placeholder: "Todos os clientes",
                     value: o.customer,
                     onValueChange: (l: any) => r("customer", l),
-                    options: (customerReport ? [...manualRows(a.customers), ...lookups.customers.rows] : a.customers).map((l: any) => ({
+                    options: (salesReport ? lookups.customers.rows : customerReport ? [...manualRows(a.customers), ...lookups.customers.rows] : a.customers).map((l: any) => ({
                         value: l.id,
                         label: l.name + " (" + l.code + ")",
                     })),
-                    remote: customerReport ? lookups.customers.matches : undefined,
+                    remote: remoteFilters ? lookups.customers.matches : undefined,
                 }),
                 (0, b.jsx)(Sl, {
                     label: "Vendedor",
                     placeholder: "Todos os vendedores",
                     value: o.seller,
                     onValueChange: (l: any) => r("seller", l),
-                    options: localOwners ? La(['', ...localOwners]) : customerReport ? La(['', ...lookups.sellers.rows.map((l: any) => ({ value: l.id, label: l.name }))]) : La([
+                    options: localOwners ? La(['', ...localOwners]) : remoteFilters ? La(['', ...lookups.sellers.rows.map((l: any) => ({ value: l.id, label: l.name }))]) : La([
                         "",
                         ...new Set(a.orders.map((l: any) => l.seller)),
                         a.company.user,
                     ]),
-                    remote: customerReport ? lookups.sellers.matches : undefined,
+                    remote: remoteFilters ? lookups.sellers.matches : undefined,
                 }),
                 (0, b.jsx)(ho, {
                     label: "Situa\xE7\xE3o",
@@ -3014,12 +3017,19 @@ function xz(): any {
 function bz({ id: e }: any): any {
     let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
     const customerReport = e === 'clientes' && !!online;
+    const salesReport = e === 'vendas' && !!online;
     const completionReport = e === 'tarefas';
     const completionExport = He.useRef(undefined);
     const completions = He.useMemo(() => completionReport ? completionRecords(t) : [], [completionReport, t.activities, t.tasks, t.customers]);
-    const remote = He.useMemo(() => customerReport && remoteCustomerReport(r.f)
+    const salesKey = JSON.stringify([e, l, r.f]);
+    const [salesResult, setSalesResult] = He.useState(undefined);
+    const onSalesSummary = He.useCallback((summary: ERPSalesSummary | undefined) => setSalesResult({ key: salesKey, summary }), [salesKey]);
+    const salesSummary: ERPSalesSummary | undefined = salesResult?.key === salesKey ? salesResult.summary : undefined;
+    const remote = He.useMemo(() => salesReport
+        ? { client: online, resource: 'orders', salesReport: salesReportQuery(r.f, l), onSummary: onSalesSummary }
+        : customerReport && remoteCustomerReport(r.f)
         ? { client: online, resource: 'customers', filters: customerReportFilters(r.f) } : undefined,
-        [online, e, r.f.customer, r.f.seller, r.f.status]);
+        [online, e, l, salesKey, onSalesSummary]);
     if (!n)
         return (0, b.jsx)(Wu, {});
     const reportMonth=r.f.from?.slice(0,7) || r.f.to?.slice(0,7) || businessDate().slice(0,7);
@@ -3546,6 +3556,7 @@ function bz({ id: e }: any): any {
             ],
         });
     if (customerReport) m = localCustomerReportRows(t.customers, r.f);
+    if (salesReport) m = [];
     let g: any = p.filter((h: any) => !c.includes(h.key));
     return (0, b.jsxs)(fa, {
         width: "wide",
@@ -3558,7 +3569,7 @@ function bz({ id: e }: any): any {
                     rows: csvRows(m, p.filter((h: any) => !h.action)),
                     name: "relatorio-" + e,
                     localRows: completionReport ? completionExport : undefined,
-                    remoteResource: remote ? 'customers' : undefined,
+                    remoteResource: remote?.resource,
                     transformRows: remote || completionReport ? (rows: any[]) => csvRows(rows, p.filter((h: any) => !h.action)) : undefined,
                     columns: p.filter((h: any) => !h.action).map((h: any) => h.key),
                 }),
@@ -3570,15 +3581,15 @@ function bz({ id: e }: any): any {
                     children: [
                         (0, b.jsx)(Ha, {
                             label: "Pedidos no recorte filtrado",
-                            value: d.length,
+                            value: salesReport ? salesSummary?.documentCount ?? pa : d.length,
                         }),
                         (0, b.jsx)(Ha, {
                             label: "Valor em pedidos",
-                            value: rt(Zo(d, "total")),
+                            value: salesReport ? rt(salesSummary?.documentAmount) : rt(Zo(d, "total")),
                         }),
                         (0, b.jsx)(Ha, {
                             label: "Ticket m\xE9dio em pedidos",
-                            value: d.length ? rt(Zo(d, "total") / d.length) : "\u2014",
+                            value: salesReport ? salesSummary ? formatERPAmount(salesSummary.documentAmount, salesSummary.documentCount) ?? (salesSummary.documentCount === 0 ? "\u2014" : pa) : pa : d.length ? rt(Zo(d, "total") / d.length) : "\u2014",
                         }),
                     ],
                 }),
@@ -3603,7 +3614,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, localOwners: completionReport ? completionOwners(completions, t.users) : undefined }),
+            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : salesReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport, localOwners: completionReport ? completionOwners(completions, t.users) : undefined }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),
