@@ -173,12 +173,13 @@ async function readBillingDiagnostic(gateway: Transport, input: Row) {
   const dimensions = ['CODTIPOPER','OPERATION_VERSION','CODNAT',...Object.keys(flags)];
   const detail = `SELECT H.NUNOTA,H.CODTIPOPER,TO_CHAR(H.DHTIPOPER,'YYYY-MM-DD"T"HH24:MI:SS') AS OPERATION_VERSION,H.CODNAT,H.VLRNOTA,H.DTFATUR,${Object.entries(flags).map(([name, sql]) => `CASE WHEN ${sql} THEN 1 ELSE 0 END AS ${name}`).join(',')} FROM ${join} WHERE ${period} AND ${commercial}`;
   // A consulta externa contém uma linha por cabeçalho, sem multiplicar valores por TGFVAR/itens.
-  const sql = `SELECT ${dimensions.join(',')},COUNT(*) AS DOCUMENT_COUNT,SUM(CASE WHEN VLRNOTA IS NULL THEN 1 ELSE 0 END) AS MISSING_AMOUNT_COUNT,TO_CHAR(SUM(VLRNOTA),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS DOCUMENT_AMOUNT,TO_CHAR(MIN(DTFATUR),'YYYY-MM-DD') AS FIRST_DATE,TO_CHAR(MAX(DTFATUR),'YYYY-MM-DD') AS LAST_DATE FROM (${detail}) D GROUP BY ${dimensions.join(',')} ORDER BY ${dimensions.join(',')} OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`;
+  const sql = `SELECT ${dimensions.join(',')},MIN(NUNOTA) AS SAMPLE_DOCUMENT_CODE,COUNT(*) AS DOCUMENT_COUNT,SUM(CASE WHEN VLRNOTA IS NULL THEN 1 ELSE 0 END) AS MISSING_AMOUNT_COUNT,TO_CHAR(SUM(VLRNOTA),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS DOCUMENT_AMOUNT,TO_CHAR(MIN(DTFATUR),'YYYY-MM-DD') AS FIRST_DATE,TO_CHAR(MAX(DTFATUR),'YYYY-MM-DD') AS LAST_DATE FROM (${detail}) D GROUP BY ${dimensions.join(',')} ORDER BY ${dimensions.join(',')} OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`;
   const nativeRows = await gateway.select(sql, 50);
   const rows = nativeRows.map(row => {
     const flag = (name: string) => { const n = observedInteger(row[name]); return n === 0 ? false : n === 1 ? true : incompatible(); };
     const count = observedInteger(row['DOCUMENT_COUNT']), missingAmount = observedInteger(row['MISSING_AMOUNT_COUNT']);
-    if (count < 1 || missingAmount > count) return incompatible();
+    const sampleDocumentCode = observedInteger(row['SAMPLE_DOCUMENT_CODE']);
+    if (sampleDocumentCode < 1 || sampleDocumentCode > 2147483647 || count < 1 || missingAmount > count) return incompatible();
     const observedDay = (value: unknown): string => {
       if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return incompatible();
       const d = new Date(value + 'T00:00:00Z');
@@ -189,7 +190,7 @@ async function readBillingDiagnostic(gateway: Transport, input: Row) {
     const standardOrigin = flag('HAS_STANDARD_ORIGIN'), otherOrigin = flag('HAS_OTHER_ORIGIN'), unresolvedOrigin = flag('HAS_UNRESOLVED_ORIGIN'), unlinkedItem = flag('HAS_UNLINKED_ITEM'), hasItems = flag('HAS_ITEMS'), crossCompanyOrigin = flag('HAS_CROSS_COMPANY_ORIGIN');
     const eligible = standardOrigin && !otherOrigin && !unresolvedOrigin && !unlinkedItem && hasItems && !crossCompanyOrigin && missingAmount === 0;
     const amount = row['DOCUMENT_AMOUNT'] === null && missingAmount === count ? null : billingDecimal(row['DOCUMENT_AMOUNT']);
-    return { ...row, documentCount: count, missingAmountCount: missingAmount, documentAmount: amount, standardOrigin, otherOrigin, unresolvedOrigin, unlinkedItem, hasItems, crossCompanyOrigin, eligible };
+    return { ...row, sampleDocumentCode, documentCount: count, missingAmountCount: missingAmount, documentAmount: amount, standardOrigin, otherOrigin, unresolvedOrigin, unlinkedItem, hasItems, crossCompanyOrigin, eligible };
   });
   const hasMore = rows.length === 50;
   const pageDocumentCount = rows.reduce((n,r)=>n+r.documentCount,0);
