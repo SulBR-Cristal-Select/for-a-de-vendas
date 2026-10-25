@@ -286,7 +286,7 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
   return { ...observed(),items,total,totalWithoutSearch,offset:page.offset,summary,...(billing ? {billingPolicy:bp,linkMode:'direct-item-reference',quantitiesAllocated:false,ordersAdded:false,undatedTreatment:'excluded-without-date-fallback'} : {salesPolicy:policy}),...(mix ? {productCountPolicy:{field:'TGFITE.CODPROD',distinctPerCustomer:true,quantitiesAdded:false,missingItems:'unavailable'}} : {}),companyCodes:companies,groupBy:group ?? null };
 }
 
-export type OrderItemsReportInput = Omit<SalesReportInput,'groupBy'|'productMix'>;
+export type OrderItemsReportInput = Omit<SalesReportInput,'groupBy'|'productMix'> & {productReport?:true};
 const itemAggregate = `COUNT(*) AS LINE_COUNT,COUNT(DISTINCT TO_CHAR(I.NUNOTA)||':'||TO_CHAR(I.SEQUENCIA)) AS UNIQUE_LINE_COUNT,COUNT(CASE WHEN I.VLRTOT IS NULL THEN 1 END) AS MISSING_SUBTOTAL_COUNT,TO_CHAR(SUM(I.VLRTOT),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS ITEM_SUBTOTAL`;
 function itemSummary(row: Row | undefined) {
   const lineCount=salesCount(row,'LINE_COUNT'),missingSubtotalCount=salesCount(row,'MISSING_SUBTOTAL_COUNT');
@@ -297,13 +297,16 @@ function itemSummary(row: Row | undefined) {
 }
 /** Itens da venda padrão, sem cotação, rateio ou multiplicação de preço/quantidade. */
 export async function readOrderItemsReport(gateway: Transport,input: OrderItemsReportInput,scope: ReadScope) {
-  keys(input,['resource','offset','limit','customerId','sellerCode','status','search','sort','direction','from','to','companyCode']);
-  if(input.resource!=='orders'||input.status!==undefined&&input.status!=='confirmado')return invalid();
+  keys(input,['resource','offset','limit','customerId','sellerCode','status','search','sort','direction','from','to','companyCode','productReport']);
+  if(input.resource!=='orders'||input.status!==undefined&&input.status!=='confirmado'||input.productReport!==undefined&&input.productReport!==true)return invalid();
+  const products=input.productReport===true;
   const allowed=scopeOf(scope),page=windowOf(input.offset,input.limit),policy=STANDARD_SALES_REPORT_POLICY;
   let companies=allowed.companies;
   if(input.companyCode!==undefined){integer(input.companyCode);if(!companies.includes(input.companyCode))throw new SankhyaError('ERP_SCOPE_FORBIDDEN','Filial fora do escopo autorizado.',403);companies=[input.companyCode];}
-  const sort=input.sort??'date',direction=input.direction??'desc';
-  const itemSorts:Record<string,string>={name:foldSQL('PR.DESCRPROD'),date:'C.DTNEG',number:'C.NUMNOTA',customer:foldSQL('P.RAZAOSOCIAL'),price:'I.VLRUNIT',qty:'I.QTDNEG',total:'I.VLRTOT'};
+  const sort=input.sort??(products?'name':'date'),direction=input.direction??(products?'asc':'desc');
+  const invalidUnit="I.CODVOL IS NULL OR LENGTH(TRIM(I.CODVOL))=0";
+  const quantityKnown=`COUNT(CASE WHEN I.QTDNEG IS NULL OR (${invalidUnit}) THEN 1 END)=0 AND COUNT(DISTINCT I.CODVOL)=1`;
+  const itemSorts:Record<string,string>=products?{code:'I.CODPROD',name:foldSQL('PR.DESCRPROD'),qty:`CASE WHEN ${quantityKnown} THEN SUM(I.QTDNEG) END`,total:'SUM(I.VLRTOT)'}:{name:foldSQL('PR.DESCRPROD'),date:'C.DTNEG',number:'C.NUMNOTA',customer:foldSQL('P.RAZAOSOCIAL'),price:'I.VLRUNIT',qty:'I.QTDNEG',total:'I.VLRTOT'};
   if(typeof sort!=='string'||!Object.hasOwn(itemSorts,sort)||!['asc','desc'].includes(direction))return invalid();
   const start=dateInput(input.from),end=dateInput(input.to),search=searchText(input.search);if(start&&end&&start>end)return invalid();
   const candidate=[...baseWhere(allowed,'P',companies),`C.CODTIPOPER=${policy.operationCode}`,`C.CODNAT=${policy.natureCode}`,`C.STATUSNOTA='${policy.statusCode}'`];
@@ -320,13 +323,28 @@ export async function readOrderItemsReport(gateway: Transport,input: OrderItemsR
   const meta=await gateway.select(`SELECT TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE ${Object.entries(required).map(([t,cols])=>`(TABLE_NAME='${t}' AND COLUMN_NAME IN (${Object.keys(cols).map(literal).join(',')}))`).join(' OR ')} ORDER BY TABLE_NAME,COLUMN_NAME FETCH FIRST 50 ROWS ONLY`,50);
   for(const [table,cols]of Object.entries(required))for(const [name,type]of Object.entries(cols))if(!meta.some(r=>r['TABLE_NAME']===table&&r['COLUMN_NAME']===name&&(type==='text'?['CHAR','VARCHAR2','NCHAR','NVARCHAR2'].includes(String(r['DATA_TYPE'])):type==='decimal'?['NUMBER','FLOAT'].includes(String(r['DATA_TYPE'])):r['DATA_TYPE']===type)))return unsupportedSales();
   const invalidTop="T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'P' OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1)";
-  const guard=await gateway.select(`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} LEFT JOIN TGFITE I ON I.NUNOTA=C.NUNOTA WHERE ${candidate.join(' AND ')} AND ((${invalidTop}) OR (T.BONIFICACAO='N' AND T.GOLDEV=1 AND I.NUNOTA IS NOT NULL AND (I.CODEMP IS NULL OR I.CODEMP<>C.CODEMP OR I.CODPROD IS NULL OR I.SEQUENCIA IS NULL)))`,1);
+  const groupedIdentity=products?' OR I.CODPROD<1 OR I.CODPROD>2147483647 OR I.CODPROD<>ROUND(I.CODPROD,0) OR I.SEQUENCIA< -2147483648 OR I.SEQUENCIA>2147483647 OR I.SEQUENCIA<>ROUND(I.SEQUENCIA,0) OR C.NUNOTA<1 OR C.NUNOTA>2147483647 OR C.NUNOTA<>ROUND(C.NUNOTA,0)':'';
+  const guard=await gateway.select(`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} LEFT JOIN TGFITE I ON I.NUNOTA=C.NUNOTA WHERE ${candidate.join(' AND ')} AND ((${invalidTop}) OR (T.BONIFICACAO='N' AND T.GOLDEV=1 AND I.NUNOTA IS NOT NULL AND (I.CODEMP IS NULL OR I.CODEMP<>C.CODEMP OR I.CODPROD IS NULL OR I.SEQUENCIA IS NULL${groupedIdentity})))`,1);
   if(guard.length!==1)return incompatible();if(salesCount(guard[0],'MISSING_CONTEXT_COUNT')!==0)return unsupportedSales();
   const withoutSearch=[...candidate,`T.TIPMOV='${policy.movement}'`,`T.BONIFICACAO='${policy.bonification}'`,`T.GOLDEV=${policy.devolution}`];
   const where=[...withoutSearch],itemFrom=`${fromSQL} JOIN TGFITE I ON I.NUNOTA=C.NUNOTA LEFT JOIN TGFPRO PR ON PR.CODPROD=I.CODPROD`;
   if(search){const term=literal('%'+foldERPText(search).replace(/[!%_]/g,c=>'!'+c)+'%');where.push(`(${['TO_CHAR(C.NUNOTA)','TO_CHAR(C.NUMNOTA)','TO_CHAR(I.CODPROD)','PR.DESCRPROD','P.RAZAOSOCIAL','V.APELIDO','I.CODVOL'].map(f=>`${foldSQL(f)} LIKE ${term} ESCAPE '!'`).join(' OR ')})`);}
-  const sums=await gateway.select(`SELECT ${itemAggregate} FROM ${itemFrom} WHERE ${where.join(' AND ')}`,1);if(sums.length!==1)return incompatible();const summary=itemSummary(sums[0]),total=summary.lineCount;
-  const totalWithoutSearch=search?await count(gateway,itemFrom,withoutSearch):total;if(total>totalWithoutSearch)return incompatible();
+  const sums=await gateway.select(`SELECT ${itemAggregate} FROM ${itemFrom} WHERE ${where.join(' AND ')}`,1);if(sums.length!==1)return incompatible();const summary=itemSummary(sums[0]);
+  const grouped=(conditions:string[])=>`(SELECT I.CODPROD,PR.DESCRPROD FROM ${itemFrom} WHERE ${conditions.join(' AND ')} GROUP BY I.CODPROD,PR.DESCRPROD) G`;
+  const total=products?await count(gateway,grouped(where),['1=1']):summary.lineCount;
+  const totalWithoutSearch=search?await count(gateway,products?grouped(withoutSearch):itemFrom,products?['1=1']:withoutSearch):total;if(total>totalWithoutSearch||total>summary.lineCount)return incompatible();
+  if(products){
+    const rows=await gateway.select(`SELECT I.CODPROD,PR.DESCRPROD,${itemAggregate},COUNT(CASE WHEN I.QTDNEG IS NULL THEN 1 END) AS MISSING_QUANTITY_COUNT,COUNT(CASE WHEN ${invalidUnit} THEN 1 END) AS MISSING_UNIT_COUNT,COUNT(DISTINCT I.CODVOL) AS UNIT_COUNT,CASE WHEN COUNT(CASE WHEN ${invalidUnit} THEN 1 END)=0 AND COUNT(DISTINCT I.CODVOL)=1 THEN MIN(I.CODVOL) END AS UNIT_CODE,CASE WHEN ${quantityKnown} THEN TO_CHAR(SUM(I.QTDNEG),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') END AS QUANTITY FROM ${itemFrom} WHERE ${where.join(' AND ')} GROUP BY I.CODPROD,PR.DESCRPROD ORDER BY ${itemSorts[sort]} ${direction.toUpperCase()} NULLS LAST,I.CODPROD ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`,page.limit);
+    const items=rows.map(r=>{const product=code(r['CODPROD']),part=itemSummary(r),missingQuantityCount=salesCount(r,'MISSING_QUANTITY_COUNT'),missingUnitCount=salesCount(r,'MISSING_UNIT_COUNT'),unitCount=salesCount(r,'UNIT_COUNT');
+      if(part.lineCount<1||missingQuantityCount>part.lineCount||missingUnitCount>part.lineCount||unitCount>part.lineCount)return incompatible();
+      const unitKnown=unitCount===1&&missingUnitCount===0,qtyKnown=unitKnown&&missingQuantityCount===0,unit=text(r['UNIT_CODE']);
+      if(unitKnown?unit===null||unit.trim()==='':unit!==null)return incompatible();
+      const qty=r['QUANTITY']===null?null:salesAmount(r['QUANTITY']);if(qtyKnown?qty===null:qty!==null)return incompatible();
+      return{id:`sankhya:items:product:${product}`,source:'observado',readOnly:true,productId:`sankhya:product:${product}`,code:String(product),name:text(r['DESCRPROD']),qty,total:part.subtotal,unit,lineCount:part.lineCount,missingSubtotalCount:part.missingSubtotalCount,missingQuantityCount,missingUnitCount,unitCount};});
+    verifyPage(items,total,page.offset,page.limit);if(new Set(items.map(i=>i.id)).size!==items.length)return incompatible();
+    if(page.offset===0&&items.length===total&&(items.reduce((n,i)=>n+i.lineCount,0)!==summary.lineCount||items.reduce((n,i)=>n+i.missingSubtotalCount,0)!==summary.missingSubtotalCount||summary.subtotal!==null&&(items.some(i=>i.total===null)||decimalUnits(sumERPDecimals(items.map(i=>salesAmount(i.total))))!==decimalUnits(summary.subtotal))))return incompatible();
+    return{...observed(),items,total,totalWithoutSearch,offset:page.offset,summary,salesPolicy:policy,companyCodes:companies,productAggregation:{field:'TGFITE.CODPROD',mixedUnits:'unavailable',quantitiesConverted:false,subtotalReconstructed:false},groupBy:'product'};
+  }
   const order=`${itemSorts[sort]} ${direction.toUpperCase()} NULLS LAST,C.NUNOTA ${direction.toUpperCase()} NULLS LAST,I.SEQUENCIA ${direction.toUpperCase()} NULLS LAST`;
   const rows=await gateway.select(`SELECT C.NUNOTA,C.NUMNOTA,C.CODEMP,C.CODPARC,C.CODVEND,C.CODTIPOPER,C.CODNAT,C.TIPMOV,C.STATUSNOTA,TO_CHAR(C.DTNEG,'YYYY-MM-DD') AS ITEM_DATE,I.SEQUENCIA,I.CODEMP AS ITEM_COMPANY,I.CODPROD,I.CODVOL,PR.DESCRPROD,P.RAZAOSOCIAL,TO_CHAR(I.QTDNEG,'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS QUANTITY,TO_CHAR(I.VLRUNIT,'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS UNIT_PRICE,TO_CHAR(I.VLRTOT,'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS SUBTOTAL FROM ${itemFrom} WHERE ${where.join(' AND ')} ORDER BY ${order} OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`,page.limit);
   const items=rows.map(r=>{

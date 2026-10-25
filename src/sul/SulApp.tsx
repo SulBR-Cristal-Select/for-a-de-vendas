@@ -14,9 +14,10 @@ import { completionOwners, completionRecords, filterCompletions } from './comple
 import { opportunityReportRows, filterOpportunityRows, opportunityReportOwners } from './opportunity-report';
 import { salesReportQuery } from './erp-sales-report';
 import { useERPSalesChart } from './erp-sales-chart';
-import { formatERPAmount } from '../lib/erp-decimal';
+import { useERPProductsChart } from './erp-products-chart';
+import { formatERPAmount, formatERPQuantity } from '../lib/erp-decimal';
 import { ERPCombobox as Sl } from './erp-combobox';
-import type { ERPPrice, ERPRow, ERPSalesSummary } from '../lib/erp-online';
+import type { ERPPrice, ERPRow, ERPSalesSummary, ERPItemSummary } from '../lib/erp-online';
 import { workspaceERPSeller } from '../lib/erp-identity';
 import './sul.css';
 const He: any = React;
@@ -3026,6 +3027,7 @@ function bz({ id: e }: any): any {
     const billingReport = e === 'faturamento' && !!online;
     const commercialReport = salesReport || billingReport;
     const itemReport = e === 'produtos-pedido' && !!online;
+    const productReport = e === 'produtos' && !!online;
     const completionReport = e === 'tarefas';
     const opportunityReport = e === 'funil';
     const localRecordReport = completionReport || opportunityReport;
@@ -3037,7 +3039,12 @@ function bz({ id: e }: any): any {
     const onSalesSummary = He.useCallback((summary: ERPSalesSummary | undefined, source?: ERPReportSource) => setSalesResult({ key: salesKey, summary, source }), [salesKey]);
     const salesSummary: ERPSalesSummary | undefined = salesResult?.key === salesKey ? salesResult.summary : undefined;
     const salesChart = useERPSalesChart(online, chartReport && salesResult?.key === salesKey ? salesResult : undefined);
-    const remote = He.useMemo(() => itemReport
+    const [productResult,setProductResult]=He.useState(undefined);
+    const onItemsSummary=He.useCallback((summary:ERPItemSummary|undefined,source?:ERPReportSource)=>setProductResult({key:salesKey,summary,source}),[salesKey]);
+    const productChart=useERPProductsChart(online,productReport&&productResult?.key===salesKey?productResult:undefined);
+    const remote = He.useMemo(() => productReport
+        ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},onItemsSummary}
+        : itemReport
         ? {client:online,resource:'orders',orderItemsReport:salesReportQuery(r.f,'nenhum')}
         : billingReport
         ? { client: online, resource:'invoices',billingReport:salesReportQuery(r.f,l),onSummary:onSalesSummary }
@@ -3045,7 +3052,7 @@ function bz({ id: e }: any): any {
         ? { client: online, resource: 'orders', salesReport: { ...salesReportQuery(r.f, abcReport || mixReport ? 'cliente' : l), ...(mixReport ? {productMix:true} : {}) }, ...(abcReport ? { salesParticipation:true } : {}), onSummary: onSalesSummary }
         : customerReport && remoteCustomerReport(r.f)
         ? { client: online, resource: 'customers', filters: customerReportFilters(r.f) } : undefined,
-        [online, e, l, salesKey, onSalesSummary]);
+        [online, e, l, salesKey, onSalesSummary, onItemsSummary]);
     if (!n)
         return (0, b.jsx)(Wu, {});
     const reportMonth=r.f.from?.slice(0,7) || r.f.to?.slice(0,7) || businessDate().slice(0,7);
@@ -3461,14 +3468,14 @@ function bz({ id: e }: any): any {
                                     (y =
                                         "Não há lançamentos de comissão disponíveis. Nenhuma regra ou valor é presumido sem configuração confirmada."))
                                 : e === "produtos"
-                                    ? ((m = dv(t, d)),
+                                    ? ((m = productReport ? [] : dv(t, d)),
                                         (p = [
                                             z("code", "C\xF3digo"),
                                             z("name", "Categorias e produtos", void 0, {
                                                 primary: !0,
                                                 wide: !0,
                                             }),
-                                            z("qty", "Quantidade vendida", (h: any) => na(h.qty), {
+                                            z("qty", "Quantidade vendida", (h: any) => productReport ? formatERPQuantity(h.qty) ?? pa : na(h.qty), {
                                                 align: "right",
                                             }),
                                             z("total", "Valor vendido", (h: any) => rt(h.total), {
@@ -3479,7 +3486,7 @@ function bz({ id: e }: any): any {
                                             title: "Quantidade vendida por produto",
                                             description: "Itens dos pedidos persistidos no período selecionado",
                                             children: (0, b.jsx)(Zy, {
-                                                items: m.map((h: any) => ({ label: h.name, value: h.qty })),
+                                                items: productReport ? productChart : m.map((h: any) => ({ label: h.name, value: h.qty })),
                                             }),
                                         })),
                                         (y =
@@ -3630,7 +3637,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport || itemReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
+            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport || productReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport || itemReport || productReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),

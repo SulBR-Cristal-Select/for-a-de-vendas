@@ -16,7 +16,7 @@ export type ERPSalesQuery = ERPHistoryQuery & { resource: 'orders'; sellerCode?:
 export type ERPBillingQuery = Omit<ERPSalesQuery, 'resource'|'productMix'> & { resource: 'invoices' };
 export type ERPSalesSummary = { documentCount: number; documentAmount: string | null; missingAmountCount: number; amountField: 'TGFCAB.VLRNOTA'; headerCountedOnce: true; atomicSnapshot: false };
 export type ERPSalesWindow = ERPWindow & { summary: ERPSalesSummary; groupBy: 'seller' | 'customer' | null; companyCodes: (1 | 4)[] };
-export type ERPOrderItemsQuery = Omit<ERPSalesQuery,'groupBy'|'productMix'>;
+export type ERPOrderItemsQuery = Omit<ERPSalesQuery,'groupBy'|'productMix'> & {productReport?:true};
 export type ERPItemSummary = {lineCount:number;subtotal:string|null;missingSubtotalCount:number;quantityField:'TGFITE.QTDNEG';unitPriceField:'TGFITE.VLRUNIT';subtotalField:'TGFITE.VLRTOT';calculatedSubtotal:false;headerAmountsAdded:false;atomicSnapshot:false};
 export type ERPOrderItemsWindow = ERPWindow & {summary:ERPItemSummary;companyCodes:(1|4)[]};
 export type ERPDocumentQuery = { resource?: never; id: string; offset?: number; limit?: number };
@@ -98,14 +98,24 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
   }
   if (items.length !== Math.min(limit, Math.max(0, total - offset))) invalid();
   if(operation==='order-items-report') {
-    const q=query as ERPOrderItemsQuery,summary=data['summary'],policy=data['salesPolicy'],companies=data['companyCodes'];
-    if(!object(summary)||summary['lineCount']!==total||!natural(summary['missingSubtotalCount'])||summary['missingSubtotalCount']>total||summary['quantityField']!=='TGFITE.QTDNEG'||summary['unitPriceField']!=='TGFITE.VLRUNIT'||summary['subtotalField']!=='TGFITE.VLRTOT'||summary['calculatedSubtotal']!==false||summary['headerAmountsAdded']!==false||summary['atomicSnapshot']!==false)invalid();
+    const q=query as ERPOrderItemsQuery,summary=data['summary'],policy=data['salesPolicy'],companies=data['companyCodes'],products=q.productReport===true,aggregation=data['productAggregation'];
+    if(products?!object(aggregation)||aggregation['field']!=='TGFITE.CODPROD'||aggregation['mixedUnits']!=='unavailable'||aggregation['quantitiesConverted']!==false||aggregation['subtotalReconstructed']!==false||data['groupBy']!=='product':aggregation!==undefined||data['groupBy']!==undefined)invalid();
+    if(!object(summary)||!natural(summary['lineCount'])||(products?total>summary['lineCount']:summary['lineCount']!==total)||!natural(summary['missingSubtotalCount'])||summary['missingSubtotalCount']>summary['lineCount']||summary['quantityField']!=='TGFITE.QTDNEG'||summary['unitPriceField']!=='TGFITE.VLRUNIT'||summary['subtotalField']!=='TGFITE.VLRTOT'||summary['calculatedSubtotal']!==false||summary['headerAmountsAdded']!==false||summary['atomicSnapshot']!==false)invalid();
     if(summary['missingSubtotalCount']?summary['subtotal']!==null:typeof summary['subtotal']!=='string'||erpDecimal(summary['subtotal'])!==summary['subtotal'])invalid();
     if(total===0&&summary['subtotal']!=='0')invalid();
     if(!object(policy)||policy['movement']!=='P'||policy['operationCode']!==1001||policy['natureCode']!==10100000||policy['statusCode']!=='L'||policy['dateField']!=='DTNEG'||policy['bonification']!=='N'||policy['devolution']!==1)invalid();
     if(!Array.isArray(companies)||!companies.length||new Set(companies).size!==companies.length||companies.some(c=>c!==1&&c!==4)||q.companyCode!==undefined&&(companies.length!==1||companies[0]!==q.companyCode))invalid();
     if(new Set(items.map(r=>r['id'])).size!==items.length)invalid();
     for(const row of items){
+      if(products){
+        const code=row['code'],lc=row['lineCount'],mq=row['missingQuantityCount'],mu=row['missingUnitCount'],uc=row['unitCount'],ms=row['missingSubtotalCount'];
+        if(typeof code!=='string'||!/^([1-9]\d{0,9})$/.test(code)||Number(code)>2147483647||row['id']!==`sankhya:items:product:${code}`||row['productId']!==`sankhya:product:${code}`||row['source']!=='observado'||row['readOnly']!==true||row['name']!==null&&typeof row['name']!=='string'||!natural(lc)||lc<1||![mq,mu,uc,ms].every(n=>natural(n)&&n<=lc))invalid();
+        const unitKnown=uc===1&&mu===0,qtyKnown=unitKnown&&mq===0;
+        if(unitKnown?typeof row['unit']!=='string'||row['unit'].trim()==='':row['unit']!==null)invalid();
+        if(qtyKnown?typeof row['qty']!=='string'||erpDecimal(row['qty'])!==row['qty']:row['qty']!==null)invalid();
+        if(ms?row['total']!==null:typeof row['total']!=='string'||erpDecimal(row['total'])!==row['total'])invalid();
+        continue;
+      }
       const e=row['erp'];
       if(!object(e)||!natural(e['documentCode'])||e['documentCode']<1||e['documentCode']>2147483647||typeof e['sequence']!=='number'||!Number.isInteger(e['sequence'])||e['sequence']< -2147483648||e['sequence']>2147483647||!companies.includes(e['companyCode'])||e['itemCompanyCode']!==e['companyCode']||e['movement']!=='P'||e['operationCode']!==1001||e['natureCode']!==10100000||e['statusCode']!=='L'||e['dateField']!=='DTNEG'||row['id']!==`sankhya:order:${e['documentCode']}:item:${e['sequence']}`||row['source']!=='observado'||row['readOnly']!==true)invalid();
       for(const key of ['price','qty','total'])if(row[key]!==null&&(typeof row[key]!=='string'||erpDecimal(row[key])!==row[key]))invalid();
@@ -115,7 +125,7 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
       const day=row['date'];if(day!==null&&(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day+'T00:00:00Z'))||new Date(day+'T00:00:00Z').toISOString().slice(0,10)!==day))invalid();
       if(q.customerId!==undefined&&row['customerId']!==q.customerId||q.sellerCode!==undefined&&row['sellerCode']!==q.sellerCode||q.from&&(!day||String(day)<q.from)||q.to&&(!day||String(day)>q.to))invalid();
     }
-    if(offset===0&&items.length===total&&(items.filter(r=>r['total']===null).length!==summary['missingSubtotalCount']||summary['subtotal']!==null&&sumERPDecimals(items.map(r=>String(r['total'])))!==summary['subtotal']))invalid();
+    if(offset===0&&items.length===total&&((products?items.reduce((n,r)=>n+Number(r['missingSubtotalCount']),0):items.filter(r=>r['total']===null).length)!==summary['missingSubtotalCount']||products&&items.reduce((n,r)=>n+Number(r['lineCount']),0)!==summary['lineCount']||summary['subtotal']!==null&&sumERPDecimals(items.map(r=>String(r['total'])))!==summary['subtotal']))invalid();
   }
   if (operation === 'sales-report' || operation === 'billing-report') {
     const billing = operation === 'billing-report';
@@ -170,6 +180,8 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
   }
   async function request<T>(operation: ERPOperation, query: ERPQuery): Promise<T> {
     if (!query) throw new ERPOnlineError('INVALID_REQUEST');
+    const productReport=(query as {productReport?:unknown}).productReport;
+    if(productReport!==undefined&&(operation!=='order-items-report'||productReport!==true))throw new ERPOnlineError('INVALID_REQUEST');
     const mix = (query as {productMix?:unknown;groupBy?:unknown}).productMix;
     if (mix !== undefined && (operation !== 'sales-report' || mix !== true || (query as ERPSalesQuery).groupBy !== 'customer')) throw new ERPOnlineError('INVALID_REQUEST');
     if (operation === 'document') {
