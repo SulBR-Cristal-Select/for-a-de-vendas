@@ -11,6 +11,7 @@ import type { ERPClient, ERPQueryRef } from './erp-hooks';
 import { useERPCustomerReportLookups, useERPOrderLookups } from './erp-order-lookups';
 import { customerReportFilters, localCustomerReportRows, remoteCustomerReport } from './erp-customer-report';
 import { completionOwners, completionRecords, filterCompletions } from './completion-report';
+import { opportunityReportRows, filterOpportunityRows, opportunityReportOwners } from './opportunity-report';
 import { salesReportQuery } from './erp-sales-report';
 import { formatERPAmount } from '../lib/erp-decimal';
 import { ERPCombobox as Sl } from './erp-combobox';
@@ -3021,8 +3022,11 @@ function bz({ id: e }: any): any {
     const billingReport = e === 'faturamento' && !!online;
     const commercialReport = salesReport || billingReport;
     const completionReport = e === 'tarefas';
+    const opportunityReport = e === 'funil';
+    const localRecordReport = completionReport || opportunityReport;
     const completionExport = He.useRef(undefined);
     const completions = He.useMemo(() => completionReport ? completionRecords(t) : [], [completionReport, t.activities, t.tasks, t.customers]);
+    const opportunities = He.useMemo(() => opportunityReport ? opportunityReportRows(t) : [], [opportunityReport, t.opportunities, t.customers]);
     const salesKey = JSON.stringify([e, l, r.f]);
     const [salesResult, setSalesResult] = He.useState(undefined);
     const onSalesSummary = He.useCallback((summary: ERPSalesSummary | undefined) => setSalesResult({ key: salesKey, summary }), [salesKey]);
@@ -3273,7 +3277,7 @@ function bz({ id: e }: any): any {
     }
     else
         e === "funil"
-            ? ((m = t.opportunities),
+            ? ((m = filterOpportunityRows(opportunities, r.f)),
                 (p = [
                     z("name", "Oportunidade", void 0, { primary: !0 }),
                     z("customer", "Cliente", (h: any) => Un(t, h.customerId)),
@@ -3572,9 +3576,9 @@ function bz({ id: e }: any): any {
                 actions: (0, b.jsx)(Gp, {
                     rows: csvRows(m, p.filter((h: any) => !h.action)),
                     name: "relatorio-" + e,
-                    localRows: completionReport ? completionExport : undefined,
+                    localRows: localRecordReport ? completionExport : undefined,
                     remoteResource: remote?.resource,
-                    transformRows: remote || completionReport ? (rows: any[]) => csvRows(rows, p.filter((h: any) => !h.action)) : undefined,
+                    transformRows: remote || localRecordReport ? (rows: any[]) => csvRows(rows, p.filter((h: any) => !h.action)) : undefined,
                     columns: p.filter((h: any) => !h.action).map((h: any) => h.key),
                 }),
             }),
@@ -3601,7 +3605,7 @@ function bz({ id: e }: any): any {
             (0, b.jsx)(ya, {
                 rows: m,
                 remote,
-                exportRef: completionReport ? completionExport : undefined,
+                exportRef: localRecordReport ? completionExport : undefined,
                 label: n.name,
                 columns: g,
                 actions: (0, b.jsxs)(b.Fragment, {
@@ -3618,7 +3622,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : commercialReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : undefined }),
+            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),
