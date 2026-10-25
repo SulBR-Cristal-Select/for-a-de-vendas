@@ -10,7 +10,7 @@ const required={
 };
 const columns=Object.entries(required).flatMap(([TABLE_NAME,fields])=>Object.entries(fields).map(([COLUMN_NAME,DATA_TYPE])=>({TABLE_NAME,COLUMN_NAME,DATA_TYPE})));
 const admin={role:'administrador' as const};
-const row={CODTIPOPER:1101,OPERATION_VERSION:'2026-01-01T10:11:12',CODNAT:10100000,HAS_STANDARD_ORIGIN:1,HAS_OTHER_ORIGIN:0,HAS_UNRESOLVED_ORIGIN:0,HAS_UNLINKED_ITEM:0,HAS_ITEMS:1,HAS_CROSS_COMPANY_ORIGIN:0,DOCUMENT_COUNT:2,MISSING_AMOUNT_COUNT:0,DOCUMENT_AMOUNT:'9007199254740993.01',FIRST_DATE:'2026-10-01',LAST_DATE:'2026-10-25'};
+const row={SAMPLE_DOCUMENT_CODE:123,CODTIPOPER:1101,OPERATION_VERSION:'2026-01-01T10:11:12',CODNAT:10100000,HAS_STANDARD_ORIGIN:1,HAS_OTHER_ORIGIN:0,HAS_UNRESOLVED_ORIGIN:0,HAS_UNLINKED_ITEM:0,HAS_ITEMS:1,HAS_CROSS_COMPANY_ORIGIN:0,DOCUMENT_COUNT:2,MISSING_AMOUNT_COUNT:0,DOCUMENT_AMOUNT:'9007199254740993.01',FIRST_DATE:'2026-10-01',LAST_DATE:'2026-10-25'};
 function transport(rows:Record<string,unknown>[]=[row],commercial=2,undated=0){
  return{select:vi.fn().mockResolvedValueOnce(columns).mockResolvedValueOnce([{APPROVED_DOCUMENT_COUNT:commercial+3,COMMERCIAL_DOCUMENT_COUNT:commercial,MISSING_CONTEXT_COUNT:0}]).mockResolvedValueOnce([{UNDATED_DOCUMENT_COUNT:undated}]).mockResolvedValueOnce(rows)};
 }
@@ -89,4 +89,13 @@ describe('faturamento aprovado e vinculado à venda padrão, sem somar P/V',()=>
  it('página intermediária não publica subtotal como total do período',async()=>{
   expect(await readCommercialDictionary(transport(),{...query,offset:50},admin)).toMatchObject({offset:50,qualificationComplete:false,totals:null});
  });
+ it('rastreia o cabeçalho por MIN de NUNOTA no diagnóstico, sem associar por valor ou nome',async()=>{
+  const g=transport([{...row,SAMPLE_DOCUMENT_CODE:76543,DOCUMENT_COUNT:1,DOCUMENT_AMOUNT:'55.56',HAS_UNLINKED_ITEM:1}],1);
+  expect(await readCommercialDictionary(g,query,admin)).toMatchObject({qualificationComplete:false,totals:null,rows:[{sampleDocumentCode:76543,documentCount:1,unlinkedItem:true}]});
+  expect(g.select.mock.calls[3]![0]).toContain('MIN(NUNOTA) AS SAMPLE_DOCUMENT_CODE');
+ });
+ it.each([undefined,null,0,1.5,2147483648])('recusa código de amostra inválido sem inventar identificador: %s',async SAMPLE_DOCUMENT_CODE=>{
+  await expect(readCommercialDictionary(transport([{...row,SAMPLE_DOCUMENT_CODE}]),query,admin)).rejects.toMatchObject({code:'ERP_INVALID_RESPONSE'});
+ });
+
 });
