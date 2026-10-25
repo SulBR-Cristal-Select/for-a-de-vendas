@@ -163,3 +163,11 @@ Em25/10/2026 às11h42 o usuário autorizou somente corrigir os rótulos/aviso de
 ### Rastreabilidade do diagnóstico fiscal, sem mudar qualificação
 
 Em25/10/2026 às15h01, o diagnóstico administrativo da filial1/2026 retornou um grupo inconclusivo de uma nota com DTFATUR11/06 e VLRNOTA55,56: origem padrão comprovada e item sem vínculo de origem. Para localizar o documento sem associar por nome/valor, o diagnóstico existente passa a retornar `sampleDocumentCode=MIN(NUNOTA)` por grupo, validado como inteiro positivo no contrato de documentos. Só um grupo com contagem1 identifica univocamente seu cabeçalho; em grupos maiores é explicitamente uma amostra. Nenhum novo parâmetro, endpoint, regra fiscal, controle de interface ou permissão. Totais inconclusivos continuam nulos.791 testes/33 arquivos (6 novos), TypeScript app/handler e bundle backend aprovados; frontend e banco não alterados.
+
+### Relatório local de oportunidades do funil
+
+O relatório `funil` consulta somente `opportunities` já devolvidas pelo workspace sob as regras de proprietário/equipe existentes. Aberta, Ganha, Perdida e situação desconhecida permanecem como declaradas; ganho de oportunidade não cria nem comprova venda ou faturamento ERP. Os filtros existentes de cliente, vendedor e situação usam essa coleção, não os pedidos. Identidades são comparadas por `customerId`/`sellerId`, sem juntar homônimos nem atribuir o responsável desconhecido à pessoa logada. O cliente é identificado exclusivamente pelo ID local visível; não há vínculo por nome/documento ou cópia do ERP.
+
+Abertura permanece `date`, sem fallback para criação ou ganho. O CSV usa todo o recorte filtrado/buscado/ordenado da tabela antes da paginação e mantém as sete colunas originais. Os guardas de filtros/responsáveis reutilizam os helpers já testados de registros locais, sem a seleção `Realizada` exclusiva do relatório de tarefas. Não altera os quadros do funil, formulários, controles, textos, CSS, preço, backend, banco ou permissões.
+
+811 testes/34 arquivos,20 casos novos; TypeScript/build e auditoria comparativa à basec8b29b9 aprovados (680 propriedades visuais,638 chamadas JSX e ambos os CSS preservados). Os casos positivos e exportação de15 linhas além da página10 são componentes/fixtures, não registros reais novos ou homologação comercial.
