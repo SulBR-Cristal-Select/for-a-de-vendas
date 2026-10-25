@@ -107,3 +107,11 @@ Testes SQL com membros sintéticos não são login comercial real. Acesso positi
 ERP/faturamento fiscal, SMTP/WhatsApp, pagamentos e IA remota não têm provedores configurados. Não são apresentados como transações externas concluídas. O backend permite editar o nome da própria conta, mas rejeita alteração de papéis e de outros perfis pelo snapshot, operações sem provedor e exclusão por simples ausência de registros; bloqueio e cancelamento permanecem disponíveis. Essas funções exigem integração específica antes de serem consideradas concluídas.
 
 O arquivo de referência do usuário tem SHA-256 `ef045c867719a77a3424e1f377aa42c66e3fc8b2e913557518f9d3d5b491b6c7`. Seu conteúdo histórico não é exposto como base operacional da aplicação.
+
+### Faturamento vinculado à venda padrão
+
+Regra confirmada em25/10/2026 às05h57 (America/Sao_Paulo): notas de venda originadas da venda padrão, período por `TGFCAB.DTFATUR`, `STATUSNOTA=L` e `STATUSNFE=A`. `STANDARD_BILLING_REPORT_POLICY` é separada da criação/cotação e de `STANDARD_SALES_REPORT_POLICY`.
+
+O diagnóstico administrativo fixo `analytics/billing` verifica os tipos físicos, a TOP histórica exata e os vínculos de itens `TGFVAR`; soma somente `TGFCAB.VLRNOTA`, uma vez por cabeçalho, sem acrescentar pedidos nem reconstruir preço/desconto/quantidade. Valores decimais são transportados como texto e somados exatamente no servidor. Notas sem vínculo padrão comprovado ficam fora do recorte; origem mista/indireta/incompleta, referência entre filiais ou valor/data ausente impedem um total conclusivo. Não há rateio presumido. Contagens/grupos são conferidos, em consultas separadas e janelas de até50; não constituem snapshot atômico.
+
+Este delta não conecta as telas, não migra o banco, não altera UI/identidade/equipe e não homologa login, cotação ou criação comercial. Suíte local:609 testes/26 arquivos, incluindo40 novos casos de faturamento; TypeScript app/handler e bundle backend aprovados.
