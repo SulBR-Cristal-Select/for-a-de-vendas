@@ -133,3 +133,11 @@ O relatório `clientes` usa o cadastro ERP atual, contado uma vez por parceiro n
 Busca, ordenação e páginas10/20/50 usam o leitor já existente. Os filtros de cliente/vendedor usam códigos técnicos; homônimos não se fundem, e o filtro nunca amplia o próprio vendedor/equipe privada. Cadastros manuais continuam separados e não ganham vínculo ERP por nome/documento. O CSV percorre apenas o recorte solicitado, em janelas de até50, confirma contagens e preserva as três colunas originais. Nenhum histórico é carregado para calcular a lista.
 
 Delta validado com673 testes/28 arquivos (26 novos), TypeScript do aplicativo/handler e builds. As588 propriedades visuais estáticas, componentes e CSS foram comparados à base08cf251: sem novos controles, textos ou classes. Isso conecta somente o relatório de clientes; não conclui os demais relatórios e os27 indicadores, nem homologação comercial, cobertura ERP ou ativação de perfis.
+
+### Relatório local de tarefas realizadas
+
+O relatório `tarefas` usa exclusivamente tarefas e atividades do workspace já devolvidas sob as regras de acesso existentes. Ambas exigem o status exato `Realizada`; registros pendentes ou sem status não são tratados como concluídos. Os filtros de cliente, responsável e situação consultam essa fonte, não os pedidos. O responsável é comparado pelo `sellerId` recebido; nomes iguais não são fundidos e ausência de identificador não vira a pessoa logada. Isso não autentica usuários nem concede escopo comercial ERP.
+
+A data continua sendo `date`, declarada no registro; não é criado um `completedAt`. Os IDs da tabela são qualificados pela coleção, sem alterar os IDs persistidos. A busca considera também o cliente local identificado por ID. O CSV usa o mesmo conjunto filtrado e ordenado da tabela inteira, antes da paginação, com as cinco colunas já existentes.
+
+Delta validado com693 testes/29 arquivos (20 novos), TypeScript e build.588 propriedades visuais,647 chamadas de componentes e CSS preservados em relação a8fbe52f. Nenhuma alteração de backend, migração, acesso, referência ERP de atividade ou carteira. Casos positivos foram exercitados em componentes/fixtures locais; não representam novos registros reais ou homologação comercial.
