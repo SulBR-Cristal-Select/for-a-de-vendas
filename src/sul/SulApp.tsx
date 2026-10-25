@@ -10,6 +10,7 @@ import { assertManualMutation, manualRows, useERPCategories, useERPRecord, useER
 import type { ERPClient, ERPQueryRef } from './erp-hooks';
 import { useERPCustomerReportLookups, useERPOrderLookups } from './erp-order-lookups';
 import { customerReportFilters, localCustomerReportRows, remoteCustomerReport } from './erp-customer-report';
+import { completionOwners, completionRecords, filterCompletions } from './completion-report';
 import { ERPCombobox as Sl } from './erp-combobox';
 import type { ERPPrice, ERPRow } from '../lib/erp-online';
 import { workspaceERPSeller } from '../lib/erp-identity';
@@ -262,11 +263,12 @@ function L5(e: any, t: any): any {
         .filter((o: any) => typeof o != "object")
         .join(" ")).includes(ol(t)));
 }
-function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r = !0, actions: l, q: s, onQuery: i, remote, }: any): any {
+function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r = !0, actions: l, q: s, onQuery: i, remote, exportRef, }: any): any {
     let [u, c] = (0, He.useState)(""), f: any = s ?? u, d: any = L5(e, f), m: any = (0, He.useMemo)(() => Object.fromEntries(t.map((x: any) => [x.key, x.get || ((v: any) => v[x.key] ?? "")])), [t]), p: any = UI(remote ? [] : d, m), local: any = zI(p.rows, 10, { resetKey: f }), context = qa(), onlinePage = useERPTable(remote, e, f, p.sort, context.queryMetadata), y: any = remote ? onlinePage : local, C: any = t.map((x: any) => ({
         ...x,
         sortKey: x.action || x.selection ? void 0 : x.key,
     }));
+    if (exportRef) exportRef.current = () => p.rows;
     return (0, b.jsxs)("div", {
         className: "space-y-3",
         children: [
@@ -323,12 +325,12 @@ function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r
 function z(e: any, t: any, a: any = undefined, o: any = {}): any {
     return { key: e, header: t, cell: a || ((n: any) => n[e] ?? pa), ...o };
 }
-function Gp({ rows: e, name: t, columns: a, remoteResource, transformRows }: any): any {
+function Gp({ rows: e, name: t, columns: a, remoteResource, transformRows, localRows }: any): any {
     const { online, queryMetadata } = qa();
     return (0, b.jsxs)(xt, {
         onClick: async () => {
             try {
-            let rows = e;
+            let rows = localRows?.current?.() || e;
             if (online && remoteResource) {
                 const metadata = queryMetadata.current[remoteResource];
                 if (!metadata) throw new Error("Consulta ERP indisponível. Tente novamente.");
@@ -361,7 +363,7 @@ function w5(e: any): any {
             ((!o.from || l.date >= o.from) && (!o.to || l.date <= o.to))));
     return { open: t, setOpen: a, f: o, setF: n, rows: r };
 }
-function E5({ filter: e, rows: t, customerReport = false }: any): any {
+function E5({ filter: e, rows: t, customerReport = false, localOwners }: any): any {
     let { db: a, online } = qa(), [o, n] = (0, He.useState)(e.f);
     const lookups = useERPCustomerReportLookups(customerReport && e.open ? online : undefined, o.customer || '', o.seller || '');
     const lookupError = lookups.customers.error || lookups.sellers.error;
@@ -411,7 +413,7 @@ function E5({ filter: e, rows: t, customerReport = false }: any): any {
                     placeholder: "Todos os vendedores",
                     value: o.seller,
                     onValueChange: (l: any) => r("seller", l),
-                    options: customerReport ? La(['', ...lookups.sellers.rows.map((l: any) => ({ value: l.id, label: l.name }))]) : La([
+                    options: localOwners ? La(['', ...localOwners]) : customerReport ? La(['', ...lookups.sellers.rows.map((l: any) => ({ value: l.id, label: l.name }))]) : La([
                         "",
                         ...new Set(a.orders.map((l: any) => l.seller)),
                         a.company.user,
@@ -3012,6 +3014,9 @@ function xz(): any {
 function bz({ id: e }: any): any {
     let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
     const customerReport = e === 'clientes' && !!online;
+    const completionReport = e === 'tarefas';
+    const completionExport = He.useRef(undefined);
+    const completions = He.useMemo(() => completionReport ? completionRecords(t) : [], [completionReport, t.activities, t.tasks, t.customers]);
     const remote = He.useMemo(() => customerReport && remoteCustomerReport(r.f)
         ? { client: online, resource: 'customers', filters: customerReportFilters(r.f) } : undefined,
         [online, e, r.f.customer, r.f.seller, r.f.status]);
@@ -3373,7 +3378,7 @@ function bz({ id: e }: any): any {
                                     children: "Per\xEDodo de inatividade",
                                 }))))
                     : e === "tarefas"
-                        ? ((m = t.activities.concat(t.tasks.filter((h: any) => h.status === "Realizada"))),
+                        ? ((m = filterCompletions(completions, r.f)),
                             (p = [
                                 z("date", "Data de in\xEDcio", (h: any) => xo(h.date)),
                                 z("customer", "Raz\xE3o social", (h: any) => (h.customerId ? Un(t, h.customerId) : "\u2014"), { primary: !0 }),
@@ -3552,8 +3557,9 @@ function bz({ id: e }: any): any {
                 actions: (0, b.jsx)(Gp, {
                     rows: csvRows(m, p.filter((h: any) => !h.action)),
                     name: "relatorio-" + e,
+                    localRows: completionReport ? completionExport : undefined,
                     remoteResource: remote ? 'customers' : undefined,
-                    transformRows: remote ? (rows: any[]) => csvRows(rows, p.filter((h: any) => !h.action)) : undefined,
+                    transformRows: remote || completionReport ? (rows: any[]) => csvRows(rows, p.filter((h: any) => !h.action)) : undefined,
                     columns: p.filter((h: any) => !h.action).map((h: any) => h.key),
                 }),
             }),
@@ -3580,6 +3586,7 @@ function bz({ id: e }: any): any {
             (0, b.jsx)(ya, {
                 rows: m,
                 remote,
+                exportRef: completionReport ? completionExport : undefined,
                 label: n.name,
                 columns: g,
                 actions: (0, b.jsxs)(b.Fragment, {
@@ -3596,7 +3603,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport }),
+            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, localOwners: completionReport ? completionOwners(completions, t.users) : undefined }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),
