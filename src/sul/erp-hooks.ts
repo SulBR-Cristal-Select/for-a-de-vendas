@@ -5,10 +5,11 @@ import { compareERP, foldERPText, type ERPSortKey } from '../lib/erp-order';
 import { paginateERP, type ERPMergedPage } from '../lib/erp-paging';
 
 export type ERPClient = ReturnType<typeof createERPClient>;
-export type ERPDescriptor = { client: ERPClient; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters']; salesReport?: Omit<ERPSalesQuery, 'resource' | 'offset' | 'limit'>; billingReport?: Omit<ERPBillingQuery, 'resource' | 'offset' | 'limit'>; orderItemsReport?: Omit<ERPOrderItemsQuery,'resource'|'offset'|'limit'>; onSummary?: (summary: ERPSalesSummary | undefined) => void };
+export type ERPDescriptor = { client: ERPClient; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters']; salesReport?: Omit<ERPSalesQuery, 'resource' | 'offset' | 'limit'>; billingReport?: Omit<ERPBillingQuery, 'resource' | 'offset' | 'limit'>; orderItemsReport?: Omit<ERPOrderItemsQuery,'resource'|'offset'|'limit'>; onSummary?: (summary: ERPSalesSummary | undefined, source?: ERPReportSource) => void };
 export type ERPQueryMetadata = { exportRows: () => Promise<ERPRow[]> };
 export type ERPQueryRef = MutableRefObject<Partial<Record<ERPResource | 'orders' | 'invoices', ERPQueryMetadata>>>;
 type ERPTableQuery = ERPPageQuery | Omit<ERPHistoryQuery, 'offset' | 'limit'> | Omit<ERPSalesQuery, 'offset' | 'limit'> | Omit<ERPBillingQuery, 'offset' | 'limit'>;
+export type ERPReportSource = { query: ERPTableQuery; companyCodes: readonly (1 | 4)[] };
 const historyResource = (resource: string | undefined) => resource === 'orders' || resource === 'invoices';
 export function historyPresentation(row: ERPRow): ERPRow {
   const erp = row['erp'] as ERPRow | undefined;
@@ -114,11 +115,18 @@ export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[
   useEffect(() => {
     descriptor?.onSummary?.(undefined);
     if (!descriptor || !query || search !== debounced) return;
-    let alive = true, summary: ERPSalesSummary | undefined;
+    let alive = true, summary: ERPSalesSummary | undefined, source: ERPReportSource | undefined;
     void paginateERP({ localRows: localFiltered, localTotalWithoutSearch: locals.length, skip: (page - 1) * pageSize, pageSize,
       getWindow: async (offset, limit) => {
         const window = await tableWindow(descriptor, query, offset, limit);
-        if ('summary' in window && !descriptor.orderItemsReport) summary = window.summary as ERPSalesSummary;
+        if ('summary' in window && !descriptor.orderItemsReport) {
+          summary = window.summary as ERPSalesSummary;
+          if ('companyCodes' in window) {
+            const codes = window.companyCodes;
+            if (!Array.isArray(codes) || !codes.length || codes.length > 2 || new Set(codes).size !== codes.length || codes.some(code => code !== 1 && code !== 4)) throw new ERPOnlineError('INVALID_RESPONSE');
+            source = { query, companyCodes: codes as (1 | 4)[] };
+          }
+        }
         return window;
       },
       ...(sort ? { compare: compareERP(sort.key as ERPSortKey, sort.dir) } : {}),
@@ -127,7 +135,7 @@ export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[
       const last = Math.max(1, Math.ceil(data.total / pageSize));
       if (page > last) { setNavigation({ key: baseKey, page: last, size: pageSize }); return; }
       setResult({ key: requestKey, scope: scopeKey, client: descriptor.client, data });
-      descriptor.onSummary?.(summary);
+      descriptor.onSummary?.(summary, source);
     }).catch(error => { if (alive) setResult({ key: requestKey, scope: scopeKey, client: descriptor.client, error: message(error) }); });
     return () => { alive = false; };
   }, [client, requestKey, debounced]);

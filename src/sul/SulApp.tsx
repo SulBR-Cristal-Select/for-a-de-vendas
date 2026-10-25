@@ -7,12 +7,13 @@ import * as runtime from 'react/jsx-runtime';
 import { Badge as bi, Button as Ft, PageHeading as Hp, PageToolbar as nv, TableToolbar as cv, DataTable as s1, Empty as hn, Drawer as xb, Select as ho, Tabs as of, Page as fa, ActionMenu as Il, KpiGrid as _i, ChartCard as cs, DatePicker as Jd, Callout as Gu, Card as Vt, Section as Ot, FieldGrid as Vi, IconButton as wR, NumberField as Hr, TextField as vr, TextareaField as $u, PropertyList as _o, KpiCard as Ha, Checkbox as Yy, CurrencyField as Up, KanbanBoard as c1, KanbanColumn as i1, KanbanCard as u1, BarChart as Qy, Modal as gb, SettingsLayout as uv, SettingsSection as nf, Switch as zu, AppShell as l1, Sidebar as t1, ThemeToggle as n0, ConfirmDialog as HR, formatCurrency as Vd, formatDate as oI, formatNumber as na, normalize as ol, notify as go, useSort as UI, usePagination as zI, BarList as Zy, ProductMark as rv } from '@g4ai/ds';
 import catalogo from './catalogo.json';
 import { assertManualMutation, manualRows, useERPCategories, useERPRecord, useERPDocument, useERPTable } from './erp-hooks';
-import type { ERPClient, ERPQueryRef } from './erp-hooks';
+import type { ERPClient, ERPQueryRef, ERPReportSource } from './erp-hooks';
 import { useERPCustomerReportLookups, useERPOrderLookups } from './erp-order-lookups';
 import { customerReportFilters, localCustomerReportRows, remoteCustomerReport } from './erp-customer-report';
 import { completionOwners, completionRecords, filterCompletions } from './completion-report';
 import { opportunityReportRows, filterOpportunityRows, opportunityReportOwners } from './opportunity-report';
 import { salesReportQuery } from './erp-sales-report';
+import { useERPSalesChart } from './erp-sales-chart';
 import { formatERPAmount } from '../lib/erp-decimal';
 import { ERPCombobox as Sl } from './erp-combobox';
 import type { ERPPrice, ERPRow, ERPSalesSummary } from '../lib/erp-online';
@@ -3018,7 +3019,8 @@ function xz(): any {
 function bz({ id: e }: any): any {
     let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
     const customerReport = e === 'clientes' && !!online;
-    const salesReport = e === 'vendas' && !!online;
+    const chartReport = ['resumo','vendas-anterior'].includes(e) && !!online;
+    const salesReport = (e === 'vendas' || chartReport) && !!online;
     const billingReport = e === 'faturamento' && !!online;
     const commercialReport = salesReport || billingReport;
     const itemReport = e === 'produtos-pedido' && !!online;
@@ -3030,8 +3032,9 @@ function bz({ id: e }: any): any {
     const opportunities = He.useMemo(() => opportunityReport ? opportunityReportRows(t) : [], [opportunityReport, t.opportunities, t.customers]);
     const salesKey = JSON.stringify([e, l, r.f]);
     const [salesResult, setSalesResult] = He.useState(undefined);
-    const onSalesSummary = He.useCallback((summary: ERPSalesSummary | undefined) => setSalesResult({ key: salesKey, summary }), [salesKey]);
+    const onSalesSummary = He.useCallback((summary: ERPSalesSummary | undefined, source?: ERPReportSource) => setSalesResult({ key: salesKey, summary, source }), [salesKey]);
     const salesSummary: ERPSalesSummary | undefined = salesResult?.key === salesKey ? salesResult.summary : undefined;
+    const salesChart = useERPSalesChart(online, chartReport && salesResult?.key === salesKey ? salesResult : undefined);
     const remote = He.useMemo(() => itemReport
         ? {client:online,resource:'orders',orderItemsReport:salesReportQuery(r.f,'nenhum')}
         : billingReport
@@ -3067,7 +3070,7 @@ function bz({ id: e }: any): any {
                         billingReport ? "Notas fiscais aprovadas vinculadas à venda padrão, por data de faturamento. Pedidos e notas não são somados." : "Somente pedidos com documentos fiscais disponíveis. A integração fiscal não está configurada; vendas não são apresentadas como faturamento.")),
             l !== "nenhum")) {
             let h: any = {};
-            (d.forEach((S: any) => {
+            (!commercialReport && d.forEach((S: any) => {
                 let L: any = l === "vendedor" ? S.seller : Un(t, S.customerId), I: any = (h[L] ||= { id: L, name: L, count: 0, total: 0 });
                 (I.count++, (I.total += S.total));
             }),
@@ -3087,7 +3090,7 @@ function bz({ id: e }: any): any {
                 description: "Totais agrupados por vendedor",
                 children: (0, b.jsx)(Qy, {
                     label: "Valor em pedidos por vendedor",
-                    data: Array.from(new Set(d.map((h: any) => h.seller))).map((h: any) => ({
+                    data: chartReport ? salesChart : Array.from(new Set(d.map((h: any) => h.seller))).map((h: any) => ({
                         vendedor: h,
                         total: Zo(d.filter((S: any) => S.seller === h), "total"),
                     })),
