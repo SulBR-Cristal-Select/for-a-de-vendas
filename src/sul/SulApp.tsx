@@ -3021,6 +3021,7 @@ function bz({ id: e }: any): any {
     const salesReport = e === 'vendas' && !!online;
     const billingReport = e === 'faturamento' && !!online;
     const commercialReport = salesReport || billingReport;
+    const itemReport = e === 'produtos-pedido' && !!online;
     const completionReport = e === 'tarefas';
     const opportunityReport = e === 'funil';
     const localRecordReport = completionReport || opportunityReport;
@@ -3031,7 +3032,9 @@ function bz({ id: e }: any): any {
     const [salesResult, setSalesResult] = He.useState(undefined);
     const onSalesSummary = He.useCallback((summary: ERPSalesSummary | undefined) => setSalesResult({ key: salesKey, summary }), [salesKey]);
     const salesSummary: ERPSalesSummary | undefined = salesResult?.key === salesKey ? salesResult.summary : undefined;
-    const remote = He.useMemo(() => billingReport
+    const remote = He.useMemo(() => itemReport
+        ? {client:online,resource:'orders',orderItemsReport:salesReportQuery(r.f,'nenhum')}
+        : billingReport
         ? { client: online, resource:'invoices',billingReport:salesReportQuery(r.f,l),onSummary:onSalesSummary }
         : salesReport
         ? { client: online, resource: 'orders', salesReport: salesReportQuery(r.f, l), onSummary: onSalesSummary }
@@ -3477,7 +3480,7 @@ function bz({ id: e }: any): any {
                                         (y =
                                             "Soma das quantidades e valores dos itens persistidos no período selecionado."))
                                     : e === "produtos-pedido"
-                                        ? ((m = d.flatMap((h: any) => (h.items || []).map((S: any) => ({
+                                        ? ((m = itemReport ? [] : d.flatMap((h: any) => (h.items || []).map((S: any) => ({
                                             id: h.id + "-" + S.productId,
                                             date: h.date,
                                             number: h.number,
@@ -3564,7 +3567,7 @@ function bz({ id: e }: any): any {
             ],
         });
     if (customerReport) m = localCustomerReportRows(t.customers, r.f);
-    if (commercialReport) m = [];
+    if (commercialReport || itemReport) m = [];
     let g: any = p.filter((h: any) => !c.includes(h.key));
     return (0, b.jsxs)(fa, {
         width: "wide",
@@ -3622,7 +3625,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
+            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport || itemReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),
