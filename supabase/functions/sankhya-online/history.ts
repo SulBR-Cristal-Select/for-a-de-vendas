@@ -1,7 +1,8 @@
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
 import { scopeOf, sellerAllowed, sellerPredicate, type ReadScope } from './read-model.ts';
 import { foldERPText } from '../../../src/lib/erp-order.ts';
-import { STANDARD_SALES_REPORT_POLICY } from './policy.ts';
+import { STANDARD_SALES_REPORT_POLICY, STANDARD_BILLING_REPORT_POLICY } from './policy.ts';
+import { BILLING_COLUMNS, billingOriginFlags } from './billing-source.ts';
 import { erpDecimal, sumERPDecimals, decimalUnits } from '../../../src/lib/erp-decimal.ts';
 
 type Row = Record<string, unknown>;
@@ -155,7 +156,9 @@ export async function readDocument(gateway: Transport, input: DocumentInput, sco
   }), total, totalWithoutSearch: total, offset: page.offset, limit: page.limit, hasMore: page.offset + items.length < total };
 }
 
-export type SalesReportInput = HistoryInput & { resource: 'orders'; sellerCode?: number; groupBy?: 'seller' | 'customer'; status?: 'confirmado' };
+type CommercialReportInput = HistoryInput & { sellerCode?: number; groupBy?: 'seller' | 'customer'; status?: 'confirmado' };
+export type SalesReportInput = CommercialReportInput & { resource: 'orders' };
+export type BillingReportInput = CommercialReportInput & { resource: 'invoices' };
 const unsupportedSales = (): never => { throw new SankhyaError('ERP_CONTEXT_REQUIRED', 'Estrutura comercial do ERP não confirmada.'); };
 const salesAmount = (value: unknown): string => erpDecimal(value) ?? incompatible();
 function salesCount(row: Row | undefined, field: string): number {
@@ -172,10 +175,12 @@ function salesSummary(row: Row | undefined) {
 }
 
 /** Relatório fixo de venda padrão. Não amplia o histórico genérico nem aceita SQL do navegador. */
-export async function readSalesReport(gateway: Transport, input: SalesReportInput, scope: ReadScope) {
+export async function readSalesReport(gateway: Transport, input: SalesReportInput, scope: ReadScope) { return readCommercialReport(gateway,input,scope,false); }
+export async function readBillingReport(gateway: Transport, input: BillingReportInput, scope: ReadScope) { return readCommercialReport(gateway,input,scope,true); }
+async function readCommercialReport(gateway: Transport, input: CommercialReportInput, scope: ReadScope, billing: boolean) {
   keys(input, ['resource','offset','limit','customerId','sellerCode','status','search','sort','direction','from','to','companyCode','groupBy']);
-  if (input.resource !== 'orders' || input.groupBy !== undefined && !['seller','customer'].includes(input.groupBy) || input.status !== undefined && input.status !== 'confirmado') return invalid();
-  const allowed = scopeOf(scope), page = windowOf(input.offset, input.limit), policy = STANDARD_SALES_REPORT_POLICY;
+  if (input.resource !== (billing ? 'invoices' : 'orders') || input.groupBy !== undefined && !['seller','customer'].includes(input.groupBy) || input.status !== undefined && input.status !== 'confirmado') return invalid();
+  const allowed = scopeOf(scope), page = windowOf(input.offset, input.limit), policy = STANDARD_SALES_REPORT_POLICY, bp = STANDARD_BILLING_REPORT_POLICY, movement = billing ? 'V' : 'P', dateField = billing ? 'DTFATUR' : 'DTNEG';
   let companies = allowed.companies;
   if (input.companyCode !== undefined) {
     integer(input.companyCode);
@@ -185,32 +190,50 @@ export async function readSalesReport(gateway: Transport, input: SalesReportInpu
   const group = input.groupBy, sort = input.sort ?? (group ? 'name' : 'date'), direction = input.direction ?? (group ? 'asc' : 'desc');
   const groupCode = group === 'seller' ? 'C.CODVEND' : 'C.CODPARC', groupName = group === 'seller' ? 'V.APELIDO' : 'P.RAZAOSOCIAL';
   const groupSorts: Record<string,string> = { name: foldSQL(groupName), count: 'COUNT(*)', total: 'SUM(C.VLRNOTA)' };
-  if (typeof sort !== 'string' || !Object.hasOwn(group ? groupSorts : sorts, sort) || !['asc','desc'].includes(direction)) return invalid();
+  const reportSorts = billing ? { ...sorts,date:'C.DTFATUR',number:'C.NUNOTA',nf:'C.NUMNOTA',invoiced:'C.VLRNOTA' } : sorts;
+  if (typeof sort !== 'string' || !Object.hasOwn(group ? groupSorts : reportSorts, sort) || !['asc','desc'].includes(direction)) return invalid();
   const start = dateInput(input.from), end = dateInput(input.to), search = searchText(input.search);
   if (start && end && start > end) return invalid();
-  const candidate = [...baseWhere(allowed, 'P', companies), `C.CODTIPOPER=${policy.operationCode}`, `C.CODNAT=${policy.natureCode}`, `C.STATUSNOTA='${policy.statusCode}'`];
+  const candidate = [...baseWhere(allowed, movement, companies), ...(billing ? [`C.STATUSNOTA='${bp.statusCode}'`,`C.STATUSNFE='${bp.fiscalStatusCode}'`,'C.DTFATUR IS NOT NULL'] : [`C.CODTIPOPER=${policy.operationCode}`, `C.CODNAT=${policy.natureCode}`, `C.STATUSNOTA='${policy.statusCode}'`])];
   if (input.customerId !== undefined) candidate.push(`P.CODPARC=${identifier(input.customerId, 'sankhya:customer:')}`);
   if (input.sellerCode !== undefined) {
     const selected = integer(input.sellerCode);
     if (!sellerAllowed(allowed, selected)) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Vendedor fora do escopo autorizado.', 403);
     candidate.push(`C.CODVEND=${selected}`);
   }
-  if (start) candidate.push(`C.DTNEG>=TO_DATE(${literal(start)},'YYYY-MM-DD')`);
-  if (end) candidate.push(`C.DTNEG<TO_DATE(${literal(end)},'YYYY-MM-DD')+1`);
+  if (start) candidate.push(`C.${dateField}>=TO_DATE(${literal(start)},'YYYY-MM-DD')`);
+  if (end) candidate.push(`C.${dateField}<TO_DATE(${literal(end)},'YYYY-MM-DD')+1`);
   const required: Record<string, Record<string,string>> = {
     TGFCAB: { CODEMP:'NUMBER',NUNOTA:'NUMBER',CODTIPOPER:'NUMBER',DHTIPOPER:'DATE',CODNAT:'NUMBER',DTNEG:'DATE',TIPMOV:'text',STATUSNOTA:'text',VLRNOTA:'amount',CODPARC:'NUMBER',CODVEND:'NUMBER' },
     TGFTOP: { CODTIPOPER:'NUMBER',DHALTER:'DATE',TIPMOV:'text',BONIFICACAO:'text',GOLDEV:'NUMBER' },
     TGFPAR: { CODPARC:'NUMBER',CODVEND:'NUMBER',CODEMP:'NUMBER',CLIENTE:'text' },
   };
+  if (billing) {
+    for (const [table,columns] of Object.entries(BILLING_COLUMNS)) required[table] = { ...required[table],...columns };
+    required['TGFCAB']!['VLRNOTA'] = 'amount';
+  }
   const metadataWhere = Object.entries(required).map(([table, columns]) => `(TABLE_NAME='${table}' AND COLUMN_NAME IN (${Object.keys(columns).map(literal).join(',')}))`).join(' OR ');
   const metadata = await gateway.select(`SELECT TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE ${metadataWhere} ORDER BY TABLE_NAME,COLUMN_NAME FETCH FIRST 50 ROWS ONLY`, 50);
   for (const [table, columns] of Object.entries(required)) for (const [name, type] of Object.entries(columns)) {
     if (!metadata.some(r => r['TABLE_NAME'] === table && r['COLUMN_NAME'] === name && (type === 'text' ? ['CHAR','VARCHAR2','NCHAR','NVARCHAR2'].includes(String(r['DATA_TYPE'])) : type === 'amount' ? ['NUMBER','FLOAT'].includes(String(r['DATA_TYPE'])) : r['DATA_TYPE'] === type))) return unsupportedSales();
   }
-  const missing = await gateway.select(`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} WHERE ${candidate.join(' AND ')} AND (T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'P' OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1))`, 1);
+  const invalidTop = billing
+    ? "T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'V' OR T.GOLSINAL IS NULL OR T.GOLSINAL NOT IN (-1,0,1) OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1)"
+    : "T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'P' OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1)";
+  const missing = await gateway.select(`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} WHERE ${candidate.join(' AND ')} AND (${invalidTop})`, 1);
   if (missing.length !== 1) return incompatible();
   if (salesCount(missing[0], 'MISSING_CONTEXT_COUNT') !== 0) return unsupportedSales();
-  const withoutSearch = [...candidate, `T.TIPMOV='${policy.movement}'`, `T.BONIFICACAO='${policy.bonification}'`, `T.GOLDEV=${policy.devolution}`], where = [...withoutSearch];
+  const commercial = billing ? [`T.TIPMOV='V'`,`T.GOLSINAL=${bp.salesSignal}`,`T.BONIFICACAO='${bp.bonification}'`,`T.GOLDEV=${bp.devolution}`] : [`T.TIPMOV='${policy.movement}'`, `T.BONIFICACAO='${policy.bonification}'`, `T.GOLDEV=${policy.devolution}`];
+  const withoutSearch = [...candidate, ...commercial];
+  if (billing) {
+    const f = billingOriginFlags('C');
+    const uncertainty = `(${f.HAS_UNRESOLVED_ORIGIN}) OR ((${f.HAS_STANDARD_ORIGIN}) AND ((${f.HAS_OTHER_ORIGIN}) OR (${f.HAS_UNLINKED_ITEM}) OR NOT (${f.HAS_ITEMS}) OR (${f.HAS_CROSS_COMPANY_ORIGIN}) OR C.VLRNOTA IS NULL))`;
+    const unknown = await gateway.select(`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} WHERE ${withoutSearch.join(' AND ')} AND (${uncertainty})`,1);
+    if (unknown.length !== 1) return incompatible();
+    if (salesCount(unknown[0],'MISSING_CONTEXT_COUNT') !== 0) return unsupportedSales();
+    withoutSearch.push(`(${f.HAS_STANDARD_ORIGIN})`,`NOT (${f.HAS_OTHER_ORIGIN})`,`NOT (${f.HAS_UNRESOLVED_ORIGIN})`,`NOT (${f.HAS_UNLINKED_ITEM})`,`(${f.HAS_ITEMS})`,`NOT (${f.HAS_CROSS_COMPANY_ORIGIN})`);
+  }
+  const where = [...withoutSearch];
   if (search) {
     const term = literal('%' + foldERPText(search).replace(/[!%_]/g, c => '!' + c) + '%');
     where.push(`(${['TO_CHAR(C.NUNOTA)','TO_CHAR(C.NUMNOTA)','P.RAZAOSOCIAL','V.APELIDO','T.DESCROPER','C.STATUSNOTA'].map(f => `${foldSQL(f)} LIKE ${term} ESCAPE '!'`).join(' OR ')})`);
@@ -228,16 +251,17 @@ export async function readSalesReport(gateway: Transport, input: SalesReportInpu
     items = rows.map(r => {
       const code = nullableCode(r['GROUP_CODE']), subtotal = salesSummary(r);
       if (subtotal.documentCount < 1) return incompatible();
-      return { id: `sankhya:sales:${group}:${code ?? 'unknown'}`, source:'observado',readOnly:true,name:text(r['GROUP_NAME']),count:subtotal.documentCount,total:subtotal.documentAmount,groupCode:code,groupBy:group,missingAmountCount:subtotal.missingAmountCount };
+      return { id: `sankhya:${billing ? 'billing' : 'sales'}:${group}:${code ?? 'unknown'}`, source:'observado',readOnly:true,name:text(r['GROUP_NAME']),count:subtotal.documentCount,total:subtotal.documentAmount,groupCode:code,groupBy:group,missingAmountCount:subtotal.missingAmountCount };
     });
   } else {
-    const order = `${sorts[sort]} ${direction.toUpperCase()} NULLS LAST${sort !== 'code' ? `,C.NUNOTA ${direction.toUpperCase()} NULLS LAST` : ''}`;
-    const rows = await gateway.select(`SELECT ${fields},TO_CHAR(C.VLRNOTA,'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS DOCUMENT_AMOUNT FROM ${fromSQL} WHERE ${where.join(' AND ')} ORDER BY ${order} OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`, page.limit);
+    const order = `${reportSorts[sort]} ${direction.toUpperCase()} NULLS LAST${sort !== 'code' ? `,C.NUNOTA ${direction.toUpperCase()} NULLS LAST` : ''}`;
+    const reportFields = billing ? fields.replace("TO_CHAR(C.DTNEG,'YYYY-MM-DD') AS DOCUMENT_DATE","TO_CHAR(C.DTFATUR,'YYYY-MM-DD') AS DOCUMENT_DATE") + ',C.STATUSNFE' : fields;
+    const rows = await gateway.select(`SELECT ${reportFields},TO_CHAR(C.VLRNOTA,'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS DOCUMENT_AMOUNT FROM ${fromSQL} WHERE ${where.join(' AND ')} ORDER BY ${order} OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`, page.limit);
     items = rows.map(r => {
-      if (code(r['CODTIPOPER']) !== 1001 || r['STATUSNOTA'] !== 'L') return incompatible();
-      const item = documentDTO(r,'P',companies,{total:r['DOCUMENT_AMOUNT'] === null ? null : salesAmount(r['DOCUMENT_AMOUNT'])});
+      if ((!billing && code(r['CODTIPOPER']) !== 1001) || r['STATUSNOTA'] !== 'L' || billing && r['STATUSNFE'] !== 'A') return incompatible();
+      const item = documentDTO(r,movement,companies,{total:r['DOCUMENT_AMOUNT'] === null ? null : salesAmount(r['DOCUMENT_AMOUNT'])});
       if (input.customerId && item.customerId !== input.customerId || input.sellerCode !== undefined && item.sellerCode !== input.sellerCode || start && (!item.date || item.date < start) || end && (!item.date || item.date > end)) return incompatible();
-      return item;
+      return billing ? { ...item,nf:item.number,invoiced:item.total,erp:{...item.erp,dateField:'DTFATUR',fiscalStatusCode:text(r['STATUSNFE'])} } : item;
     });
   }
   verifyPage(items,total,page.offset,page.limit);
@@ -249,5 +273,5 @@ export async function readSalesReport(gateway: Transport, input: SalesReportInpu
       if (items.some(r => r['total'] === null) || decimalUnits(sumERPDecimals(items.map(r => salesAmount(r['total'])))) !== decimalUnits(summary.documentAmount)) return incompatible();
     }
   }
-  return { ...observed(),items,total,totalWithoutSearch,offset:page.offset,summary,salesPolicy:policy,companyCodes:companies,groupBy:group ?? null };
+  return { ...observed(),items,total,totalWithoutSearch,offset:page.offset,summary,...(billing ? {billingPolicy:bp,linkMode:'direct-item-reference',quantitiesAllocated:false,ordersAdded:false,undatedTreatment:'excluded-without-date-fallback'} : {salesPolicy:policy}),companyCodes:companies,groupBy:group ?? null };
 }
