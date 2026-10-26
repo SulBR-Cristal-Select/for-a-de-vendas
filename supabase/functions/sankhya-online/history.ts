@@ -181,12 +181,14 @@ const commercialFromSQL=fromSQL;
 export async function readSalesReport(gateway: Transport, input: SalesReportInput, scope: ReadScope) { return readCommercialReport(gateway,input,scope,false); }
 export async function readBillingReport(gateway: Transport, input: BillingReportInput, scope: ReadScope) { return readCommercialReport(gateway,input,scope,true); }
 export async function readBilledOrdersReport(gateway:Transport,input:SalesReportInput,scope:ReadScope){return readCommercialReport(gateway,input,scope,false,true);}
-async function readCommercialReport(gateway: Transport, input: CommercialReportInput, scope: ReadScope, billing: boolean, billed=false) {
+export async function readRankingSales(gateway:Transport,input:SalesReportInput,scope:ReadScope){return readCommercialReport(gateway,input,scope,false,false,true);}
+async function readCommercialReport(gateway: Transport, input: CommercialReportInput, scope: ReadScope, billing: boolean, billed=false, ranking=false) {
   let fromSQL=commercialFromSQL,prefix='';
   const read=async(stage:string,sql:string,limit:number)=>{try{return await gateway.select(prefix?prefix+' '+sql:sql,limit);}catch(e){if(billed&&e instanceof SankhyaError)throw new SankhyaError(e.code,e.message,e.status,e.upstreamStatus,{kind:'billed-orders-query-stage',fields:[],hint:stage});throw e;}};
   const dataGateway={select:(sql:string,limit:number)=>read('group-count',sql,limit)};
   keys(input, ['resource','offset','limit','customerId','sellerCode','status','search','sort','direction','from','to','companyCode','groupBy','productMix']);
   if (input.resource !== (billing ? 'invoices' : 'orders') || input.groupBy !== undefined && !['seller','customer'].includes(input.groupBy) || input.status !== undefined && input.status !== 'confirmado' || input.productMix !== undefined && (input.productMix !== true || billing || billed || input.groupBy !== 'customer')) return invalid();
+  if(ranking&&(input.groupBy!=='seller'||input.productMix!==undefined))return invalid();
   const mix = input.productMix === true;
   const allowed = scopeOf(scope), page = windowOf(input.offset, input.limit), policy = STANDARD_SALES_REPORT_POLICY, bp = STANDARD_BILLING_REPORT_POLICY, movement = billing ? 'V' : 'P', dateField = billing ? 'DTFATUR' : 'DTNEG';
   let companies = allowed.companies;
@@ -269,13 +271,13 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
     // O cabeçalho financeiro não participa do join de itens: cada pedido soma uma vez.
     // SKU repetido em pedidos/unidades diferentes conta uma vez por cliente, não é quantidade.
     const mixSQL = mix ? `WITH MIX_SOURCE AS (SELECT C.NUNOTA,C.CODEMP,C.CODPARC,C.VLRNOTA,P.RAZAOSOCIAL FROM ${fromSQL} WHERE ${where.join(' AND ')}) SELECT C.CODPARC AS GROUP_CODE,C.RAZAOSOCIAL AS GROUP_NAME,${salesAggregate},(SELECT CASE WHEN COUNT(DISTINCT H.NUNOTA)<>COUNT(DISTINCT I.NUNOTA) OR COUNT(CASE WHEN I.CODPROD IS NULL OR I.CODPROD<1 OR I.CODPROD>2147483647 OR I.CODPROD<>ROUND(I.CODPROD,0) OR I.CODEMP IS NULL OR I.CODEMP<>H.CODEMP THEN 1 END)>0 THEN NULL ELSE COUNT(DISTINCT I.CODPROD) END FROM MIX_SOURCE H LEFT JOIN TGFITE I ON I.NUNOTA=H.NUNOTA WHERE H.CODPARC=C.CODPARC OR (H.CODPARC IS NULL AND C.CODPARC IS NULL)) AS PRODUCT_COUNT FROM MIX_SOURCE C GROUP BY C.CODPARC,C.RAZAOSOCIAL ORDER BY ${groupSorts[sort]} ${direction.toUpperCase()} NULLS LAST,C.CODPARC ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY` : undefined;
-    const rows = await read('page',mixSQL ?? `SELECT ${groupCode} AS GROUP_CODE,${groupName} AS GROUP_NAME,${salesAggregate} FROM ${fromSQL} WHERE ${where.join(' AND ')} GROUP BY ${groupCode},${groupName} ORDER BY ${groupSorts[sort]} ${direction.toUpperCase()} NULLS LAST,${groupCode} ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`, page.limit);
+    const rows = await read('page',mixSQL ?? `SELECT ${groupCode} AS GROUP_CODE,${groupName} AS GROUP_NAME,${salesAggregate}${ranking?",COUNT(DISTINCT C.CODPARC) AS CUSTOMER_COUNT,ROW_NUMBER() OVER(ORDER BY SUM(C.VLRNOTA) DESC NULLS LAST,C.CODVEND ASC NULLS LAST) AS SELLER_POSITION":""} FROM ${fromSQL} WHERE ${where.join(' AND ')} GROUP BY ${groupCode},${groupName} ORDER BY ${groupSorts[sort]} ${direction.toUpperCase()} NULLS LAST,${groupCode} ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`, page.limit);
     items = rows.map(r => {
       const code = nullableCode(r['GROUP_CODE']), subtotal = salesSummary(r);
       if (subtotal.documentCount < 1) return incompatible();
       const qty = mix ? r['PRODUCT_COUNT'] === null ? null : salesCount(r,'PRODUCT_COUNT') : undefined;
       if (mix && qty !== null && (!qty || qty < 1)) return incompatible();
-      return { id: `sankhya:${billing ? 'billing' : 'sales'}:${group}:${code ?? 'unknown'}`, source:'observado',readOnly:true,name:text(r['GROUP_NAME']),count:subtotal.documentCount,total:subtotal.documentAmount,groupCode:code,groupBy:group,missingAmountCount:subtotal.missingAmountCount,...(mix ? {qty} : {}) };
+      return { id: `sankhya:${billing ? 'billing' : 'sales'}:${group}:${code ?? 'unknown'}`, source:'observado',readOnly:true,name:text(r['GROUP_NAME']),count:subtotal.documentCount,total:subtotal.documentAmount,groupCode:code,groupBy:group,missingAmountCount:subtotal.missingAmountCount,...(ranking?{clients:salesCount(r,'CUSTOMER_COUNT'),rank:salesCount(r,'SELLER_POSITION')} : {}),...(mix ? {qty} : {}) };
     });
   } else {
     const order = `${reportSorts[sort]} ${direction.toUpperCase()} NULLS LAST${sort !== 'code' ? `,C.NUNOTA ${direction.toUpperCase()} NULLS LAST` : ''}`;

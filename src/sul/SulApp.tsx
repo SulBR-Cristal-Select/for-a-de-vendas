@@ -1,3 +1,4 @@
+import {useRankingChart} from './erp-ranking-chart';
 import type {ERPCommissionSummary} from '../lib/erp-commission';
 import type { ERPWalletSummary } from '../lib/erp-wallet';
 import { formatERPShare } from '../lib/erp-decimal';
@@ -17,7 +18,7 @@ import { completionOwners, completionRecords, filterCompletions } from './comple
 import { opportunityReportRows, filterOpportunityRows, opportunityReportOwners } from './opportunity-report';
 import { salesReportQuery } from './erp-sales-report';
 import { nonBuyersQuery } from './nonbuyers-report';
-import { useERPSalesChart } from './erp-sales-chart';
+import { useERPSalesChart, salesChartCoordinate } from './erp-sales-chart';
 import { useERPProductsChart } from './erp-products-chart';
 import { formatERPAmount, formatERPQuantity } from '../lib/erp-decimal';
 import { ERPCombobox as Sl } from './erp-combobox';
@@ -3035,6 +3036,7 @@ function xz(): any {
 }
 function bz({ id: e }: any): any {
     let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
+    const rankingReport=['ranking','meta-vendedor'].includes(e)&&!!online;
     const receivablesReport=e==='titulos'&&!!online;
     const customerReport = e === 'clientes' && !!online;
     const nonBuyerReport = e === 'nao-compraram' && !!online;
@@ -3060,7 +3062,7 @@ function bz({ id: e }: any): any {
     const salesReport = (e === 'vendas' || chartReport || abcReport || mixReport) && !!online;
     const billingReport = e === 'faturamento' && !!online;
     const billedOrdersReport=e==='faturados'&&!!online;
-    const commercialReport = salesReport || billingReport || billedOrdersReport;
+    const commercialReport = salesReport || billingReport || billedOrdersReport || rankingReport;
     const itemReport = e === 'produtos-pedido' && !!online;
     const productReport = e === 'produtos' && !!online;
     const managementReport = e === 'gerencial' && !!online;
@@ -3074,6 +3076,7 @@ function bz({ id: e }: any): any {
     const [salesResult, setSalesResult] = He.useState(undefined);
     const onSalesSummary = He.useCallback((summary: ERPSalesSummary | undefined, source?: ERPReportSource) => setSalesResult({ key: salesKey, summary, source }), [salesKey]);
     const salesSummary: ERPSalesSummary | undefined = salesResult?.key === salesKey ? salesResult.summary : undefined;
+    const rankingChart=useRankingChart(online,rankingReport&&e==='meta-vendedor'&&salesResult?.key===salesKey?salesResult:undefined);
     const salesChart = useERPSalesChart(online, chartReport && salesResult?.key === salesKey ? salesResult : undefined);
     const [productResult,setProductResult]=He.useState(undefined);
     const onItemsSummary=He.useCallback((summary:ERPItemSummary|undefined,source?:ERPReportSource)=>setProductResult({key:salesKey,summary,source}),[salesKey]);
@@ -3081,7 +3084,9 @@ function bz({ id: e }: any): any {
     const managementProducts = He.useMemo(() => managementReport
         ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},registerExport:false}
         : undefined,[online,e,salesKey]);
-    const remote = He.useMemo(() => receivablesReport
+    const remote = He.useMemo(() => rankingReport
+        ? {client:online,resource:'orders',rankingReport:{...salesReportQuery(r.f,'nenhum'),month:reportMonth},onSummary:onSalesSummary}
+        : receivablesReport
         ? (()=>{const {status:_ignored,...filters}=salesReportQuery(r.f,'nenhum');return{client:online,resource:'orders',receivablesReport:{...filters,...(r.f.status?{settlement:r.f.status==='Baixa registrada'?'registrada':r.f.status==='Sem baixa registrada'?'sem-registro':'invalid'}:{})}};})()
         : commissionReport
         ? {client:online,resource:'orders',commissionReport:{...salesReportQuery(r.f,'nenhum'),view:e==='comissoes'?'sellers':'orders'},onCommissionSummary}
@@ -3108,7 +3113,7 @@ function bz({ id: e }: any): any {
         [online, e, l, salesKey, onSalesSummary, onItemsSummary,nonBuyerKey,onNonBuyersSummary,walletKey,onWalletSummary,commissionKey,onCommissionSummary]);
     if (!n)
         return (0, b.jsx)(Wu, {});
-    let d: any = ['faturados', 'faturamento'].includes(e) ? invoicedOrders(r.rows, t.invoices) : r.rows, m: any = [], p: any = [], y: any = "Dados persistidos no sistema, conforme os filtros selecionados.", C: any = null, x: any = null, v: any = d.filter((h: any) => h.type === "Venda" && h.status === "Conclu\xEDdo");
+    let d: any = ['faturados', 'faturamento'].includes(e) ? invoicedOrders(r.rows, t.invoices) : r.rows, m: any = [], p: any = [], y: any = "Dados persistidos no sistema, conforme os filtros selecionados.", C: any = null, x: any = null, v: any = (rankingReport?[]:d).filter((h: any) => h.type === "Venda" && h.status === "Conclu\xEDdo");
     if ([
         "resumo",
         "vendas",
@@ -3188,13 +3193,13 @@ function bz({ id: e }: any): any {
         })
             .sort((h: any, S: any) => S.total - h.total)),
             (p = [
-                z("rank", "Posi\xE7\xE3o", (h: any) => m.indexOf(h) + 1),
+                z("rank", "Posi\xE7\xE3o", (h: any) => rankingReport ? h.rank ?? pa : m.indexOf(h) + 1),
                 z("name", "Vendedor", void 0, { primary: !0 }),
                 z("total", "Vendido", (h: any) => rt(h.total), { align: "right" }),
                 z("count", "Pedidos"),
                 z("clients", "Clientes atendidos"),
-                z("target", "Meta", (h: any) => rt(h.target), { align: "right" }),
-                z("hit", "Atingimento", (h: any) => h.target > 0
+                z("target", "Meta", (h: any) => h.target == null ? pa : rt(h.target), { align: "right" }),
+                z("hit", "Atingimento", (h: any) => rankingReport ? h.hit ?? pa : h.target > 0
                     ? na((100 * h.total) / h.target) + "%"
                     : "N\xE3o definida"),
             ]),
@@ -3222,7 +3227,7 @@ function bz({ id: e }: any): any {
                 children: [(0, b.jsx)(od, {}), "Definir metas"],
             })),
             (y =
-                "Metas persistidas por vendedor para " + businessMonthLabel(reportMonth) + "."));
+                rankingReport ? (r.f.from || r.f.to ? "Pedidos padrão no período de emissão filtrado; metas locais de " : "Pedidos padrão e metas locais de ") + businessMonthLabel(reportMonth) + "; posição por valor, desempate por código ERP. Metas locais somente com vínculo privado inequívoco, mesmas filiais e mês completo, sem recorte de cliente. Busca não renumera posições. Definir metas mantém o cadastro local por usuário." : "Metas persistidas por vendedor para " + businessMonthLabel(reportMonth) + "."));
     else if (e === "nao-compraram") {
         let h: any = new Set(v.filter((S:any)=>S.date?.startsWith(reportMonth)).map((S: any) => S.customerId)), mes: any = reportMonth;
         ((m = (nonBuyerReport ? [] : t.customers)
@@ -3268,8 +3273,8 @@ function bz({ id: e }: any): any {
                 z("target", "Meta", (h: any) => (h.target != null ? rt(h.target) : pa), {
                     align: "right",
                 }),
-                z("hit", "Atingido", (h: any) => (h.target > 0 ? na((h.total / h.target) * 100) + "%" : pa), { align: "right" }),
-                z("progress", "Atingimento", (h: any) => h.target > 0
+                z("hit", "Atingido", (h: any) => (rankingReport ? h.hit ?? pa : h.target > 0 ? na((h.total / h.target) * 100) + "%" : pa), { align: "right" }),
+                z("progress", "Atingimento", (h: any) => (rankingReport ? h.progress !== null : h.target > 0)
                     ? (0, b.jsx)("div", {
                         style: { minWidth: 120 },
                         children: (0, b.jsx)("div", {
@@ -3282,8 +3287,8 @@ function bz({ id: e }: any): any {
                             children: (0, b.jsx)("div", {
                                 style: {
                                     height: 8,
-                                    width: Math.min(100, (h.total / h.target) * 100) + "%",
-                                    background: h.total / h.target >= 1
+                                    width: (rankingReport ? h.progress : Math.min(100, (h.total / h.target) * 100)) + "%",
+                                    background: (rankingReport ? h.progress >= 100 : h.total / h.target >= 1)
                                         ? "var(--ds-ok)"
                                         : "var(--ds-accent)",
                                     borderRadius: 4,
@@ -3295,10 +3300,10 @@ function bz({ id: e }: any): any {
             ]),
             (C = (0, b.jsx)(cs, {
                 title: "Meta x Vendido por vendedor",
-                description: "Barras = vendido no recorte \xB7 linha tracejada = meta",
+                description: rankingReport ? "Barras = pedidos padrão no período; meta somente com vínculo e escopo comprovados" : "Barras = vendido no recorte \xB7 linha tracejada = meta",
                 children: (0, b.jsx)(Qy, {
                     label: "Meta por vendedor",
-                    data: m.map((h: any) => ({
+                    data: rankingReport ? rankingChart : m.map((h: any) => ({
                         vendedor: h.name,
                         Vendido: h.total,
                         Meta: h.target ?? 0,
@@ -3307,13 +3312,13 @@ function bz({ id: e }: any): any {
                     series: [{ key: "Vendido", label: "Vendido" }],
                     format: Vd,
                     height: 300,
-                    reference: m.length === 1 && m[0].target > 0
+                    reference: rankingReport ? rankingChart.length===1 && rankingChart[0]!.target!==null && Number(rankingChart[0]!.target)>0 ? {value:salesChartCoordinate(rankingChart[0]!.target),label:"Meta "+rt(rankingChart[0]!.target)} : null : m.length === 1 && m[0].target > 0
                         ? { value: m[0].target, label: "Meta " + rt(m[0].target) }
                         : null,
                 }),
             })),
             (y =
-                "Metas definidas no relatório Ranking de vendedor / Meta para " + businessMonthLabel(reportMonth) + "."));
+                rankingReport ? "Pedidos padrão no período selecionado; metas locais de " + businessMonthLabel(reportMonth) + ". Atingimento indisponível sem vínculo por código, mesmas filiais e mês completo, ou com filtro de cliente. Ausência de meta não equivale a zero." : "Metas definidas no relatório Ranking de vendedor / Meta para " + businessMonthLabel(reportMonth) + "."));
     }
     else if (e === "gerencial") {
         let h: any = {};
@@ -3662,7 +3667,7 @@ function bz({ id: e }: any): any {
         children: [
             (0, b.jsx)(Ua, {
                 title: n.name,
-                description: receivablesReport ? "Recebíveis nativos no Sankhya, sem geração ou baixa financeira" : billedOrdersReport ? "Pedidos padrão com notas fiscais aprovadas, inclusive faturamento parcial" : commissionReport ? "Consulta à comissão nativa no Sankhya, sem comprovação de pagamento" : stockReport ? "Consulta ao estoque registrado no Sankhya" : walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
+                description: rankingReport ? "Pedidos padrão no Sankhya e metas locais, sem vínculo por nome" : receivablesReport ? "Recebíveis nativos no Sankhya, sem geração ou baixa financeira" : billedOrdersReport ? "Pedidos padrão com notas fiscais aprovadas, inclusive faturamento parcial" : commissionReport ? "Consulta à comissão nativa no Sankhya, sem comprovação de pagamento" : stockReport ? "Consulta ao estoque registrado no Sankhya" : walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
                 back: { label: "Relat\xF3rios", to: "/relatorios" },
                 actions: (0, b.jsx)(Gp, {
                     rows: csvRows(m, p.filter((h: any) => !h.action)),
