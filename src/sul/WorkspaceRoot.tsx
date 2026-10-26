@@ -6,7 +6,9 @@ import SulApp, { createAppState } from './SulApp';
 import { supabase } from '../lib/supabase';
 import { erpClient } from '../lib/erp-online';
 import { loadWorkspace, saveWorkspace, WorkspaceError } from '../lib/workspace';
+import { createSubmissionClient } from '../lib/erp-submission';
 
+const submissionClient = createSubmissionClient(async (body, signal) => await supabase.functions.invoke('sankhya-online', { body, signal }));
 export default function WorkspaceRoot() {
   const [session, setSession] = useState<Session | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -26,6 +28,7 @@ export default function WorkspaceRoot() {
     const acceptSession = (next: Session | null) => {
       const identity = next?.user.id ?? null;
       erpClient.setIdentity(identity);
+      submissionClient.setIdentity(identity);
       if (identity !== currentIdentity) setState(null);
       currentIdentity = identity;
       setSession(next);
@@ -39,7 +42,7 @@ export default function WorkspaceRoot() {
     const { data } = supabase.auth.onAuthStateChange((_event, next) => {
       if (alive) { sessionChanged = true; acceptSession(next); }
     });
-    return () => { alive = false; data.subscription.unsubscribe(); erpClient.setIdentity(null); };
+    return () => { alive = false; data.subscription.unsubscribe(); erpClient.setIdentity(null); submissionClient.setIdentity(null); };
   }, []);
 
   const userId = session?.user.id;
@@ -103,7 +106,7 @@ export default function WorkspaceRoot() {
     } finally { setSubmitting(false); }
   }
 
-  if (session && state?.owner === session.user.id) return <SulApp key={session.user.id + ':' + reload} initialState={state.value} online={erpClient} persist={saveWorkspace} onSignOut={signOut} />;
+  if (session && state?.owner === session.user.id) return <SulApp key={session.user.id + ':' + reload} initialState={state.value} online={erpClient} submission={submissionClient} refresh={loadWorkspace} persist={saveWorkspace} onSignOut={signOut} />;
   return <Page width="narrow">
     <PageHeading title="Sul · Força de Vendas" description="SulBR" />
     <Card className="space-y-5">

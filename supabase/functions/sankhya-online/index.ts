@@ -10,6 +10,8 @@ import { readHistory, readDocument, readSalesReport, readBillingReport, readOrde
 import { readWindow, readPage, readRecord, readFacets } from './read-model.ts';
 import { readNonBuyers } from './nonbuyers.ts';
 import { actorScope } from './identity.ts';
+import { reviewSubmission, submitOrder, submissionStatus, type ReceiptWriter } from './submission.ts';
+import type { SubmissionReceipt } from '../../../src/lib/erp-submission-contract.ts';
 
 // A chave de manutenção não substitui uma identidade de usuário para consultas comerciais.
 const gateway = new SankhyaGateway(key => Deno.env.get(key));
@@ -54,12 +56,12 @@ async function actor(request: Request) {
   actorScope(profile, linked.data); // Valida somente o vínculo obtido pelo Auth no servidor.
   return profile;
 }
-async function attestOrder(args: Record<string, unknown>) {
+async function serverOrderRPC(args: Record<string, unknown>, name: 'attest_erp_order_request' | 'erp_submission_write') {
   const url = Deno.env.get('SUPABASE_URL');
   const key = jsonKeys('SUPABASE_SECRET_KEYS')['default'] || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (url !== 'https://cxurczhmrvxcuvklyiht.supabase.co' || !key) throw new SankhyaError('ERP_REVALIDATION_UNAVAILABLE', 'Escritor de prova comercial não configurado.', 503);
   // A chave técnica só registra prova privada. O autor Auth real é revalidado pelo SQL.
-  const response = await fetch(url + '/rest/v1/rpc/attest_erp_order_request', { method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json', ...(!key.startsWith('sb_secret_') ? { Authorization: `Bearer ${key}` } : {}) }, body: JSON.stringify(args), signal: AbortSignal.timeout(15000), redirect: 'error' });
+  const response = await fetch(url + '/rest/v1/rpc/' + name, { method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json', ...(!key.startsWith('sb_secret_') ? { Authorization: `Bearer ${key}` } : {}) }, body: JSON.stringify(args), signal: AbortSignal.timeout(15000), redirect: 'error' });
   const data = await response.json();
   if (!response.ok) {
     if (data?.code === 'PT409') throw new SankhyaError('REVISION_CONFLICT', 'Recarregue os dados antes de salvar.', 409);
@@ -68,6 +70,12 @@ async function attestOrder(args: Record<string, unknown>) {
   }
   return data;
 }
+const attestOrder = (args: Record<string, unknown>) => serverOrderRPC(args, 'attest_erp_order_request');
+const writeSubmission: ReceiptWriter = async args => {
+  const result = await serverOrderRPC(args, 'erp_submission_write');
+  if (!result || typeof result.acquired !== 'boolean' || !result.receipt || typeof result.receipt.id !== 'string') throw new SankhyaError('ERP_SUBMISSION_UNAVAILABLE', 'Não foi possível conferir o recibo de envio.', 503);
+  return { acquired: result.acquired, receipt: result.receipt as SubmissionReceipt };
+};
 Deno.serve(async (request: Request) => {
   const started = performance.now();
   const origin = request.headers.get('Origin');
@@ -109,6 +117,12 @@ Deno.serve(async (request: Request) => {
     // Mesmo usuário Auth e vínculo privado em catálogo, cotação e preparação.
     // Nenhum vendedor/filial do corpo HTTP se transforma em autoridade.
     const scope = actorScope(profile);
+    if (['order-send-review','order-send-submit','order-send-status'].includes(input.operation)) {
+      const deps = { gateway: { ...commercialGateway, contextPrices: gateway.contextPrices.bind(gateway), includeOrder: gateway.includeOrder.bind(gateway), confirmOrder: gateway.confirmOrder.bind(gateway) }, actor: profile, rpc: async (name: string, args: Record<string, unknown>) => await profile.client.rpc(name, args), write: writeSubmission };
+      if (input.operation === 'order-send-review') return reply(await reviewSubmission(deps, input.query));
+      if (input.operation === 'order-send-status') return reply(await submissionStatus(deps, input.query));
+      return reply(await submitOrder(deps, input.query));
+    }
     if (input.operation === 'prepare-order-save') return reply(await revalidateOrderRequest({ ...commercialGateway, contextPrices: q => gateway.contextPrices(q) }, input.query, profile, async (name, args) => await profile.client.rpc(name, args), attestOrder));
     if (input.operation === 'payment-options') return reply(await readPaymentOptions(commercialGateway, input.query, scope));
     if (input.operation === 'history') return reply(await readHistory(commercialGateway, input.query, scope));
