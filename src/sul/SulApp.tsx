@@ -1,3 +1,5 @@
+import type { ERPWalletSummary } from '../lib/erp-wallet';
+import { formatERPShare } from '../lib/erp-decimal';
 import {FileText as $s} from 'lucide-react';
 import { ArrowLeft as gm, Download as vm, ArrowRight as Jr, Plus as Sa, Printer as td, Trash as Ws, Check as ka, FileCheck as Cm, Pencil as tl, Link2 as Jc, Package as du, ChevronRight as so, Target as od, Lock as Im, ListFilter as ed, Layers as Xl, Settings as ad, Users as Wl, ClipboardList as ym, Building2 as qs, Mail as Lm, Globe as Qc, CreditCard as Kc, ShieldCheck as Mm, ChartNoAxesCombined as Yc, Truck as nd, Sparkles as al, Send as Nm, ChartColumn as zs, Handshake as Sm, Search as tr } from 'lucide-react';
 import { Pagination as GI } from '@g4ai/ds';
@@ -3034,8 +3036,14 @@ function bz({ id: e }: any): any {
     let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
     const customerReport = e === 'clientes' && !!online;
     const nonBuyerReport = e === 'nao-compraram' && !!online;
+    const walletReport = ['carteira-vendedor','positivacao'].includes(e) && !!online;
+    const stockReport = e==='estoque' && !!online;
     const reportMonth=r.f.from?.slice(0,7) || r.f.to?.slice(0,7) || businessDate().slice(0,7);
     const nonBuyerKey=JSON.stringify([r.f,reportMonth]);
+    const walletKey=JSON.stringify([e,r.f,reportMonth]);
+    const [walletResult,setWalletResult]=He.useState(undefined);
+    const onWalletSummary=He.useCallback((summary:ERPWalletSummary|undefined)=>setWalletResult({key:walletKey,summary}),[walletKey]);
+    const walletSummary:ERPWalletSummary|undefined=walletResult?.key===walletKey?walletResult.summary:undefined;
     const [nonBuyerResult,setNonBuyerResult]=He.useState(undefined);
     const onNonBuyersSummary=He.useCallback((summary:ERPNonBuyersSummary|undefined)=>setNonBuyerResult({key:nonBuyerKey,summary}),[nonBuyerKey]);
     const nonBuyerSummary:ERPNonBuyersSummary|undefined=nonBuyerResult?.key===nonBuyerKey?nonBuyerResult.summary:undefined;
@@ -3065,7 +3073,11 @@ function bz({ id: e }: any): any {
     const managementProducts = He.useMemo(() => managementReport
         ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},registerExport:false}
         : undefined,[online,e,salesKey]);
-    const remote = He.useMemo(() => nonBuyerReport
+    const remote = He.useMemo(() => stockReport
+        ? {client:online,resource:'products',stockReport:{}}
+        : walletReport
+        ? {client:online,resource:'customers',walletReport:{...nonBuyersQuery(r.f,reportMonth),view:e==='carteira-vendedor'?'sellers':'customers'},onWalletSummary}
+        : nonBuyerReport
         ? {client:online,resource:'customers',nonBuyersReport:nonBuyersQuery(r.f,reportMonth),onNonBuyersSummary}
         : managementReport
         ? {client:online,resource:'orders',salesReport:salesReportQuery(r.f,'cliente')}
@@ -3079,7 +3091,7 @@ function bz({ id: e }: any): any {
         ? { client: online, resource: 'orders', salesReport: { ...salesReportQuery(r.f, abcReport || mixReport ? 'cliente' : l), ...(mixReport ? {productMix:true} : {}) }, ...(abcReport ? { salesParticipation:true } : {}), onSummary: onSalesSummary }
         : customerReport && remoteCustomerReport(r.f)
         ? { client: online, resource: 'customers', filters: customerReportFilters(r.f) } : undefined,
-        [online, e, l, salesKey, onSalesSummary, onItemsSummary,nonBuyerKey,onNonBuyersSummary]);
+        [online, e, l, salesKey, onSalesSummary, onItemsSummary,nonBuyerKey,onNonBuyersSummary,walletKey,onWalletSummary]);
     if (!n)
         return (0, b.jsx)(Wu, {});
     let d: any = ['faturados', 'faturamento'].includes(e) ? invoicedOrders(r.rows, t.invoices) : r.rows, m: any = [], p: any = [], y: any = "Dados persistidos no sistema, conforme os filtros selecionados.", C: any = null, x: any = null, v: any = d.filter((h: any) => h.type === "Venda" && h.status === "Conclu\xEDdo");
@@ -3586,7 +3598,7 @@ function bz({ id: e }: any): any {
                                                     ]),
                                                     (y =
                                                         "Nenhum provedor de envio externo está configurado. Nenhuma mensagem é enviada por esta consulta."));
-    if (e === "carteira-vendedor")
+    if (e === "carteira-vendedor" && !walletReport)
         return (0, b.jsxs)(fa, {
             width: "wide",
             children: [
@@ -3605,6 +3617,21 @@ function bz({ id: e }: any): any {
                 }),
             ],
         });
+    if(stockReport){
+        m=[]; C=null; x=null;
+        p=[z('code','Código'),z('name','Produto',void 0,{primary:true,wide:true}),z('companyCode','Empresa'),z('localCode','Local'),z('control','Controle'),z('partnerCode','Parceiro'),z('stockType','Tipo ERP'),z('unit','Unidade'),z('stock','Estoque registrado'),z('reserved','Reservado')];
+        y='Estoque registrado no Sankhya por empresa, produto, local, controle, parceiro e tipo. Somente leitura; sem somar contextos ou unidades. Disponibilidade não confirmada: nenhum saldo é calculado por subtração.';
+    }
+    if(walletReport){
+        m=[]; C=null;
+        p=e==='carteira-vendedor'?[
+            z('code','Código'),z('name','Vendedor',void 0,{primary:true}),
+            z('walletCount','Carteira ativa'),z('buyerCount','Compradores no mês'),z('nonBuyerCount','Sem compra no mês'),
+        ]:[z('code','Código'),z('name','Razão social',void 0,{primary:true,wide:true}),z('seller','Vendedor'),z('localStatus','Situação')];
+        y='Carteira atual ATIVO=S; compradores da venda padrão no mês '+reportMonth+'. Clientes compartilhados entre filiais são contados uma vez. Os totais abaixo respeitam cliente/vendedor e antecedem a busca textual.';
+        if(walletSummary)y+=' Carteira ativa: '+na(walletSummary.walletCount)+'; compradores: '+na(walletSummary.buyerCount)+'; sem compra: '+na(walletSummary.nonBuyerCount)+'; positivação: '+(formatERPShare(String(walletSummary.buyerCount),String(walletSummary.walletCount))??'—')+'.';
+        x=(0,b.jsx)(ho,{label:'Mês de compra',size:'compact',value:reportMonth,options:monthOptions(t.orders),onValueChange:(month:string)=>r.setF({...r.f,from:month+'-01',to:''})});
+    }
     if (customerReport) m = localCustomerReportRows(t.customers, r.f);
     if (commercialReport || itemReport) m = [];
     let g: any = p.filter((h: any) => !c.includes(h.key));
@@ -3613,7 +3640,7 @@ function bz({ id: e }: any): any {
         children: [
             (0, b.jsx)(Ua, {
                 title: n.name,
-                description: "Consulta aos dados persistidos, conforme os filtros selecionados",
+                description: stockReport ? "Consulta ao estoque registrado no Sankhya" : walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
                 back: { label: "Relat\xF3rios", to: "/relatorios" },
                 actions: (0, b.jsx)(Gp, {
                     rows: csvRows(m, p.filter((h: any) => !h.action)),
@@ -3664,7 +3691,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport || productReport || managementReport || nonBuyerReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport || itemReport || productReport || managementReport || nonBuyerReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
+            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport || productReport || managementReport || nonBuyerReport || walletReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport || itemReport || productReport || managementReport || nonBuyerReport || walletReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),

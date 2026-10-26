@@ -1,3 +1,4 @@
+import {readStock} from './stock.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2.118.0';
 import { SankhyaError, SankhyaGateway } from './gateway.ts';
 import { metadataQuery } from './metadata.ts';
@@ -8,7 +9,7 @@ import { readPaymentOptions } from './payments.ts';
 import { revalidateOrderRequest } from './transactions.ts';
 import { readHistory, readDocument, readSalesReport, readBillingReport, readOrderItemsReport } from './history.ts';
 import { readWindow, readPage, readRecord, readFacets } from './read-model.ts';
-import { readNonBuyers } from './nonbuyers.ts';
+import { readNonBuyers, readWallet } from './nonbuyers.ts';
 import { actorScope } from './identity.ts';
 import { reviewSubmission, submitOrder, submissionStatus, type ReceiptWriter } from './submission.ts';
 import type { SubmissionReceipt } from '../../../src/lib/erp-submission-contract.ts';
@@ -127,6 +128,8 @@ Deno.serve(async (request: Request) => {
     if (input.operation === 'payment-options') return reply(await readPaymentOptions(commercialGateway, input.query, scope));
     if (input.operation === 'history') return reply(await readHistory(commercialGateway, input.query, scope));
     if (input.operation === 'sales-report') return reply(await readSalesReport(commercialGateway, input.query, scope));
+    if (input.operation === 'stock-report') return reply(await readStock(commercialGateway, input.query, scope));
+    if (input.operation === 'wallet-report') return reply(await readWallet(commercialGateway, input.query, scope));
     if (input.operation === 'nonbuyers-report') return reply(await readNonBuyers(commercialGateway, input.query, scope));
     if (input.operation === 'order-items-report') return reply(await readOrderItemsReport(commercialGateway, input.query, scope));
     if (input.operation === 'billing-report') return reply(await readBillingReport(commercialGateway, input.query, scope));
