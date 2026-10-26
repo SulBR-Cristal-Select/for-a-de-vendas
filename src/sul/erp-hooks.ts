@@ -6,7 +6,7 @@ import { paginateERP, type ERPMergedPage } from '../lib/erp-paging';
 import { decimalUnits, formatERPShare } from '../lib/erp-decimal';
 
 export type ERPClient = ReturnType<typeof createERPClient>;
-export type ERPDescriptor = { client: ERPClient; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters']; salesParticipation?: boolean; salesReport?: Omit<ERPSalesQuery, 'resource' | 'offset' | 'limit'>; billingReport?: Omit<ERPBillingQuery, 'resource' | 'offset' | 'limit'>; orderItemsReport?: Omit<ERPOrderItemsQuery,'resource'|'offset'|'limit'>; onSummary?: (summary: ERPSalesSummary | undefined, source?: ERPReportSource) => void; onItemsSummary?: (summary: ERPItemSummary | undefined, source?: ERPReportSource) => void };
+export type ERPDescriptor = { client: ERPClient; registerExport?: false; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters']; salesParticipation?: boolean; salesReport?: Omit<ERPSalesQuery, 'resource' | 'offset' | 'limit'>; billingReport?: Omit<ERPBillingQuery, 'resource' | 'offset' | 'limit'>; orderItemsReport?: Omit<ERPOrderItemsQuery,'resource'|'offset'|'limit'>; onSummary?: (summary: ERPSalesSummary | undefined, source?: ERPReportSource) => void; onItemsSummary?: (summary: ERPItemSummary | undefined, source?: ERPReportSource) => void };
 export type ERPQueryMetadata = { exportRows: () => Promise<ERPRow[]> };
 export type ERPQueryRef = MutableRefObject<Partial<Record<ERPResource | 'orders' | 'invoices', ERPQueryMetadata>>>;
 type ERPTableQuery = ERPPageQuery | Omit<ERPHistoryQuery, 'offset' | 'limit'> | Omit<ERPSalesQuery, 'offset' | 'limit'> | Omit<ERPBillingQuery, 'offset' | 'limit'>;
@@ -119,15 +119,17 @@ export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[
     }),
   } : undefined, [client, baseKey, localFiltered]);
   activeExport.current = exportMetadata;
-  if (resource && exportMetadata) metadata.current[resource] = exportMetadata;
+  // Quadros secundários sem exportação não podem substituir o CSV da tabela principal.
+  const exportResource = descriptor?.registerExport === false ? undefined : resource;
+  if (exportResource && exportMetadata) metadata.current[exportResource] = exportMetadata;
   useEffect(() => {
     activeExport.current = exportMetadata;
-    if (resource && exportMetadata) metadata.current[resource] = exportMetadata;
+    if (exportResource && exportMetadata) metadata.current[exportResource] = exportMetadata;
     return () => {
-      if (resource && metadata.current[resource] === exportMetadata) delete metadata.current[resource];
+      if (exportResource && metadata.current[exportResource] === exportMetadata) delete metadata.current[exportResource];
       if (activeExport.current === exportMetadata) activeExport.current = undefined;
     };
-  }, [resource, exportMetadata, metadata]);
+  }, [exportResource, exportMetadata, metadata]);
   useEffect(() => {
     descriptor?.onSummary?.(undefined);
     descriptor?.onItemsSummary?.(undefined);
