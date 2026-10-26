@@ -3037,6 +3037,7 @@ function bz({ id: e }: any): any {
     const customerReport = e === 'clientes' && !!online;
     const nonBuyerReport = e === 'nao-compraram' && !!online;
     const walletReport = ['carteira-vendedor','positivacao'].includes(e) && !!online;
+    const stockReport = e==='estoque' && !!online;
     const reportMonth=r.f.from?.slice(0,7) || r.f.to?.slice(0,7) || businessDate().slice(0,7);
     const nonBuyerKey=JSON.stringify([r.f,reportMonth]);
     const walletKey=JSON.stringify([e,r.f,reportMonth]);
@@ -3072,7 +3073,9 @@ function bz({ id: e }: any): any {
     const managementProducts = He.useMemo(() => managementReport
         ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},registerExport:false}
         : undefined,[online,e,salesKey]);
-    const remote = He.useMemo(() => walletReport
+    const remote = He.useMemo(() => stockReport
+        ? {client:online,resource:'products',stockReport:{}}
+        : walletReport
         ? {client:online,resource:'customers',walletReport:{...nonBuyersQuery(r.f,reportMonth),view:e==='carteira-vendedor'?'sellers':'customers'},onWalletSummary}
         : nonBuyerReport
         ? {client:online,resource:'customers',nonBuyersReport:nonBuyersQuery(r.f,reportMonth),onNonBuyersSummary}
@@ -3614,6 +3617,11 @@ function bz({ id: e }: any): any {
                 }),
             ],
         });
+    if(stockReport){
+        m=[]; C=null; x=null;
+        p=[z('code','Código'),z('name','Produto',void 0,{primary:true,wide:true}),z('companyCode','Empresa'),z('localCode','Local'),z('control','Controle'),z('partnerCode','Parceiro'),z('stockType','Tipo ERP'),z('unit','Unidade'),z('stock','Estoque registrado'),z('reserved','Reservado')];
+        y='Estoque registrado no Sankhya por empresa, produto, local, controle, parceiro e tipo. Somente leitura; sem somar contextos ou unidades. Disponibilidade não confirmada: nenhum saldo é calculado por subtração.';
+    }
     if(walletReport){
         m=[]; C=null;
         p=e==='carteira-vendedor'?[
@@ -3632,7 +3640,7 @@ function bz({ id: e }: any): any {
         children: [
             (0, b.jsx)(Ua, {
                 title: n.name,
-                description: walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
+                description: stockReport ? "Consulta ao estoque registrado no Sankhya" : walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
                 back: { label: "Relat\xF3rios", to: "/relatorios" },
                 actions: (0, b.jsx)(Gp, {
                     rows: csvRows(m, p.filter((h: any) => !h.action)),
