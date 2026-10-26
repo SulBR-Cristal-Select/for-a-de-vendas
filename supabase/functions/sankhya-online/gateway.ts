@@ -1,4 +1,6 @@
-// Transporte somente leitura. Segredos permanecem exclusivamente no ambiente do servidor.
+import type { InclusionPayload } from '../../../src/lib/erp-submission-contract.ts';
+// Leituras preservadas; inclusão/confirmação só pelo fluxo aprovado e com recibo servidor.
+// Segredos permanecem exclusivamente no ambiente do servidor.
 export class SankhyaError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 502,
     public readonly upstreamStatus?: number, public readonly nativeFormat?: { kind: string; fields: string[]; httpStatus?: number; responseBodyPrices?: boolean; dataPrices?: boolean; providerCode?: number | null; providerType?: string | null; hint?: string; collectionName?: string; rowFields?: string[]; valueTypes?: string[]; context?: { candidates: number; productMatches: number; unitMatches: number; localMatches: number; controlMatches: number; units: (string | null)[]; localTypes: string[]; controlTypes: string[]; controlLengths: number[]; distinctMatches?: number; candidateFields?: string[]; priceValuesEqual?: boolean } }) { super(message); }
@@ -73,7 +75,38 @@ export class SankhyaGateway {
       return Object.fromEntries(names.map((name, index) => [name as string, row[index]]));
     });
   }
-  // Consulta de preço com simulação explicitamente desativada. Não há rota de envio ou confirmação aqui.
+  /** Não repete chamadas: falha de transporte é resultado incerto, nunca autorização para reincluir. */
+  private async orderCommand(service: 'CACSP.incluirNota' | 'CACSP.confirmarNota', body: unknown): Promise<ObjectValue> {
+    await this.ensureCompanyScope();
+    const token = await this.authenticate(), inclusion = service === 'CACSP.incluirNota';
+    const uncertain = inclusion ? 'ERP_INCLUSION_UNCERTAIN' : 'ERP_CONFIRMATION_UNCERTAIN';
+    let response: Response;
+    try {
+      response = await this.request(`https://api.sankhya.com.br/gateway/v1/mgecom/service.sbr?serviceName=${service}&outputType=json`, {
+        method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
+        body:JSON.stringify({serviceName:service,requestBody:body}), signal:AbortSignal.timeout(30000), redirect:'error',
+      });
+    } catch { throw new SankhyaError(uncertain, 'Resultado não comprovado. Consulte o mesmo pedido antes de tentar novamente.', 503); }
+    if (!response.ok) throw new SankhyaError(uncertain, 'Resultado não comprovado. Consulte o mesmo pedido antes de tentar novamente.', 502, response.status);
+    let result: ObjectValue;
+    try { const raw=await response.text(); if(raw.length>1000000)throw new Error(); result=object(JSON.parse(raw)); }
+    catch { throw new SankhyaError(uncertain, 'Resposta de envio incompatível; não repetir a inclusão.', 502); }
+    if (String(result['status']) === '0') throw new SankhyaError(inclusion ? 'ERP_INCLUSION_REJECTED' : 'ERP_CONFIRMATION_REJECTED', 'O Sankhya recusou a operação. Confira o mesmo pedido.', 409);
+    if (String(result['status']) !== '1') throw new SankhyaError(uncertain, 'Resposta de envio sem confirmação.', 502);
+    return object(result['responseBody']);
+  }
+  async includeOrder(payload: InclusionPayload): Promise<number> {
+    const header=payload.nota.cabecalho;
+    if (!['1','4'].includes(header['CODEMP']?.['$'] || '') || header['TIPMOV']?.['$'] !== 'P' || header['CODTIPOPER']?.['$'] !== '1001' || header['CODNAT']?.['$'] !== '10100000' || Object.keys(header).some(k=>!['NUNOTA','CODEMP','CODPARC','CODVEND','CODTIPOPER','CODTIPVENDA','TIPMOV','DTNEG','DTPREVENT','NUMPEDIDO2','CIF_FOB','AD_STATUS_PEDIDO','CODNAT'].includes(k))) throw new SankhyaError('INVALID_REQUEST','Payload de inclusão recusado.',400);
+    const result=await this.orderCommand('CACSP.incluirNota',payload), raw=object(object(result['pk'])['NUNOTA'])['$'];
+    if (!/^[1-9]\d*$/.test(String(raw)) || !Number.isSafeInteger(Number(raw))) throw new SankhyaError('ERP_INCLUSION_UNCERTAIN','Inclusão sem NUNOTA comprovado; consultar antes de repetir.',502);
+    return Number(raw);
+  }
+  async confirmOrder(nunota: number): Promise<void> {
+    if(!Number.isSafeInteger(nunota)||nunota<1)throw new SankhyaError('INVALID_REQUEST','NUNOTA inválido.',400);
+    await this.orderCommand('CACSP.confirmarNota',{nota:{NUNOTA:{$:String(nunota)},confirmacaoCentralNota:false,ehPedidoWeb:false,atualizaPrecoItemPedCompra:false,ownerServiceCall:'CentralNotas'}});
+  }
+  // Consulta de preço preservada com simulação explicitamente desativada.
   async contextPrices(input: NativePriceInput): Promise<ObjectValue> {
     const positive = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v > 0 && v <= 9999999999;
     if (![1, 4].includes(input.codigoEmpresa) || !positive(input.codigoCliente) || !positive(input.codigoVendedor) || !positive(input.codigoTipoOperacao) || !positive(input.codigoTipoNegociacao) || !Array.isArray(input.produtos) || !input.produtos.length || input.produtos.length > 50 || input.produtos.some(p => !positive(p.codigoProduto) || typeof p.unidade !== 'string' || !p.unidade.trim() || p.unidade.length > 12 || typeof p.quantidade !== 'number' || !Number.isFinite(p.quantidade) || p.quantidade <= 0 || p.quantidade > 100000000 || (!Number.isSafeInteger(p.codigoLocalEstoque) || p.codigoLocalEstoque < 0) || (typeof p.controle !== 'string' || p.controle.length > 17))) {

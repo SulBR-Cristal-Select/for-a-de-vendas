@@ -20,6 +20,8 @@ import { formatERPAmount, formatERPQuantity } from '../lib/erp-decimal';
 import { ERPCombobox as Sl } from './erp-combobox';
 import type { ERPPrice, ERPRow, ERPSalesSummary, ERPItemSummary, ERPNonBuyersSummary } from '../lib/erp-online';
 import { workspaceERPSeller } from '../lib/erp-identity';
+import type { SubmissionClient } from '../lib/erp-submission';
+import OrderSubmission from './OrderSubmission';
 import './sul.css';
 const He: any = React;
 const b: any = runtime;
@@ -188,9 +190,9 @@ export function useERPOrderPrices(client: ERPClient | undefined, context: Online
 }
 export function createMutationQueue(current: {
     current: Record<string, any>;
-}, persist: SulAppProps['persist'], commit: (confirmed: Record<string, any>) => void) {
+}, persist: SulAppProps['persist'], commit: (confirmed: Record<string, any>) => void, reload?: () => Promise<Record<string, any>>) {
     let tail: Promise<unknown> = Promise.resolve();
-    return (mutator: (draft: Record<string, any>) => unknown): Promise<Record<string, any>> => {
+    const enqueue = (mutator: (draft: Record<string, any>) => unknown): Promise<Record<string, any>> => {
         const pending = tail.then(async () => {
             const before = current.current;
             const next = structuredClone(before);
@@ -224,6 +226,14 @@ export function createMutationQueue(current: {
         tail = pending.catch(() => undefined);
         return pending;
     };
+    return Object.assign(enqueue, { refresh: () => {
+        const pending = tail.then(async () => {
+            if (!reload) throw new Error('Recarga autenticada indisponível.');
+            const confirmed = createAppState(await reload());
+            current.current = confirmed; commit(confirmed); return confirmed;
+        });
+        tail = pending.catch(() => undefined); return pending;
+    } });
 }
 var bo: any = businessDate(), pa: any = "N\xE3o extra\xEDdo", Xu: any = (e: any) => JSON.parse(JSON.stringify(e)), rt: any = (e: any) => (e == null ? pa : typeof e === 'string' ? formatERPAmount(e) ?? pa : Vd(e)), xo: any = (e: any) => (e ? oI(e) : pa), La: any = (e: any) => e.map((t: any) => typeof t == "string" ? { value: t, label: t || "Todos" } : t), zp: any = (e: any, t: any) => e.customers.find((a: any) => a.id === t), Un: any = (e: any, t: any) => zp(e, t)?.name || "Cliente indispon\xEDvel", Ur: any = (e: any, t: any) => e.products.find((a: any) => a.id === t), Zo: any = (e: any, t: any) => e.reduce((a: any, o: any) => a + (Number(o[t]) || 0), 0), y5: any = (e: any) => Math.round(e * 100), d1: any = (items: any[], freight: any = 0) => commercialTotal(items, freight), I5: any = (0, He.createContext)(null), qa: any = () => (0, He.useContext)(I5);
 function sellerNames(db: any): string[] { return [...new Set<string>([db.company.user, ...(db.users || []).filter((u: any) => u.active !== false).map((u: any) => u.name)].filter(Boolean))]; }
@@ -1271,15 +1281,16 @@ function sz(): any {
 }
 function iz({ id: e }: any): any {
     const duplicateIdentity = useRef<{ source: string; id: string } | null>(null);
-    let { db: t, update: a, editor: o, confirm: n } = qa(), r: any = t.orders.find((f: any) => f.id === e);
+    let { db: t, update: a, editor: o, confirm: n, submission, refresh } = qa(), r: any = t.orders.find((f: any) => f.id === e);
     if (!r)
         return (0, b.jsx)(Wu, {});
     let l: any = zp(t, r.customerId);
     async function s(): Promise<any> {
         if (duplicateIdentity.current?.source !== e) duplicateIdentity.current = { source: e, id: crypto.randomUUID() };
         let f: any = duplicateIdentity.current!.id;
+        const duplicate = Xu(r); delete duplicate.erpSubmission;
         try { await a((d: any) => d.orders.unshift({
-            ...Xu(r),
+            ...duplicate,
             id: f,
             number: undefined,
             date: bo,
@@ -1389,6 +1400,7 @@ function iz({ id: e }: any): any {
                             onClick: () => window.print(),
                             children: [(0, b.jsx)(td, {}), "Visualizar"],
                         }),
+                        submission && r.erp?.mode === 'online' && r.sellerId === t.company.userId && (0, b.jsx)(OrderSubmission, { order: r, client: submission, refresh }, r.id),
                         (0, b.jsxs)(Ft, {
                             onClick: u, disabled:true, disabledReason:"Integração fiscal não configurada",
                             children: [(0, b.jsx)(Cm, {}), "Faturar pedido"],
@@ -5021,8 +5033,10 @@ export interface SulAppProps {
     persist: (nextState: Record<string, any>) => Promise<Record<string, any>>;
     onSignOut: () => Promise<void>;
     online?: ERPClient;
+    submission?: SubmissionClient;
+    refresh?: () => Promise<Record<string, any>>;
 }
-export default function SulApp({ initialState, persist, onSignOut, online }: SulAppProps): React.ReactElement {
+export default function SulApp({ initialState, persist, onSignOut, online, submission, refresh }: SulAppProps): React.ReactElement {
     let [e, t] = (0, He.useState)(location.hash || "#/indicadores"), a: any = e.replace(/^#/, "").split("?")[0], [o, n] = (0, He.useState)(() => createAppState(initialState)), [r, l] = (0, He.useState)(null), [s, i] = (0, He.useState)(null), [u, c] = (0, He.useState)(!1), [f, d] = (0, He.useState)("");
     ((0, He.useEffect)(() => {
         location.hash || (location.hash = "/indicadores");
@@ -5043,15 +5057,17 @@ export default function SulApp({ initialState, persist, onSignOut, online }: Sul
         }, []));
     const queryMetadata: ERPQueryRef = useRef({});
     const current = useRef<Record<string, any>>(o);
-    const persistRef = useRef(persist);
-    persistRef.current = persist;
+    const persistRef = useRef(persist), refreshRef = useRef(refresh);
+    persistRef.current = persist; refreshRef.current = refresh;
     const queueRef = useRef<ReturnType<typeof createMutationQueue> | null>(null);
     if (!queueRef.current)
-        queueRef.current = createMutationQueue(current, (next) => persistRef.current(next), (confirmed) => { n(confirmed); });
+        queueRef.current = createMutationQueue(current, (next) => persistRef.current(next), (confirmed) => { n(confirmed); }, async () => { if (!refreshRef.current) throw new Error('Recarga autenticada indisponível.'); return refreshRef.current(); });
     const update = (mutator: (draft: Record<string, any>) => unknown) => queueRef.current!(mutator);
     let y: any = {
         db: o,
         online,
+        submission,
+        refresh: queueRef.current.refresh,
         queryMetadata,
         update,
         editor: l,

@@ -8,7 +8,7 @@ Aplicação SulBR baseada no bundle ajustado e no mapeamento funcional, com comp
 - Supabase: https://supabase.com/dashboard/project/cxurczhmrvxcuvklyiht
 - Repositório sincronizado: https://github.com/SulBR-Cristal-Select/for-a-de-vendas
 
-O nome `for-a-de-vendas` foi aceito pelo usuário em 22/10/2026; não há renomeação pendente. O repositório anterior permanece em `SulBR-Cristal-Select/forca-vendas-referencia`; não foi excluído.
+O repositório conectado permanece `for-a-de-vendas`; a renomeação para `forca-vendas` cabe ao proprietário. O repositório anterior permanece em `SulBR-Cristal-Select/forca-vendas-referencia`; não foi excluído.
 
 ## Desenvolvimento
 
@@ -40,13 +40,23 @@ Nenhuma carteira histórica ou simulação é carregada como operação real. Os
 ## Verificações realizadas
 
 - TypeScript e build de produção.
-- 431 testes locais em 21 arquivos: adaptadores, fila, catálogos, identidade, metas, responsáveis, vínculo Auth, paginação, histórico documental, preços, precisão, condições e revalidação transacional.
+- 1.167 testes locais em 41 arquivos; o bloco de envio acrescenta78 casos de contrato, transporte, retomada, concorrência e conferência com os componentes reais do DS.
 - 32 verificações SQL da compatibilidade ERP, mais recusa de perfil inativo, em transação revertida: preço exato/versão/unidade/vigência, filial e vínculo, precisão, parcelas, histórico não comercial, adulteração, idempotência, concorrência e regressão manual. A numeração real permaneceu em 8, sem fixtures restantes.
 - Vinte e seis verificações transacionais no Supabase: total de R$ 9.008,80 para 974 unidades em três itens, reenvio idempotente, conflito de revisão, duplicidade de documento, rollback, preço histórico, restrições de papel, isolamento de carteira, metas mensais e edição da própria conta/empresa.
 - Seis verificações adicionais do papel gestor no banco.
 - Trinta verificações de vínculo Auth (três ativações de destino e 27 recusas), incluindo reenvio idempotente, identidade real, ausência de alterações parciais e restauração das contagens originais.
 - Formulário de usuários verificado isoladamente em 390 e 1440 px: campos obrigatórios, e-mail semântico, opção Gestor, payload canônico e preservação do formulário em falha.
 - Dados fictícios desses testes foram revertidos. Testes transacionais e de componente não substituem o teste interativo de login e operação com a conta ativada.
+
+## Envio explícito ao Sankhya
+
+- **Salvar pedido** continua sendo salvamento local. No detalhe do pedido online pertencente ao titular, **Enviar ao Sankhya** abre a conferência; escolher CIF/FOB não envia nada. Só **Aprovar e enviar** autoriza a inclusão e confirmação daquela versão, sem faturar.
+- O backend reconstrói o canônico1.1 a partir do pedido salvo, verifica Auth/owner/vendedor/filial, preço nativo, Sugestão Saída, agenda e natureza. Hash e payload foram comparados com o validador original da skill Pedidos2.0.2, incluindo números fracionados/exponenciais. Os cálculos continuam exatos; números JSON só são aceitos com retorno ao mesmo decimal.
+- Persistência adicional fechada: `orders.data.freightType` (`C`/`F`) e `erpSubmission` com `id`, `hash`, `approvedBy`, `approvedAt`, `phase`, `nunota`, `status`, `checkedAt`, `errorCode`. Sem tabela nova, réplica de cadastro, resposta integral da API ou cópia geral adicional do estado.
+- A migração `20261026130032_sankhya_order_submission.sql` preserva o número ao editar, restringe o escritor de recibos ao backend e impede alteração/exclusão do pedido após iniciar o envio. Aquisição por comparação de fase, sob a trava da empresa, evita duas inclusões pelo aplicativo — inclusive em registros locais diferentes com mesma filial/cliente/número externo.
+- Uma inclusão com resultado incerto é consultada, não repetida. NUNOTA retornado é preservado. Confirmação recusada explicitamente pode ser retomada no mesmo documento; confirmação incerta exige comprovação do ERP, sem repetição automática. Sucesso exige releitura de cabeçalho, itens e `STATUSNOTA=L`. Observações não são enviadas. As chamadas ERP e o recibo Supabase não constituem uma transação distribuída; a trava não cobre outros sistemas escrevendo diretamente no ERP.
+- 33 verificações SQL internas e5 finais executadas antes do COMMIT; perfis, vínculos,12 conjuntos de dados e revisão26 preservados. O ensaio inicial descobriu consumo de sequência pelo upsert legado: o número11 foi consumido sem deixar pedido e não foi restaurado/reutilizado. A reaplicação corrigida preservou11. Nenhum pedido foi enviado ao ERP nesses testes.
+- **Homologação comercial pendente:** ativação/login dos titulares e pedidos reais das empresas1/4 foram adiados pelo usuário. Testes locais e SQL não equivalem à criação/envio completo pela interface publicada. Empresa1 é a matriz; demais empresas são filiais, sem ampliar o escopo autorizado1/4.
 
 ## Compatibilidade comercial Sankhya
 

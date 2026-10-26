@@ -1,0 +1,650 @@
+[
+  {
+    "name": "normal",
+    "canonical": {
+      "schema_version": "1.1",
+      "analise_id": "20000000-0000-4000-8000-000000000002",
+      "modo": "envio",
+      "estado": "aprovado",
+      "fonte": {
+        "tipo": "texto",
+        "referencia": "pedido-local:20000000-0000-4000-8000-000000000002",
+        "numero_externo": "FIXTURE-SEM-ENVIO"
+      },
+      "cliente": {
+        "codigo_sankhya": 141,
+        "nome": "Cliente sintético",
+        "cnpj": "00000000000000",
+        "uf": "PR",
+        "origem": "cadastro",
+        "codigo_condicao": 29,
+        "tipo_agenda": "1"
+      },
+      "pedidos_fiscais": [
+        {
+          "pedido_id": "20000000-0000-4000-8000-000000000002",
+          "tipo": "venda",
+          "codigo_empresa": 1,
+          "codigo_parceiro": 141,
+          "codigo_vendedor": 12,
+          "codigo_top": 1001,
+          "codigo_condicao": 29,
+          "codigo_natureza": 10100000,
+          "tipo_agenda": "1",
+          "tipo_movimento": "P",
+          "data_negociacao": "26/10/2026",
+          "data_prevista": "27/10/2026",
+          "numero_externo": "FIXTURE-SEM-ENVIO",
+          "frete_codigo": "C",
+          "itens": [
+            {
+              "sequencia": 1,
+              "codigo_produto": 11240,
+              "descricao": "Produto sintético",
+              "marca": "",
+              "unidade": "PC",
+              "quantidade": 1,
+              "valor_unitario": 11.75,
+              "valor_total": 11.75,
+              "codigo_estoque": 108,
+              "controle": " ",
+              "percentual_desconto": 0,
+              "origens": {
+                "produto": "cadastro",
+                "unidade": "cadastro",
+                "quantidade": "usuario",
+                "preco": "cadastro",
+                "estoque": "cadastro"
+              }
+            }
+          ],
+          "total": 11.75
+        }
+      ],
+      "validacoes": [
+        {
+          "regra": "pedido_local_online",
+          "status": "ok",
+          "mensagem": "Pedido salvo, contexto nativo e cadastro conferidos.",
+          "evidencias": [
+            "Auth/owner",
+            "TGFCPL.SUGTIPNEGSAID",
+            "TGFPAR.AD_STATUS_PEDIDO",
+            "TGFNAT",
+            "price-query"
+          ]
+        }
+      ],
+      "pendencias": [],
+      "aprovacao": {
+        "versao": 1,
+        "acao": "incluir_e_confirmar",
+        "hash_formato": "sha256-json-numerico-v1",
+        "status": "aprovado",
+        "hash_conteudo": "85534e2b874d42c69d5a217e426318a0749c785017914dae73f70edcecee1929",
+        "aprovado_por": "10000000-0000-4000-8000-000000000001",
+        "aprovado_em": "2026-10-26T11:56:00.000Z"
+      }
+    },
+    "hashPython": "85534e2b874d42c69d5a217e426318a0749c785017914dae73f70edcecee1929",
+    "payloadPython": {
+      "nota": {
+        "cabecalho": {
+          "NUNOTA": {},
+          "CODEMP": {
+            "$": "1"
+          },
+          "CODPARC": {
+            "$": "141"
+          },
+          "CODVEND": {
+            "$": "12"
+          },
+          "CODTIPOPER": {
+            "$": "1001"
+          },
+          "CODTIPVENDA": {
+            "$": "29"
+          },
+          "TIPMOV": {
+            "$": "P"
+          },
+          "DTNEG": {
+            "$": "26/10/2026"
+          },
+          "DTPREVENT": {
+            "$": "27/10/2026"
+          },
+          "NUMPEDIDO2": {
+            "$": "FIXTURE-SEM-ENVIO"
+          },
+          "CIF_FOB": {
+            "$": "C"
+          },
+          "AD_STATUS_PEDIDO": {
+            "$": "1"
+          },
+          "CODNAT": {
+            "$": "10100000"
+          }
+        },
+        "itens": {
+          "INFORMARPRECO": "True",
+          "item": [
+            {
+              "NUNOTA": {},
+              "CODPROD": {
+                "$": "11240"
+              },
+              "QTDNEG": {
+                "$": "1"
+              },
+              "CODVOL": {
+                "$": "PC"
+              },
+              "CODLOCALORIG": {
+                "$": "108"
+              },
+              "VLRUNIT": {
+                "$": "11.75"
+              },
+              "PERCDESC": {
+                "$": "0"
+              },
+              "IGNOREDESCPROMOQTD": {
+                "$": "True"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "schemaValidado": true
+  },
+  {
+    "name": "fracao",
+    "canonical": {
+      "schema_version": "1.1",
+      "analise_id": "20000000-0000-4000-8000-000000000002",
+      "modo": "envio",
+      "estado": "aprovado",
+      "fonte": {
+        "tipo": "texto",
+        "referencia": "pedido-local:20000000-0000-4000-8000-000000000002",
+        "numero_externo": "FIXTURE-SEM-ENVIO"
+      },
+      "cliente": {
+        "codigo_sankhya": 141,
+        "nome": "Cliente sintético",
+        "cnpj": "00000000000000",
+        "uf": "PR",
+        "origem": "cadastro",
+        "codigo_condicao": 29,
+        "tipo_agenda": "1"
+      },
+      "pedidos_fiscais": [
+        {
+          "pedido_id": "20000000-0000-4000-8000-000000000002",
+          "tipo": "venda",
+          "codigo_empresa": 1,
+          "codigo_parceiro": 141,
+          "codigo_vendedor": 12,
+          "codigo_top": 1001,
+          "codigo_condicao": 29,
+          "codigo_natureza": 10100000,
+          "tipo_agenda": "1",
+          "tipo_movimento": "P",
+          "data_negociacao": "26/10/2026",
+          "data_prevista": "27/10/2026",
+          "numero_externo": "FIXTURE-SEM-ENVIO",
+          "frete_codigo": "C",
+          "itens": [
+            {
+              "sequencia": 1,
+              "codigo_produto": 11240,
+              "descricao": "Produto sintético",
+              "marca": "",
+              "unidade": "PC",
+              "quantidade": 0.5,
+              "valor_unitario": 11.74,
+              "valor_total": 5.87,
+              "codigo_estoque": 108,
+              "controle": " ",
+              "percentual_desconto": 0,
+              "origens": {
+                "produto": "cadastro",
+                "unidade": "cadastro",
+                "quantidade": "usuario",
+                "preco": "cadastro",
+                "estoque": "cadastro"
+              }
+            }
+          ],
+          "total": 5.87
+        }
+      ],
+      "validacoes": [
+        {
+          "regra": "pedido_local_online",
+          "status": "ok",
+          "mensagem": "Pedido salvo, contexto nativo e cadastro conferidos.",
+          "evidencias": [
+            "Auth/owner",
+            "TGFCPL.SUGTIPNEGSAID",
+            "TGFPAR.AD_STATUS_PEDIDO",
+            "TGFNAT",
+            "price-query"
+          ]
+        }
+      ],
+      "pendencias": [],
+      "aprovacao": {
+        "versao": 1,
+        "acao": "incluir_e_confirmar",
+        "hash_formato": "sha256-json-numerico-v1",
+        "status": "aprovado",
+        "hash_conteudo": "955ca098b7e5db61e2532f21597ac5e52ed20d7c2a7286846c78b81da3232860",
+        "aprovado_por": "10000000-0000-4000-8000-000000000001",
+        "aprovado_em": "2026-10-26T11:56:00.000Z"
+      }
+    },
+    "hashPython": "955ca098b7e5db61e2532f21597ac5e52ed20d7c2a7286846c78b81da3232860",
+    "payloadPython": {
+      "nota": {
+        "cabecalho": {
+          "NUNOTA": {},
+          "CODEMP": {
+            "$": "1"
+          },
+          "CODPARC": {
+            "$": "141"
+          },
+          "CODVEND": {
+            "$": "12"
+          },
+          "CODTIPOPER": {
+            "$": "1001"
+          },
+          "CODTIPVENDA": {
+            "$": "29"
+          },
+          "TIPMOV": {
+            "$": "P"
+          },
+          "DTNEG": {
+            "$": "26/10/2026"
+          },
+          "DTPREVENT": {
+            "$": "27/10/2026"
+          },
+          "NUMPEDIDO2": {
+            "$": "FIXTURE-SEM-ENVIO"
+          },
+          "CIF_FOB": {
+            "$": "C"
+          },
+          "AD_STATUS_PEDIDO": {
+            "$": "1"
+          },
+          "CODNAT": {
+            "$": "10100000"
+          }
+        },
+        "itens": {
+          "INFORMARPRECO": "True",
+          "item": [
+            {
+              "NUNOTA": {},
+              "CODPROD": {
+                "$": "11240"
+              },
+              "QTDNEG": {
+                "$": "0.5"
+              },
+              "CODVOL": {
+                "$": "PC"
+              },
+              "CODLOCALORIG": {
+                "$": "108"
+              },
+              "VLRUNIT": {
+                "$": "11.74"
+              },
+              "PERCDESC": {
+                "$": "0"
+              },
+              "IGNOREDESCPROMOQTD": {
+                "$": "True"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "schemaValidado": true
+  },
+  {
+    "name": "quantidade_minima",
+    "canonical": {
+      "schema_version": "1.1",
+      "analise_id": "20000000-0000-4000-8000-000000000002",
+      "modo": "envio",
+      "estado": "aprovado",
+      "fonte": {
+        "tipo": "texto",
+        "referencia": "pedido-local:20000000-0000-4000-8000-000000000002",
+        "numero_externo": "FIXTURE-SEM-ENVIO"
+      },
+      "cliente": {
+        "codigo_sankhya": 141,
+        "nome": "Cliente sintético",
+        "cnpj": "00000000000000",
+        "uf": "PR",
+        "origem": "cadastro",
+        "codigo_condicao": 29,
+        "tipo_agenda": "1"
+      },
+      "pedidos_fiscais": [
+        {
+          "pedido_id": "20000000-0000-4000-8000-000000000002",
+          "tipo": "venda",
+          "codigo_empresa": 1,
+          "codigo_parceiro": 141,
+          "codigo_vendedor": 12,
+          "codigo_top": 1001,
+          "codigo_condicao": 29,
+          "codigo_natureza": 10100000,
+          "tipo_agenda": "1",
+          "tipo_movimento": "P",
+          "data_negociacao": "26/10/2026",
+          "data_prevista": "27/10/2026",
+          "numero_externo": "FIXTURE-SEM-ENVIO",
+          "frete_codigo": "C",
+          "itens": [
+            {
+              "sequencia": 1,
+              "codigo_produto": 11240,
+              "descricao": "Produto sintético",
+              "marca": "",
+              "unidade": "PC",
+              "quantidade": 1e-05,
+              "valor_unitario": 1000,
+              "valor_total": 0.01,
+              "codigo_estoque": 108,
+              "controle": " ",
+              "percentual_desconto": 0,
+              "origens": {
+                "produto": "cadastro",
+                "unidade": "cadastro",
+                "quantidade": "usuario",
+                "preco": "cadastro",
+                "estoque": "cadastro"
+              }
+            }
+          ],
+          "total": 0.01
+        }
+      ],
+      "validacoes": [
+        {
+          "regra": "pedido_local_online",
+          "status": "ok",
+          "mensagem": "Pedido salvo, contexto nativo e cadastro conferidos.",
+          "evidencias": [
+            "Auth/owner",
+            "TGFCPL.SUGTIPNEGSAID",
+            "TGFPAR.AD_STATUS_PEDIDO",
+            "TGFNAT",
+            "price-query"
+          ]
+        }
+      ],
+      "pendencias": [],
+      "aprovacao": {
+        "versao": 1,
+        "acao": "incluir_e_confirmar",
+        "hash_formato": "sha256-json-numerico-v1",
+        "status": "aprovado",
+        "hash_conteudo": "9580102cb12cc51a790d47c6469ac87916796e5b1e2beb0a05cff979071a2c83",
+        "aprovado_por": "10000000-0000-4000-8000-000000000001",
+        "aprovado_em": "2026-10-26T11:56:00.000Z"
+      }
+    },
+    "hashPython": "9580102cb12cc51a790d47c6469ac87916796e5b1e2beb0a05cff979071a2c83",
+    "payloadPython": {
+      "nota": {
+        "cabecalho": {
+          "NUNOTA": {},
+          "CODEMP": {
+            "$": "1"
+          },
+          "CODPARC": {
+            "$": "141"
+          },
+          "CODVEND": {
+            "$": "12"
+          },
+          "CODTIPOPER": {
+            "$": "1001"
+          },
+          "CODTIPVENDA": {
+            "$": "29"
+          },
+          "TIPMOV": {
+            "$": "P"
+          },
+          "DTNEG": {
+            "$": "26/10/2026"
+          },
+          "DTPREVENT": {
+            "$": "27/10/2026"
+          },
+          "NUMPEDIDO2": {
+            "$": "FIXTURE-SEM-ENVIO"
+          },
+          "CIF_FOB": {
+            "$": "C"
+          },
+          "AD_STATUS_PEDIDO": {
+            "$": "1"
+          },
+          "CODNAT": {
+            "$": "10100000"
+          }
+        },
+        "itens": {
+          "INFORMARPRECO": "True",
+          "item": [
+            {
+              "NUNOTA": {},
+              "CODPROD": {
+                "$": "11240"
+              },
+              "QTDNEG": {
+                "$": "1e-05"
+              },
+              "CODVOL": {
+                "$": "PC"
+              },
+              "CODLOCALORIG": {
+                "$": "108"
+              },
+              "VLRUNIT": {
+                "$": "1000"
+              },
+              "PERCDESC": {
+                "$": "0"
+              },
+              "IGNOREDESCPROMOQTD": {
+                "$": "True"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "schemaValidado": true
+  },
+  {
+    "name": "preco_nove_casas",
+    "canonical": {
+      "schema_version": "1.1",
+      "analise_id": "20000000-0000-4000-8000-000000000002",
+      "modo": "envio",
+      "estado": "aprovado",
+      "fonte": {
+        "tipo": "texto",
+        "referencia": "pedido-local:20000000-0000-4000-8000-000000000002",
+        "numero_externo": "FIXTURE-SEM-ENVIO"
+      },
+      "cliente": {
+        "codigo_sankhya": 141,
+        "nome": "Cliente sintético",
+        "cnpj": "00000000000000",
+        "uf": "PR",
+        "origem": "cadastro",
+        "codigo_condicao": 29,
+        "tipo_agenda": "1"
+      },
+      "pedidos_fiscais": [
+        {
+          "pedido_id": "20000000-0000-4000-8000-000000000002",
+          "tipo": "venda",
+          "codigo_empresa": 1,
+          "codigo_parceiro": 141,
+          "codigo_vendedor": 12,
+          "codigo_top": 1001,
+          "codigo_condicao": 29,
+          "codigo_natureza": 10100000,
+          "tipo_agenda": "1",
+          "tipo_movimento": "P",
+          "data_negociacao": "26/10/2026",
+          "data_prevista": "27/10/2026",
+          "numero_externo": "FIXTURE-SEM-ENVIO",
+          "frete_codigo": "C",
+          "itens": [
+            {
+              "sequencia": 1,
+              "codigo_produto": 11240,
+              "descricao": "Produto sintético",
+              "marca": "",
+              "unidade": "PC",
+              "quantidade": 10000000,
+              "valor_unitario": 1e-09,
+              "valor_total": 0.01,
+              "codigo_estoque": 108,
+              "controle": " ",
+              "percentual_desconto": 0,
+              "origens": {
+                "produto": "cadastro",
+                "unidade": "cadastro",
+                "quantidade": "usuario",
+                "preco": "cadastro",
+                "estoque": "cadastro"
+              }
+            }
+          ],
+          "total": 0.01
+        }
+      ],
+      "validacoes": [
+        {
+          "regra": "pedido_local_online",
+          "status": "ok",
+          "mensagem": "Pedido salvo, contexto nativo e cadastro conferidos.",
+          "evidencias": [
+            "Auth/owner",
+            "TGFCPL.SUGTIPNEGSAID",
+            "TGFPAR.AD_STATUS_PEDIDO",
+            "TGFNAT",
+            "price-query"
+          ]
+        }
+      ],
+      "pendencias": [],
+      "aprovacao": {
+        "versao": 1,
+        "acao": "incluir_e_confirmar",
+        "hash_formato": "sha256-json-numerico-v1",
+        "status": "aprovado",
+        "hash_conteudo": "9e5363fb2c63f3ca61a1753c7041d7308948ebfce4ff03eadd4787a103961f7f",
+        "aprovado_por": "10000000-0000-4000-8000-000000000001",
+        "aprovado_em": "2026-10-26T11:56:00.000Z"
+      }
+    },
+    "hashPython": "9e5363fb2c63f3ca61a1753c7041d7308948ebfce4ff03eadd4787a103961f7f",
+    "payloadPython": {
+      "nota": {
+        "cabecalho": {
+          "NUNOTA": {},
+          "CODEMP": {
+            "$": "1"
+          },
+          "CODPARC": {
+            "$": "141"
+          },
+          "CODVEND": {
+            "$": "12"
+          },
+          "CODTIPOPER": {
+            "$": "1001"
+          },
+          "CODTIPVENDA": {
+            "$": "29"
+          },
+          "TIPMOV": {
+            "$": "P"
+          },
+          "DTNEG": {
+            "$": "26/10/2026"
+          },
+          "DTPREVENT": {
+            "$": "27/10/2026"
+          },
+          "NUMPEDIDO2": {
+            "$": "FIXTURE-SEM-ENVIO"
+          },
+          "CIF_FOB": {
+            "$": "C"
+          },
+          "AD_STATUS_PEDIDO": {
+            "$": "1"
+          },
+          "CODNAT": {
+            "$": "10100000"
+          }
+        },
+        "itens": {
+          "INFORMARPRECO": "True",
+          "item": [
+            {
+              "NUNOTA": {},
+              "CODPROD": {
+                "$": "11240"
+              },
+              "QTDNEG": {
+                "$": "10000000"
+              },
+              "CODVOL": {
+                "$": "PC"
+              },
+              "CODLOCALORIG": {
+                "$": "108"
+              },
+              "VLRUNIT": {
+                "$": "1e-09"
+              },
+              "PERCDESC": {
+                "$": "0"
+              },
+              "IGNOREDESCPROMOQTD": {
+                "$": "True"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "schemaValidado": true
+  }
+]
