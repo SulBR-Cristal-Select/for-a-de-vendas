@@ -1,3 +1,4 @@
+import {readCommissions} from './commissions.ts';
 import {readStock} from './stock.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2.118.0';
 import { SankhyaError, SankhyaGateway } from './gateway.ts';
@@ -128,6 +129,7 @@ Deno.serve(async (request: Request) => {
     if (input.operation === 'payment-options') return reply(await readPaymentOptions(commercialGateway, input.query, scope));
     if (input.operation === 'history') return reply(await readHistory(commercialGateway, input.query, scope));
     if (input.operation === 'sales-report') return reply(await readSalesReport(commercialGateway, input.query, scope));
+    if (input.operation === 'commission-report') return reply(await readCommissions(commercialGateway, input.query, scope));
     if (input.operation === 'stock-report') return reply(await readStock(commercialGateway, input.query, scope));
     if (input.operation === 'wallet-report') return reply(await readWallet(commercialGateway, input.query, scope));
     if (input.operation === 'nonbuyers-report') return reply(await readNonBuyers(commercialGateway, input.query, scope));

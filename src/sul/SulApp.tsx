@@ -1,3 +1,4 @@
+import type {ERPCommissionSummary} from '../lib/erp-commission';
 import type { ERPWalletSummary } from '../lib/erp-wallet';
 import { formatERPShare } from '../lib/erp-decimal';
 import {FileText as $s} from 'lucide-react';
@@ -3038,6 +3039,11 @@ function bz({ id: e }: any): any {
     const nonBuyerReport = e === 'nao-compraram' && !!online;
     const walletReport = ['carteira-vendedor','positivacao'].includes(e) && !!online;
     const stockReport = e==='estoque' && !!online;
+    const commissionReport=['comissoes','comissoes-pedido'].includes(e)&&!!online;
+    const commissionKey=JSON.stringify([e,r.f]);
+    const [commissionResult,setCommissionResult]=He.useState(undefined);
+    const onCommissionSummary=He.useCallback((summary:ERPCommissionSummary|undefined)=>setCommissionResult({key:commissionKey,summary}),[commissionKey]);
+    const commissionSummary:ERPCommissionSummary|undefined=commissionResult?.key===commissionKey?commissionResult.summary:undefined;
     const reportMonth=r.f.from?.slice(0,7) || r.f.to?.slice(0,7) || businessDate().slice(0,7);
     const nonBuyerKey=JSON.stringify([r.f,reportMonth]);
     const walletKey=JSON.stringify([e,r.f,reportMonth]);
@@ -3073,7 +3079,9 @@ function bz({ id: e }: any): any {
     const managementProducts = He.useMemo(() => managementReport
         ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},registerExport:false}
         : undefined,[online,e,salesKey]);
-    const remote = He.useMemo(() => stockReport
+    const remote = He.useMemo(() => commissionReport
+        ? {client:online,resource:'orders',commissionReport:{...salesReportQuery(r.f,'nenhum'),view:e==='comissoes'?'sellers':'orders'},onCommissionSummary}
+        : stockReport
         ? {client:online,resource:'products',stockReport:{}}
         : walletReport
         ? {client:online,resource:'customers',walletReport:{...nonBuyersQuery(r.f,reportMonth),view:e==='carteira-vendedor'?'sellers':'customers'},onWalletSummary}
@@ -3091,7 +3099,7 @@ function bz({ id: e }: any): any {
         ? { client: online, resource: 'orders', salesReport: { ...salesReportQuery(r.f, abcReport || mixReport ? 'cliente' : l), ...(mixReport ? {productMix:true} : {}) }, ...(abcReport ? { salesParticipation:true } : {}), onSummary: onSalesSummary }
         : customerReport && remoteCustomerReport(r.f)
         ? { client: online, resource: 'customers', filters: customerReportFilters(r.f) } : undefined,
-        [online, e, l, salesKey, onSalesSummary, onItemsSummary,nonBuyerKey,onNonBuyersSummary,walletKey,onWalletSummary]);
+        [online, e, l, salesKey, onSalesSummary, onItemsSummary,nonBuyerKey,onNonBuyersSummary,walletKey,onWalletSummary,commissionKey,onCommissionSummary]);
     if (!n)
         return (0, b.jsx)(Wu, {});
     let d: any = ['faturados', 'faturamento'].includes(e) ? invoicedOrders(r.rows, t.invoices) : r.rows, m: any = [], p: any = [], y: any = "Dados persistidos no sistema, conforme os filtros selecionados.", C: any = null, x: any = null, v: any = d.filter((h: any) => h.type === "Venda" && h.status === "Conclu\xEDdo");
@@ -3617,6 +3625,13 @@ function bz({ id: e }: any): any {
                 }),
             ],
         });
+    if(commissionReport){
+        m=[]; C=null; x=null;
+        p=e==='comissoes'?[z('name','Vendedor',void 0,{primary:true}),z('value','Comissão',(h:any)=>rt(h.value))]:[z('date','Emissão',(h:any)=>xo(h.date)),z('number','Pedido',void 0,{primary:true}),z('customer','Razão social',(h:any)=>h.customerName,{wide:true}),z('total','Total do pedido',(h:any)=>rt(h.total)),z('commission','Comissão (R$)',(h:any)=>rt(h.commission))];
+        y='Comissões nativas TGFCOM.VLRCOM, inclusive devoluções, pelo código do beneficiário. Período: emissão da origem da comissão; não é referência, fechamento nem pagamento. Nenhum percentual é aplicado.';
+        if(e==='comissoes-pedido')y+=' Um pedido só é identificado por vínculo inequívoco com a venda padrão. As demais origens permanecem como Não atribuído, sem rateio ou total de pedido presumido.';
+        if(commissionSummary)y+=' Lançamentos no recorte: '+na(commissionSummary.entryCount)+'; sem vínculo inequívoco a pedido padrão: '+na(commissionSummary.unassignedEntryCount)+'.';
+    }
     if(stockReport){
         m=[]; C=null; x=null;
         p=[z('code','Código'),z('name','Produto',void 0,{primary:true,wide:true}),z('companyCode','Empresa'),z('localCode','Local'),z('control','Controle'),z('partnerCode','Parceiro'),z('stockType','Tipo ERP'),z('unit','Unidade'),z('stock','Estoque registrado'),z('reserved','Reservado')];
@@ -3640,7 +3655,7 @@ function bz({ id: e }: any): any {
         children: [
             (0, b.jsx)(Ua, {
                 title: n.name,
-                description: stockReport ? "Consulta ao estoque registrado no Sankhya" : walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
+                description: commissionReport ? "Consulta à comissão nativa no Sankhya, sem comprovação de pagamento" : stockReport ? "Consulta ao estoque registrado no Sankhya" : walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
                 back: { label: "Relat\xF3rios", to: "/relatorios" },
                 actions: (0, b.jsx)(Gp, {
                     rows: csvRows(m, p.filter((h: any) => !h.action)),

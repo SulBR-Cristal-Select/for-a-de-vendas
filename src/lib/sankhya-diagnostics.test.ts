@@ -167,3 +167,21 @@ describe('descoberta aprofundada ABC/comissão pela API, sem referência de tela
  it.each([{target:'arbitrary'},{target:'abc',sql:'SELECT 1'},{target:'abc',offset:-1},{target:'abc',table:'TSIUSU'}])('não permite consulta livre: %j',async patch=>{const g={select:vi.fn()};await expect(readCommercialDictionary(g,{kind:'analytics',section:'native-source-discovery',...patch},admin)).rejects.toBeDefined();expect(g.select).not.toHaveBeenCalled();});
  it('mantém a descoberta administrativa sem elevar vendedor/gestor',async()=>{const g={select:vi.fn()};await expect(readCommercialDictionary(g,{kind:'analytics',section:'native-source-discovery',target:'abc'},{role:'vendedor',sellerCode:12,companyCodes:[1]})).rejects.toMatchObject({code:'ERP_IDENTITY_REQUIRED'});expect(g.select).not.toHaveBeenCalled();});
 });
+
+describe('Qualificação adicional das origens nativas da comissão',()=>{
+ for(const target of ['commission-origin-policy','commission-native-periods','commission-order-links','abc-customer-schema','abc-customer-keys'])it('consulta fixa, administrativa e limitada: '+target,async()=>{
+  const rows=[{SOURCE_ROWS:1}],g={select:vi.fn().mockResolvedValueOnce(dictionaryColumns).mockResolvedValueOnce(rows)};
+  const result=await readCommercialDictionary(g,{kind:'analytics',section:'native-source-discovery',target,offset:50},admin);
+  expect(result).toMatchObject({target,offset:50,rows,hasMore:false,rulesInferred:false});
+  const sql=g.select.mock.calls[1]?.[0] as string;expect(sql).toContain('OFFSET 50 ROWS FETCH NEXT 50 ROWS ONLY');expect(g.select.mock.calls[1]?.[1]).toBe(50);expect(sql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|MERGE)\b/);
+  if(!target.startsWith('abc-')){expect(sql).toContain('C.NUNOTA=M.NUNOTAORIG');expect(sql).toContain('C.CODEMP IN (1,4)');expect(sql).toContain('M.CODEMP IS NULL OR M.CODEMP=C.CODEMP');}
+  if(target==='commission-origin-policy')expect(sql).toContain('T.DHALTER=C.DHTIPOPER');
+  if(target==='commission-native-periods'){expect(sql).toContain('COUNT(CASE WHEN M.REFERENCIA IS NULL');expect(sql).toContain('TO_CHAR(MIN(C.DTNEG)');}
+  if(target==='commission-order-links'){expect(sql).toContain('COUNT(DISTINCT R.NUNOTAORIG)');expect(sql).toContain('HAS_CROSS_COMPANY_ORIGIN');expect(sql).not.toContain('SUM(DISTINCT');}
+  if(target==='abc-customer-keys')expect(sql).toContain("D.TABLE_NAME='TGFMPE'");
+  if(target==='abc-customer-schema'){expect(sql).toContain("K.COLUMN_NAME='CODPARC'");expect(sql).toContain("D.TABLE_NAME<>'TSIUSU'");}
+ });
+ it('não transforma nomes ou SQL fornecidos pelo cliente em fonte executável',async()=>{
+  for(const query of [{target:'commission-origin-policy',sql:'SELECT 1'},{target:'TGFCOM'},{target:'commission-order-links',offset:-1}]){const g={select:vi.fn()};await expect(readCommercialDictionary(g,{kind:'analytics',section:'native-source-discovery',...query},admin)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(g.select).not.toHaveBeenCalled();}
+ });
+});
