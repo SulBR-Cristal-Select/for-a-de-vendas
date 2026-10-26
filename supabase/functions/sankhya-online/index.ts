@@ -8,6 +8,7 @@ import { readPaymentOptions } from './payments.ts';
 import { revalidateOrderRequest } from './transactions.ts';
 import { readHistory, readDocument, readSalesReport, readBillingReport, readOrderItemsReport } from './history.ts';
 import { readWindow, readPage, readRecord, readFacets } from './read-model.ts';
+import { readNonBuyers } from './nonbuyers.ts';
 import { actorScope } from './identity.ts';
 
 // A chave de manutenção não substitui uma identidade de usuário para consultas comerciais.
@@ -112,6 +113,7 @@ Deno.serve(async (request: Request) => {
     if (input.operation === 'payment-options') return reply(await readPaymentOptions(commercialGateway, input.query, scope));
     if (input.operation === 'history') return reply(await readHistory(commercialGateway, input.query, scope));
     if (input.operation === 'sales-report') return reply(await readSalesReport(commercialGateway, input.query, scope));
+    if (input.operation === 'nonbuyers-report') return reply(await readNonBuyers(commercialGateway, input.query, scope));
     if (input.operation === 'order-items-report') return reply(await readOrderItemsReport(commercialGateway, input.query, scope));
     if (input.operation === 'billing-report') return reply(await readBillingReport(commercialGateway, input.query, scope));
     if (input.operation === 'document') return reply(await readDocument(commercialGateway, input.query, scope));
