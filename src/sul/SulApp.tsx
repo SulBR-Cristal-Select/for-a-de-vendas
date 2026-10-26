@@ -3680,6 +3680,8 @@ function bz({ id: e }: any): any {
                 actions: (0, b.jsxs)(b.Fragment, {
                     children: [
                         (0, b.jsxs)(xt, {
+                            disabled: stockReport,
+                            disabledReason: stockReport ? 'Estoque por contexto: use a busca por código ou descrição do produto e a ordenação das colunas.' : undefined,
                             onClick: () => r.setOpen(!0),
                             children: [(0, b.jsx)(ed, {}), "Filtros"],
                         }),
