@@ -181,8 +181,10 @@ const commercialFromSQL=fromSQL;
 export async function readSalesReport(gateway: Transport, input: SalesReportInput, scope: ReadScope) { return readCommercialReport(gateway,input,scope,false); }
 export async function readBillingReport(gateway: Transport, input: BillingReportInput, scope: ReadScope) { return readCommercialReport(gateway,input,scope,true); }
 export async function readBilledOrdersReport(gateway:Transport,input:SalesReportInput,scope:ReadScope){return readCommercialReport(gateway,input,scope,false,true);}
+export async function readSalesDays(gateway:Transport,input:SalesReportInput,scope:ReadScope){return readCommercialReport(gateway,input,scope,false,false,false,true);}
+export async function readBillingDays(gateway:Transport,input:BillingReportInput,scope:ReadScope){return readCommercialReport(gateway,input,scope,true,false,false,true);}
 export async function readRankingSales(gateway:Transport,input:SalesReportInput,scope:ReadScope){return readCommercialReport(gateway,input,scope,false,false,true);}
-async function readCommercialReport(gateway: Transport, input: CommercialReportInput, scope: ReadScope, billing: boolean, billed=false, ranking=false) {
+async function readCommercialReport(gateway: Transport, input: CommercialReportInput, scope: ReadScope, billing: boolean, billed=false, ranking=false, calendar=false) {
   let fromSQL=commercialFromSQL,prefix='';
   const read=async(stage:string,sql:string,limit:number)=>{try{return await gateway.select(prefix?prefix+' '+sql:sql,limit);}catch(e){if(billed&&e instanceof SankhyaError)throw new SankhyaError(e.code,e.message,e.status,e.upstreamStatus,{kind:'billed-orders-query-stage',fields:[],hint:stage});throw e;}};
   const dataGateway={select:(sql:string,limit:number)=>read('group-count',sql,limit)};
@@ -197,8 +199,8 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
     if (!companies.includes(input.companyCode)) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
     companies = [input.companyCode];
   }
-  const group = input.groupBy, sort = input.sort ?? (group ? 'name' : 'date'), direction = input.direction ?? (group ? 'asc' : 'desc');
-  const groupCode = group === 'seller' ? 'C.CODVEND' : 'C.CODPARC', groupName = group === 'seller' ? 'V.APELIDO' : 'P.RAZAOSOCIAL';
+  const group = calendar?'day':input.groupBy, sort = input.sort ?? (group ? 'name' : 'date'), direction = input.direction ?? (group ? 'asc' : 'desc');
+  const groupCode = calendar?`TO_NUMBER(TO_CHAR(C.${dateField},'YYYYMMDD'))`:group === 'seller' ? 'C.CODVEND' : 'C.CODPARC', groupName = calendar?`TO_CHAR(C.${dateField},'YYYY-MM-DD')`:group === 'seller' ? 'V.APELIDO' : 'P.RAZAOSOCIAL';
   const groupSorts: Record<string,string> = mix ? { name:foldSQL('C.RAZAOSOCIAL'),qty:'PRODUCT_COUNT',total:'SUM(C.VLRNOTA)' } : { name: foldSQL(groupName), count: 'COUNT(*)', total: 'SUM(C.VLRNOTA)' };
   const billedSQL=billed?billedOrderSQL():undefined;
   const reportSorts = billedSQL?{...sorts,nf:billedSQL.labels,invoiced:billedSQL.amount}:billing ? { ...sorts,date:'C.DTFATUR',number:'C.NUNOTA',nf:'C.NUMNOTA',invoiced:'C.VLRNOTA' } : sorts;
@@ -313,17 +315,20 @@ function itemSummary(row: Row | undefined) {
   return {lineCount,subtotal,missingSubtotalCount,quantityField:'TGFITE.QTDNEG' as const,unitPriceField:'TGFITE.VLRUNIT' as const,subtotalField:'TGFITE.VLRTOT' as const,calculatedSubtotal:false as const,headerAmountsAdded:false as const,atomicSnapshot:false as const};
 }
 /** Itens da venda padrão, sem cotação, rateio ou multiplicação de preço/quantidade. */
-export async function readOrderItemsReport(gateway: Transport,input: OrderItemsReportInput,scope: ReadScope) {
+export async function readOrderItemsReport(gateway: Transport,input: OrderItemsReportInput,scope: ReadScope, dimension:'product'|'day'|'seller'|'category'='product') {
   keys(input,['resource','offset','limit','customerId','sellerCode','status','search','sort','direction','from','to','companyCode','productReport']);
   if(input.resource!=='orders'||input.status!==undefined&&input.status!=='confirmado'||input.productReport!==undefined&&input.productReport!==true)return invalid();
   const products=input.productReport===true;
+  if(!['product','day','seller','category'].includes(dimension)||dimension!=='product'&&!products)return invalid();
+  const dimensionKey=dimension==='day'?"TO_NUMBER(TO_CHAR(C.DTNEG,'YYYYMMDD'))":dimension==='seller'?'C.CODVEND':dimension==='category'?'PR.CODGRUPOPROD':'I.CODPROD';
+  const dimensionName=dimension==='day'?"TO_CHAR(C.DTNEG,'YYYY-MM-DD')":dimension==='seller'?'V.APELIDO':dimension==='category'?'G.DESCRGRUPOPROD':'PR.DESCRPROD';
   const allowed=scopeOf(scope),page=windowOf(input.offset,input.limit),policy=STANDARD_SALES_REPORT_POLICY;
   let companies=allowed.companies;
   if(input.companyCode!==undefined){integer(input.companyCode);if(!companies.includes(input.companyCode))throw new SankhyaError('ERP_SCOPE_FORBIDDEN','Filial fora do escopo autorizado.',403);companies=[input.companyCode];}
   const sort=input.sort??(products?'name':'date'),direction=input.direction??(products?'asc':'desc');
   const invalidUnit="I.CODVOL IS NULL OR LENGTH(TRIM(I.CODVOL))=0";
   const quantityKnown=`COUNT(CASE WHEN I.QTDNEG IS NULL OR (${invalidUnit}) THEN 1 END)=0 AND COUNT(DISTINCT I.CODVOL)=1`;
-  const itemSorts:Record<string,string>=products?{code:'I.CODPROD',name:foldSQL('PR.DESCRPROD'),qty:`CASE WHEN ${quantityKnown} THEN SUM(I.QTDNEG) END`,total:'SUM(I.VLRTOT)'}:{name:foldSQL('PR.DESCRPROD'),date:'C.DTNEG',number:'C.NUMNOTA',customer:foldSQL('P.RAZAOSOCIAL'),price:'I.VLRUNIT',qty:'I.QTDNEG',total:'I.VLRTOT'};
+  const itemSorts:Record<string,string>=products?{code:dimensionKey,name:foldSQL(dimensionName),qty:`CASE WHEN ${quantityKnown} THEN SUM(I.QTDNEG) END`,total:'SUM(I.VLRTOT)'}:{name:foldSQL('PR.DESCRPROD'),date:'C.DTNEG',number:'C.NUMNOTA',customer:foldSQL('P.RAZAOSOCIAL'),price:'I.VLRUNIT',qty:'I.QTDNEG',total:'I.VLRTOT'};
   if(typeof sort!=='string'||!Object.hasOwn(itemSorts,sort)||!['asc','desc'].includes(direction))return invalid();
   const start=dateInput(input.from),end=dateInput(input.to),search=searchText(input.search);if(start&&end&&start>end)return invalid();
   const candidate=[...baseWhere(allowed,'P',companies),`C.CODTIPOPER=${policy.operationCode}`,`C.CODNAT=${policy.natureCode}`,`C.STATUSNOTA='${policy.statusCode}'`];
@@ -337,6 +342,7 @@ export async function readOrderItemsReport(gateway: Transport,input: OrderItemsR
     TGFITE:{NUNOTA:'NUMBER',SEQUENCIA:'NUMBER',CODEMP:'NUMBER',CODPROD:'NUMBER',CODVOL:'text',QTDNEG:'decimal',VLRUNIT:'decimal',VLRTOT:'decimal'},
     TGFPRO:{CODPROD:'NUMBER',DESCRPROD:'text'},TGFVEN:{CODVEND:'NUMBER',APELIDO:'text'},
   };
+  if(dimension==='category'){required['TGFPRO']!['CODGRUPOPROD']='NUMBER';required['TGFGRU']={CODGRUPOPROD:'NUMBER',DESCRGRUPOPROD:'text'};}
   const meta=await gateway.select(`SELECT TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE ${Object.entries(required).map(([t,cols])=>`(TABLE_NAME='${t}' AND COLUMN_NAME IN (${Object.keys(cols).map(literal).join(',')}))`).join(' OR ')} ORDER BY TABLE_NAME,COLUMN_NAME FETCH FIRST 50 ROWS ONLY`,50);
   for(const [table,cols]of Object.entries(required))for(const [name,type]of Object.entries(cols))if(!meta.some(r=>r['TABLE_NAME']===table&&r['COLUMN_NAME']===name&&(type==='text'?['CHAR','VARCHAR2','NCHAR','NVARCHAR2'].includes(String(r['DATA_TYPE'])):type==='decimal'?['NUMBER','FLOAT'].includes(String(r['DATA_TYPE'])):r['DATA_TYPE']===type)))return unsupportedSales();
   const invalidTop="T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'P' OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1)";
@@ -344,23 +350,23 @@ export async function readOrderItemsReport(gateway: Transport,input: OrderItemsR
   const guard=await gateway.select(`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} LEFT JOIN TGFITE I ON I.NUNOTA=C.NUNOTA WHERE ${candidate.join(' AND ')} AND ((${invalidTop}) OR (T.BONIFICACAO='N' AND T.GOLDEV=1 AND I.NUNOTA IS NOT NULL AND (I.CODEMP IS NULL OR I.CODEMP<>C.CODEMP OR I.CODPROD IS NULL OR I.SEQUENCIA IS NULL${groupedIdentity})))`,1);
   if(guard.length!==1)return incompatible();if(salesCount(guard[0],'MISSING_CONTEXT_COUNT')!==0)return unsupportedSales();
   const withoutSearch=[...candidate,`T.TIPMOV='${policy.movement}'`,`T.BONIFICACAO='${policy.bonification}'`,`T.GOLDEV=${policy.devolution}`];
-  const where=[...withoutSearch],itemFrom=`${fromSQL} JOIN TGFITE I ON I.NUNOTA=C.NUNOTA LEFT JOIN TGFPRO PR ON PR.CODPROD=I.CODPROD`;
+  const where=[...withoutSearch],itemFrom=`${fromSQL} JOIN TGFITE I ON I.NUNOTA=C.NUNOTA LEFT JOIN TGFPRO PR ON PR.CODPROD=I.CODPROD${dimension==='category'?' LEFT JOIN TGFGRU G ON G.CODGRUPOPROD=PR.CODGRUPOPROD':''}`;
   if(search){const term=literal('%'+foldERPText(search).replace(/[!%_]/g,c=>'!'+c)+'%');const fields=products?['TO_CHAR(I.CODPROD)','PR.DESCRPROD']:['TO_CHAR(C.NUNOTA)','TO_CHAR(C.NUMNOTA)','TO_CHAR(I.CODPROD)','PR.DESCRPROD','P.RAZAOSOCIAL','V.APELIDO','I.CODVOL'];where.push(`(${fields.map(f=>`${foldSQL(f)} LIKE ${term} ESCAPE '!'`).join(' OR ')})`);}
   const sums=await gateway.select(`SELECT ${itemAggregate} FROM ${itemFrom} WHERE ${where.join(' AND ')}`,1);if(sums.length!==1)return incompatible();const summary=itemSummary(sums[0]);
-  const grouped=(conditions:string[])=>`(SELECT I.CODPROD,PR.DESCRPROD FROM ${itemFrom} WHERE ${conditions.join(' AND ')} GROUP BY I.CODPROD,PR.DESCRPROD) G`;
+  const grouped=(conditions:string[])=>`(SELECT ${dimensionKey},${dimensionName} FROM ${itemFrom} WHERE ${conditions.join(' AND ')} GROUP BY ${dimensionKey},${dimensionName}) G`;
   const total=products?await count(gateway,grouped(where),['1=1']):summary.lineCount;
   const totalWithoutSearch=search?await count(gateway,products?grouped(withoutSearch):itemFrom,products?['1=1']:withoutSearch):total;if(total>totalWithoutSearch||total>summary.lineCount)return incompatible();
   if(products){
-    const rows=await gateway.select(`SELECT I.CODPROD,PR.DESCRPROD,${itemAggregate},COUNT(CASE WHEN I.QTDNEG IS NULL THEN 1 END) AS MISSING_QUANTITY_COUNT,COUNT(CASE WHEN ${invalidUnit} THEN 1 END) AS MISSING_UNIT_COUNT,COUNT(DISTINCT I.CODVOL) AS UNIT_COUNT,CASE WHEN COUNT(CASE WHEN ${invalidUnit} THEN 1 END)=0 AND COUNT(DISTINCT I.CODVOL)=1 THEN MIN(I.CODVOL) END AS UNIT_CODE,CASE WHEN ${quantityKnown} THEN TO_CHAR(SUM(I.QTDNEG),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') END AS QUANTITY FROM ${itemFrom} WHERE ${where.join(' AND ')} GROUP BY I.CODPROD,PR.DESCRPROD ORDER BY ${itemSorts[sort]} ${direction.toUpperCase()} NULLS LAST,I.CODPROD ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`,page.limit);
-    const items=rows.map(r=>{const product=code(r['CODPROD']),part=itemSummary(r),missingQuantityCount=salesCount(r,'MISSING_QUANTITY_COUNT'),missingUnitCount=salesCount(r,'MISSING_UNIT_COUNT'),unitCount=salesCount(r,'UNIT_COUNT');
+    const rows=await gateway.select(`SELECT ${dimensionKey}${dimension==='product'?'':' AS CODPROD'},${dimensionName}${dimension==='product'?'':' AS DESCRPROD'},${itemAggregate},COUNT(CASE WHEN I.QTDNEG IS NULL THEN 1 END) AS MISSING_QUANTITY_COUNT,COUNT(CASE WHEN ${invalidUnit} THEN 1 END) AS MISSING_UNIT_COUNT,COUNT(DISTINCT I.CODVOL) AS UNIT_COUNT,CASE WHEN COUNT(CASE WHEN ${invalidUnit} THEN 1 END)=0 AND COUNT(DISTINCT I.CODVOL)=1 THEN MIN(I.CODVOL) END AS UNIT_CODE,CASE WHEN ${quantityKnown} THEN TO_CHAR(SUM(I.QTDNEG),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') END AS QUANTITY FROM ${itemFrom} WHERE ${where.join(' AND ')} GROUP BY ${dimensionKey},${dimensionName} ORDER BY ${itemSorts[sort]} ${direction.toUpperCase()} NULLS LAST,${dimensionKey} ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`,page.limit);
+    const items=rows.map(r=>{const product=dimension==='product'?code(r['CODPROD']):nullableCode(r['CODPROD']),part=itemSummary(r),missingQuantityCount=salesCount(r,'MISSING_QUANTITY_COUNT'),missingUnitCount=salesCount(r,'MISSING_UNIT_COUNT'),unitCount=salesCount(r,'UNIT_COUNT');
       if(part.lineCount<1||missingQuantityCount>part.lineCount||missingUnitCount>part.lineCount||unitCount>part.lineCount)return incompatible();
       const unitKnown=unitCount===1&&missingUnitCount===0,qtyKnown=unitKnown&&missingQuantityCount===0,unit=text(r['UNIT_CODE']);
       if(unitKnown?unit===null||unit.trim()==='':unit!==null)return incompatible();
       const qty=r['QUANTITY']===null?null:salesAmount(r['QUANTITY']);if(qtyKnown?qty===null:qty!==null)return incompatible();
-      return{id:`sankhya:items:product:${product}`,source:'observado',readOnly:true,productId:`sankhya:product:${product}`,code:String(product),name:text(r['DESCRPROD']),qty,total:part.subtotal,unit,lineCount:part.lineCount,missingSubtotalCount:part.missingSubtotalCount,missingQuantityCount,missingUnitCount,unitCount};});
+      return{id:`sankhya:items:${dimension}:${product??'unknown'}`,source:'observado',readOnly:true,...(dimension==='product'?{productId:`sankhya:product:${product}`}:{groupCode:product}),code:product===null?null:String(product),name:text(r['DESCRPROD']),qty,total:part.subtotal,unit,lineCount:part.lineCount,missingSubtotalCount:part.missingSubtotalCount,missingQuantityCount,missingUnitCount,unitCount};});
     verifyPage(items,total,page.offset,page.limit);if(new Set(items.map(i=>i.id)).size!==items.length)return incompatible();
     if(page.offset===0&&items.length===total&&(items.reduce((n,i)=>n+i.lineCount,0)!==summary.lineCount||items.reduce((n,i)=>n+i.missingSubtotalCount,0)!==summary.missingSubtotalCount||summary.subtotal!==null&&(items.some(i=>i.total===null)||decimalUnits(sumERPDecimals(items.map(i=>salesAmount(i.total))))!==decimalUnits(summary.subtotal))))return incompatible();
-    return{...observed(),items,total,totalWithoutSearch,offset:page.offset,summary,salesPolicy:policy,companyCodes:companies,productAggregation:{field:'TGFITE.CODPROD',mixedUnits:'unavailable',quantitiesConverted:false,subtotalReconstructed:false},groupBy:'product'};
+    return{...observed(),items,total,totalWithoutSearch,offset:page.offset,summary,salesPolicy:policy,companyCodes:companies,productAggregation:{field:dimension==='product'?'TGFITE.CODPROD':dimensionKey,mixedUnits:'unavailable',quantitiesConverted:false,subtotalReconstructed:false},groupBy:dimension};
   }
   const order=`${itemSorts[sort]} ${direction.toUpperCase()} NULLS LAST,C.NUNOTA ${direction.toUpperCase()} NULLS LAST,I.SEQUENCIA ${direction.toUpperCase()} NULLS LAST`;
   const rows=await gateway.select(`SELECT C.NUNOTA,C.NUMNOTA,C.CODEMP,C.CODPARC,C.CODVEND,C.CODTIPOPER,C.CODNAT,C.TIPMOV,C.STATUSNOTA,TO_CHAR(C.DTNEG,'YYYY-MM-DD') AS ITEM_DATE,I.SEQUENCIA,I.CODEMP AS ITEM_COMPANY,I.CODPROD,I.CODVOL,PR.DESCRPROD,P.RAZAOSOCIAL,TO_CHAR(I.QTDNEG,'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS QUANTITY,TO_CHAR(I.VLRUNIT,'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS UNIT_PRICE,TO_CHAR(I.VLRTOT,'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS SUBTOTAL FROM ${itemFrom} WHERE ${where.join(' AND ')} ORDER BY ${order} OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`,page.limit);

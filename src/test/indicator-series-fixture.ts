@@ -1,0 +1,12 @@
+import {vi} from 'vitest';
+import {billedFixture} from './billed-orders-fixture';
+import {readIndicatorSeries} from '../../supabase/functions/sankhya-online/indicator-series';
+import {createERPClient} from '../lib/erp-online';
+export function indicatorFixture(){const f=billedFixture();f.db.exec(`ALTER TABLE TGFITE ADD CODEMP INTEGER;ALTER TABLE TGFITE ADD CODPROD INTEGER;ALTER TABLE TGFITE ADD CODVOL TEXT;ALTER TABLE TGFITE ADD QTDNEG TEXT;ALTER TABLE TGFITE ADD VLRUNIT TEXT;ALTER TABLE TGFITE ADD VLRTOT TEXT;CREATE TABLE TGFPRO(CODPROD INTEGER,DESCRPROD TEXT,CODGRUPOPROD INTEGER);CREATE TABLE TGFGRU(CODGRUPOPROD INTEGER,DESCRGRUPOPROD TEXT);INSERT INTO TGFGRU VALUES(1,'Categoria nativa');INSERT INTO TGFPRO VALUES(100,'Produto nativo',1),(101,'Outro produto',1)`);
+ const meta={TGFITE:{CODEMP:'NUMBER',CODPROD:'NUMBER',CODVOL:'VARCHAR2',QTDNEG:'NUMBER',VLRUNIT:'FLOAT',VLRTOT:'FLOAT'},TGFPRO:{CODPROD:'NUMBER',DESCRPROD:'VARCHAR2',CODGRUPOPROD:'NUMBER'},TGFGRU:{CODGRUPOPROD:'NUMBER',DESCRGRUPOPROD:'VARCHAR2'},TGFVEN:{CODVEND:'NUMBER',APELIDO:'VARCHAR2'},TGFPAR:{RAZAOSOCIAL:'VARCHAR2',ATIVO:'VARCHAR2'}};for(const[t,fields]of Object.entries(meta))for(const[n,type]of Object.entries(fields))f.db.prepare('INSERT INTO USER_TAB_COLUMNS VALUES(?,?,?)').run(t,n,type);
+ f.db.function('TO_NUMBER',(v:any)=>Number(v));f.db.function('NLSSORT',(v:any,_s:any)=>v);f.db.function('TO_CHAR',{varargs:true},(v:any,format:any)=>v===null?null:format==='YYYYMMDD'?String(v).slice(0,10).replaceAll('-',''):format==='YYYY-MM-DD'?String(v).slice(0,10):String(v));
+ const order=(id:number,total:string|null='10',options:Record<string,any>={})=>f.order(id,total,{movement:'P',operation:1001,...options});
+ const item=(id:number,subtotal:string|null='9',options:Record<string,any>={})=>f.db.prepare('INSERT INTO TGFITE(NUNOTA,SEQUENCIA,CODEMP,CODPROD,CODVOL,QTDNEG,VLRUNIT,VLRTOT) VALUES(?,?,?,?,?,?,?,?)').run(id,options['sequence']??1,options['company']??1,options['product']??100,Object.hasOwn(options,'unit')?options['unit']:'UN',Object.hasOwn(options,'quantity')?options['quantity']:'2',options['price']??'999',subtotal);
+ const transport=vi.fn(async({operation,query}:any):Promise<any>=>{if(operation!=='indicator-series')throw Error('Operação inesperada');try{return{data:await readIndicatorSeries(f.g,query,{role:'administrador'}),error:null};}catch(e:any){return{data:null,error:{code:e.code??'ERP_UNAVAILABLE'}};}});
+ return{...f,order,item,transport,client:createERPClient(transport)};
+}

@@ -1,5 +1,5 @@
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
-import { currentCustomerWhere, scopeOf, type ReadScope } from './read-model.ts';
+import { currentCustomerWhere, scopeOf, sellerAllowed, type ReadScope } from './read-model.ts';
 import { CUSTOMER_INDICATOR_POLICY } from './policy.ts';
 type Row = Record<string, unknown>;
 type Transport = Pick<SankhyaGateway, 'select'>;
@@ -19,11 +19,12 @@ function counts(row: Row) {
  return{customerCount,activeKnown,activeUnknown,newKnown,newUnknown,activeCustomerCount:activeUnknown===0?activeKnown:null,newCustomerCount:newUnknown===0?newKnown:null};
 }
 /** Agregados fixos; o escopo vem do Auth servidor, nunca do corpo do navegador. */
-export async function readCustomerMetrics(gateway:Transport,value:unknown,trustedScope:ReadScope){
+export async function readCustomerMetrics(gateway:Transport,value:unknown,trustedScope:ReadScope,combined=false){
  if(!value||typeof value!=='object'||Array.isArray(value))return invalid();const input=value as Row;
- if(Object.keys(input).some(k=>!['kind','section','companyCode','from','to','offset'].includes(k))||input['kind']!=='analytics'||input['section']!=='customers')return invalid();
- const companyCode=input['companyCode'];if(companyCode!==1&&companyCode!==4)throw new SankhyaError('ERP_SCOPE_FORBIDDEN','Filial fora do escopo autorizado.',403);
- const scope=scopeOf(trustedScope),where=currentCustomerWhere(trustedScope,companyCode,false);
+ if(Object.keys(input).some(k=>!['kind','section','companyCode','from','to','offset',...(combined?['sellerCode']:[])].includes(k))||input['kind']!=='analytics'||input['section']!=='customers')return invalid();
+ const companyCode=input['companyCode'];if(!(combined&&companyCode===undefined)&&companyCode!==1&&companyCode!==4)throw new SankhyaError('ERP_SCOPE_FORBIDDEN','Filial fora do escopo autorizado.',403);
+ const scope=scopeOf(trustedScope),companies=companyCode===undefined?scope.companies:[companyCode as number],where=companyCode===undefined?[`(${companies.map(c=>'('+currentCustomerWhere(trustedScope,c,false).join(' AND ')+')').join(' OR ')})`]:currentCustomerWhere(trustedScope,companyCode as number,false);
+ if(combined&&input['sellerCode']!==undefined){const v=input['sellerCode'];if(typeof v!=='number'||!Number.isSafeInteger(v)||v<1||v>2147483647)return invalid();if(!sellerAllowed(scope,v))throw new SankhyaError('ERP_SCOPE_FORBIDDEN','Vendedor fora do escopo autorizado.',403);where.push(`P.CODVEND=${v}`);}
  const from=day(input['from']),to=day(input['to']),offset=input['offset']??0,span=Date.parse(to+'T00:00:00Z')-Date.parse(from+'T00:00:00Z');
  if(span<0||span>366*86400000||typeof offset!=='number'||!Number.isSafeInteger(offset)||offset<0||offset>2147483597)return invalid();
  const required={
@@ -50,9 +51,10 @@ export async function readCustomerMetrics(gateway:Transport,value:unknown,truste
  const native=await gateway.select(`SELECT Q.CODVEND,${measures} FROM (${qualified}) Q GROUP BY Q.CODVEND ORDER BY Q.CODVEND NULLS LAST OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`,50);
  const seen=new Set<number|null>();
  const rows=native.map(row=>{const raw=row['CODVEND'];if(raw===undefined)return incompatible();const sellerCode=raw===null?null:count(raw);if(sellerCode!==null&&sellerCode>2147483647||seen.has(sellerCode))return incompatible();seen.add(sellerCode);return{sellerCode,...counts(row)};});
- const hasMore=rows.length===50;
+ let groupCount:number|undefined;if(combined){const groups=await gateway.select(`SELECT COUNT(*) AS GROUP_COUNT FROM (SELECT Q.CODVEND FROM (${qualified}) Q GROUP BY Q.CODVEND) G`,1);if(groups.length!==1)return incompatible();groupCount=count(groups[0]!['GROUP_COUNT']);if(rows.length!==Math.min(50,Math.max(0,groupCount-offset)))return incompatible();}
+ const hasMore=combined?offset+rows.length<groupCount!:rows.length===50;
  for(const key of ['customerCount','activeKnown','activeUnknown','newKnown','newUnknown']as const){const sum=rows.reduce((n,r)=>n+r[key],0);if(!Number.isSafeInteger(sum)||sum>totals[key]||offset===0&&!hasMore&&sum!==totals[key])return incompatible();}
- return{source:'sankhya' as const,readOnly:true,supported:true,readAt:new Date().toISOString(),companyCode,from,to,offset,hasMore,historyCompanyCodes:scope.companies,currentWallet:true,sellerAttribution:'current-CODVEND' as const,newCustomerPolicy:CUSTOMER_INDICATOR_POLICY.newCustomer,activeCustomerPolicy:CUSTOMER_INDICATOR_POLICY.activeCustomer,totals,rows,atomicSnapshot:false,
+ return{source:'sankhya' as const,readOnly:true,supported:true,readAt:new Date().toISOString(),companyCode:companyCode??null,...(combined?{companyCodes:companies,groupCount}:{}),from,to,offset,hasMore,historyCompanyCodes:scope.companies,currentWallet:true,sellerAttribution:'current-CODVEND' as const,newCustomerPolicy:CUSTOMER_INDICATOR_POLICY.newCustomer,activeCustomerPolicy:CUSTOMER_INDICATOR_POLICY.activeCustomer,totals,rows,atomicSnapshot:false,
   coverage:{policy:CUSTOMER_INDICATOR_POLICY.coverage,available:false,value:null,numerator:null,denominator:totals.activeCustomerCount,reason:'ERP_ACTIVITY_REFERENCE_UNAVAILABLE' as const},
   ordersAdded:false,identityChanged:false};
 }

@@ -1,3 +1,5 @@
+import {SelectedIndicators} from './SelectedIndicators';
+import {useOnlineIndicators} from './online-indicators';
 import {useRankingChart} from './erp-ranking-chart';
 import type {ERPCommissionSummary} from '../lib/erp-commission';
 import type { ERPWalletSummary } from '../lib/erp-wallet';
@@ -490,15 +492,20 @@ function Ui({ area: e, items: t }: any): any {
     });
 }
 function nz(): any {
-    let { db: e, update: t, editor: a } = qa(), [o, n] = (0, He.useState)(businessDate().slice(0, 7)), [r, l] = (0, He.useState)(""), [s, i] = (0, He.useState)(e.activePanel || "Painel Sul");
+    let { db: e, update: t, editor: a, online } = qa(), [o, n] = (0, He.useState)(businessDate().slice(0, 7)), [r, l] = (0, He.useState)(""), [s, i] = (0, He.useState)(e.activePanel || "Painel Sul");
+    const native=useOnlineIndicators(online,o,r,e.extraIndicators,String(e.company.userId));
+    const nativeVendors=new Map<number,string>();
+    for(const row of native?.ranking?.items??[]){const c=row['sellerCode'];if(typeof c==='number'&&c>0)nativeVendors.set(c,String(row['name']??('Vendedor ERP '+c)));}
+    for(const row of native?.series['wallet-seller']?.items??[]){if(row.groupCode!==null&&row.groupCode>0)nativeVendors.set(row.groupCode,row.label??('Vendedor ERP '+row.groupCode));}
+    const nativeNonBuyers=He.useMemo(()=>online?{client:online,resource:'customers',nonBuyersReport:nonBuyersQuery({seller:r},o),registerExport:false}:undefined,[online,o,r]);
     let ano: any = o.slice(0, 4), mes: any = o.slice(5, 7);
     let mesAnt: any = String(Number(ano) - 1) + "-" + mes;
-    let u: any = e.orders.filter((p: any) => p.date && p.date.startsWith(o) && (!r || p.seller === r));
+    let u: any = (online?[]:e.orders).filter((p: any) => p.date && p.date.startsWith(o) && (!r || p.seller === r));
     let c: any = u.filter((p: any) => p.type === "Venda" && p.status === "Conclu\xEDdo");
-    let uAnt: any = e.orders.filter((p: any) => p.date && p.date.startsWith(mesAnt) && (!r || p.seller === r));
+    let uAnt: any = (online?[]:e.orders).filter((p: any) => p.date && p.date.startsWith(mesAnt) && (!r || p.seller === r));
     let cAnt: any = uAnt.filter((p: any) => p.type === "Venda" && p.status === "Conclu\xEDdo");
     let f: any = Zo(c, "total"), fAnt: any = Zo(cAnt, "total");
-    let meta: any = Object.values(monthlyTargets(e, o)).reduce((p: any, y: any) => p + (Number(y) || 0), 0);
+    let meta: any = online?null:Object.values(monthlyTargets(e, o)).reduce((p: any, y: any) => p + (Number(y) || 0), 0);
     let ating: any = meta > 0 ? (f / meta) * 100 : null;
     let base: any = e.customers.filter((p: any) => !p.blocked).length;
     let compraram: any = new Set(c.map((p: any) => p.customerId));
@@ -542,6 +549,8 @@ function nz(): any {
     })
         .filter((p: any) => p.atual > 0 || p.ant > 0)
         .sort((p: any, y: any) => y.atual - p.atual);
+    let nativeNewCount:any=null,nativeAbsent:any=null;
+    if(online){f=native?.ranking?.summary.documentAmount??null;meta=null;ating=null;base=native?.series['wallet-seller']?.summary.recordCount??null;atendidos=native?.series['wallet-seller']?.summary.buyerCount??null;nativeAbsent=base!==null&&atendidos!==null?base-atendidos:null;comissaoMes=native?.series['commissions-seller']?.summary.value??null;temComissao=comissaoMes!==null;nativeNewCount=native?.series['customers-seller-year']?.summary.newCount??null;novosFat=null;novos=[];naoCompraram=[];acumCliente=[];clientesPerf=[];}
     const MESES: any = {
         "01": "janeiro",
         "02": "fevereiro",
@@ -594,7 +603,7 @@ function nz(): any {
                         label: "Vendedor",
                         value: r,
                         placeholder: "Todos os vendedores",
-                        options: La(["", ...new Set(e.orders.map((p: any) => p.seller))]),
+                        options: online ? [{value:"",label:"Todos os vendedores"},...[...nativeVendors].sort((a,b)=>a[1].localeCompare(b[1])).map(([code,name])=>({value:"sankhya:seller:"+code,label:name+" ["+code+"]"}))] : La(["", ...new Set(e.orders.map((p: any) => p.seller))]),
                         onValueChange: (p: any) => l(String(p)),
                     }),
                     (0, b.jsx)(Il, {
@@ -632,44 +641,45 @@ function nz(): any {
                     (0, b.jsx)(Ha, {
                         label: "Meta do m\u00EAs",
                         value: meta > 0 ? rt(meta) : "\u2014",
-                        hint: "Soma das metas dos vendedores",
+                        hint: online ? "Meta global sem população completa comprovada; consulte metas por vendedor." : "Soma das metas dos vendedores",
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Vendido",
                         value: rt(f),
-                        hint: "Pedidos conclu\xEDdos do tipo Venda",
+                        hint: online ? "Pedidos padrão por DTNEG no mês selecionado; não é faturamento." : "Pedidos conclu\xEDdos do tipo Venda",
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Atingimento",
                         value: ating != null ? na(ating) + "%" : "\u2014",
-                        hint: meta > 0
+                        hint: online ? "Sem meta global comparável; não calcular por nome ou soma parcial." : meta > 0
                             ? rt(Math.max(0, meta - f)) + " restantes"
                             : "Defina metas por vendedor",
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Clientes atendidos",
-                        value: na(atendidos) + " de " + na(base),
-                        hint: base > 0 ? na((atendidos / base) * 100) + "% da base" : "",
+                        value: online && (atendidos===null||base===null) ? pa : na(atendidos) + " de " + na(base),
+                        hint: online ? base!==null&&atendidos!==null ? (formatERPShare(String(atendidos),String(base))??pa)+" da carteira atual ATIVO=S" : "Carteira nativa ainda indisponível" : base > 0 ? na((atendidos / base) * 100) + "% da base" : "",
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Sem compra no m\u00EAs",
-                        value: na(naoCompraram.length),
-                        hint: "Clientes da base sem pedido no m\u00EAs",
+                        value: online ? nativeAbsent===null ? pa : na(nativeAbsent) : na(naoCompraram.length),
+                        hint: online ? "Carteira atual ativa sem compra padrão no mês; filiais não são somadas." : "Clientes da base sem pedido no m\u00EAs",
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Comiss\u00E3o do m\u00EAs",
                         value: temComissao ? rt(comissaoMes) : "\u2014",
-                        hint: temComissao
+                        hint: online ? "Livro TGFCOM por emissão da origem; não comprova pagamento." : temComissao
                             ? "Comiss\xE3o dos itens com % definida no produto"
                             : "Defina Comiss\xE3o (%) na ficha dos produtos",
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Novos clientes " + ano,
-                        value: na(novos.length),
-                        hint: "Faturamento no ano: " + rt(novosFat),
+                        value: online ? nativeNewCount===null ? pa : na(nativeNewCount) : na(novos.length),
+                        hint: online ? "Primeira compra padrão histórica no ano, não data de cadastro. Financeiro do grupo não conectado." : "Faturamento no ano: " + rt(novosFat),
                     }),
                 ],
             }),
+            online && (0,b.jsx)(SelectedIndicators,{names:e.extraIndicators,data:native,db:e,month:o,seller:r}),
             meta > 0 &&
                 (0, b.jsx)(cs, {
                     title: "Acompanhamento da meta",
@@ -730,7 +740,7 @@ function nz(): any {
                         ],
                     })
                     : (0, b.jsx)(hn, {
-                        title: "Nenhum cliente comprou neste m\u00EAs",
+                        title: online ? "Detalhamento comparativo nativo ainda não conectado" : "Nenhum cliente comprou neste m\u00EAs",
                         framed: !1,
                     }),
             }),
@@ -747,13 +757,13 @@ function nz(): any {
                         children: acumCliente.length
                             ? (0, b.jsx)(Zy, { items: acumCliente, format: Vd })
                             : (0, b.jsx)(hn, {
-                                title: "Sem vendas neste recorte",
+                                title: online ? "Acumulado histórico nativo ainda não conectado" : "Sem vendas neste recorte",
                                 framed: !1,
                             }),
                     }),
                     (0, b.jsx)(cs, {
                         title: "Novos clientes de " + ano,
-                        description: "Cadastrados neste ano \xB7 faturamento alcan\xE7ado no ano",
+                        description: online ? "Primeira compra padrão histórica no ano; detalhamento financeiro não conectado" : "Cadastrados neste ano \xB7 faturamento alcan\xE7ado no ano",
                         action: (0, b.jsx)(xt, {
                             href: "#/clientes",
                             children: "Ver clientes",
@@ -792,7 +802,7 @@ function nz(): any {
                                 ],
                             })
                             : (0, b.jsx)(hn, {
-                                title: "Nenhum cliente cadastrado em " + ano,
+                                title: online ? "Detalhamento das primeiras compras ainda não conectado" : "Nenhum cliente cadastrado em " + ano,
                                 framed: !1,
                             }),
                     }),
@@ -802,7 +812,7 @@ function nz(): any {
                             href: "#/relatorios/nao-compraram",
                             children: "Detalhar",
                         }),
-                        children: naoCompraram.length
+                        children: online ? (0,b.jsx)(ya,{toolbar:false,rows:[],remote:nativeNonBuyers,label:'Carteira sem compra no mês',columns:[z('name','Cliente',undefined,{primary:true,wide:true}),z('code','Código'),z('seller','Vendedor')]}) : naoCompraram.length
                             ? (0, b.jsx)(ya, {
                                 toolbar: !1,
                                 rows: naoCompraram.map((p: any) => ({
@@ -849,7 +859,7 @@ function rz(): any {
                         disabledReason: "O indicador j\xE1 est\xE1 neste painel",
                         onClick: async () => {
                             (await t((l: any) => l.extraIndicators.push(r.name)),
-                                go("Indicador adicionado \xE0 simula\xE7\xE3o"));
+                                go("Indicador adicionado ao painel"));
                         },
                         children: [(0, b.jsx)(Sa, {}), "Adicionar"],
                     }), { action: !0 }),

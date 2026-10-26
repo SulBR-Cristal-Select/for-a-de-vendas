@@ -1,3 +1,4 @@
+import {decodeIndicatorSeries,validIndicatorQuery,type ERPIndicatorQuery,type ERPIndicatorWindow} from './erp-indicator-series';
 import {decodeRanking,validRankingQuery,type ERPRankingQuery,type ERPRankingWindow} from './erp-ranking';
 import {decodeReceivables,validReceivablesQuery,type ERPReceivablesQuery,type ERPReceivablesWindow} from './erp-receivables';
 import {BILLED_ORDERS_POLICY} from './erp-billed-orders';
@@ -33,8 +34,8 @@ export type ERPDocument = ERPObservation & { record: ERPRow | null; items: ERPRo
 export type ERPPriceQuery = { resource?: never; customerId: string; productId: string; paymentCode: number; type: 'Venda'; sellerCode?: number; quantity?: number; unit?: string; date?: string };
 export type ERPPaymentQuery = { resource?: never; customerId: string; offset: number; limit: number; search?: string; date?: string };
 export type ERPPrice = ERPObservation & { customer: ERPRow; product: ERPRow; seller: ERPRow; companyCode: 1 | 4; operationCode: 1001; operationVersion: string; quantity: number; payment: { code: number; label: string; version: string }; price: { amount: number; unit: string; localCode: number | null; control: string | null; tableVersion: number | null; provider: 'native-context-api' } };
-export type ERPOperation = 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'billing-report' | 'billed-orders-report' | 'order-items-report' | 'nonbuyers-report' | 'wallet-report' | 'stock-report' | 'receivables-report' | 'ranking-report' | 'commission-report' | 'document' | 'price-query' | 'payment-options';
-type ERPQuery = ERPRankingQuery | ERPReceivablesQuery | ERPCommissionQuery | ERPStockQuery | ERPWalletQuery | ERPPageQuery | ERPWindowQuery | ERPRecordQuery | ERPFacetQuery | ERPHistoryQuery | ERPSalesQuery | ERPBillingQuery | ERPOrderItemsQuery | ERPNonBuyersQuery | ERPDocumentQuery | ERPPriceQuery | ERPPaymentQuery;
+export type ERPOperation = 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'billing-report' | 'billed-orders-report' | 'order-items-report' | 'nonbuyers-report' | 'wallet-report' | 'stock-report' | 'receivables-report' | 'ranking-report' | 'indicator-series' | 'commission-report' | 'document' | 'price-query' | 'payment-options';
+type ERPQuery = ERPIndicatorQuery | ERPRankingQuery | ERPReceivablesQuery | ERPCommissionQuery | ERPStockQuery | ERPWalletQuery | ERPPageQuery | ERPWindowQuery | ERPRecordQuery | ERPFacetQuery | ERPHistoryQuery | ERPSalesQuery | ERPBillingQuery | ERPOrderItemsQuery | ERPNonBuyersQuery | ERPDocumentQuery | ERPPriceQuery | ERPPaymentQuery;
 export type ERPTransport = (body: { operation: ERPOperation; query: ERPQuery }, signal: AbortSignal) => Promise<{ data: unknown; error: unknown }>;
 const messages = {
   AUTH_REQUIRED: 'Sessão não autorizada. Entre novamente.',
@@ -95,7 +96,7 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
   const items = data['items'], total = data['total'], unfiltered = data['totalWithoutSearch'];
   if (!Array.isArray(items) || !items.every(object) || !natural(total) || !natural(unfiltered) || total > unfiltered) invalid();
   let offset: number, limit: number;
-  if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'nonbuyers-report' || operation === 'wallet-report' || operation === 'stock-report' || operation === 'commission-report' || operation === 'ranking-report' || operation === 'receivables-report' || operation === 'payment-options') {
+  if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'nonbuyers-report' || operation === 'wallet-report' || operation === 'stock-report' || operation === 'commission-report' || operation === 'indicator-series' || operation === 'ranking-report' || operation === 'receivables-report' || operation === 'payment-options') {
     const q = query as ERPWindowQuery | ERPHistoryQuery | ERPPaymentQuery;
     if (data['offset'] !== q.offset) invalid();
     offset = q.offset; limit = q.limit;
@@ -106,6 +107,7 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
     if (data['hasMore'] !== (offset + items.length < total)) invalid();
   }
   if (items.length !== Math.min(limit, Math.max(0, total - offset))) invalid();
+  if(operation==='indicator-series')decodeIndicatorSeries(data,query as ERPIndicatorQuery,invalid);
   if(operation==='ranking-report')decodeRanking(data,query as ERPRankingQuery,invalid);
   if(operation==='receivables-report')decodeReceivables(data,query as ERPReceivablesQuery,invalid);
   if(operation==='commission-report')decodeCommission(data,query as ERPCommissionQuery,invalid);
@@ -206,9 +208,10 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
   }
   async function request<T>(operation: ERPOperation, query: ERPQuery): Promise<T> {
     if (!query) throw new ERPOnlineError('INVALID_REQUEST');
-    if('month' in query&&operation!=='ranking-report'&&operation!=='nonbuyers-report'&&operation!=='wallet-report')throw new ERPOnlineError('INVALID_REQUEST');
+    if('month' in query&&operation!=='indicator-series'&&operation!=='ranking-report'&&operation!=='nonbuyers-report'&&operation!=='wallet-report')throw new ERPOnlineError('INVALID_REQUEST');
     if(operation==='commission-report'&&!validCommissionQuery(query as ERPCommissionQuery))throw new ERPOnlineError('INVALID_REQUEST');
     if(operation==='stock-report'&&!validStockQuery(query as ERPStockQuery))throw new ERPOnlineError('INVALID_REQUEST');
+    if(operation==='indicator-series'&&!validIndicatorQuery(query as ERPIndicatorQuery))throw new ERPOnlineError('INVALID_REQUEST');
     if(operation==='ranking-report'&&!validRankingQuery(query as ERPRankingQuery))throw new ERPOnlineError('INVALID_REQUEST');
     if(operation==='receivables-report'&&!validReceivablesQuery(query as ERPReceivablesQuery))throw new ERPOnlineError('INVALID_REQUEST');
     if(operation==='wallet-report'&&!validWalletQuery(query as ERPWalletQuery))throw new ERPOnlineError('INVALID_REQUEST');
@@ -230,8 +233,8 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
         const p = q as ERPPriceQuery;
         if (!/^sankhya:product:[1-9]\d*$/.test(p.productId) || !natural(p.paymentCode) || p.paymentCode < 1 || p.type !== 'Venda') throw new ERPOnlineError('INVALID_REQUEST');
       }
-    } else if (!(operation === 'billing-report' ? ['invoices'] : operation === 'sales-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'commission-report' || operation === 'ranking-report' || operation === 'receivables-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(query.resource!)) throw new ERPOnlineError('INVALID_REQUEST');
-    if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'nonbuyers-report' || operation === 'wallet-report' || operation === 'stock-report' || operation === 'commission-report' || operation === 'ranking-report' || operation === 'receivables-report' || operation === 'payment-options') {
+    } else if (!(operation === 'billing-report' ? ['invoices'] : operation === 'sales-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'commission-report' || operation === 'indicator-series' || operation === 'ranking-report' || operation === 'receivables-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(query.resource!)) throw new ERPOnlineError('INVALID_REQUEST');
+    if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'nonbuyers-report' || operation === 'wallet-report' || operation === 'stock-report' || operation === 'commission-report' || operation === 'indicator-series' || operation === 'ranking-report' || operation === 'receivables-report' || operation === 'payment-options') {
       const q = query as ERPWindowQuery | ERPHistoryQuery | ERPPaymentQuery;
       if (!natural(q.offset) || !natural(q.limit) || q.limit < 1 || q.limit > 50) throw new ERPOnlineError('INVALID_REQUEST');
     }
@@ -266,6 +269,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     stockReport: (query: ERPStockQuery) => request<ERPStockWindow>('stock-report', query),
     walletReport: (query: ERPWalletQuery) => request<ERPWalletWindow>('wallet-report', query),
     nonBuyersReport: (query: ERPNonBuyersQuery) => request<ERPNonBuyersWindow>('nonbuyers-report', query),
+    indicatorSeries:(query:ERPIndicatorQuery)=>request<ERPIndicatorWindow>('indicator-series',query),
     rankingReport:(query:ERPRankingQuery)=>request<ERPRankingWindow>('ranking-report',query),
     receivablesReport:(query:ERPReceivablesQuery)=>request<ERPReceivablesWindow>('receivables-report',query),
     billedOrdersReport: (query:ERPSalesQuery) => request<ERPSalesWindow & {billedOrdersPolicy:typeof BILLED_ORDERS_POLICY;billedOrdersSummary:{invoiceLinks:number;unattributedOrders:number;assignedInvoiceAmount:string|null}}>('billed-orders-report',query),

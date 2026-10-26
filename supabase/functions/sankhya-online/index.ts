@@ -1,3 +1,4 @@
+import {readIndicatorSeries} from './indicator-series.ts';
 import {readRanking} from './ranking.ts';
 import {readReceivables} from './receivables.ts';
 import {readBilledOrdersReport} from './history.ts';
@@ -131,6 +132,7 @@ Deno.serve(async (request: Request) => {
     if (input.operation === 'prepare-order-save') return reply(await revalidateOrderRequest({ ...commercialGateway, contextPrices: q => gateway.contextPrices(q) }, input.query, profile, async (name, args) => await profile.client.rpc(name, args), attestOrder));
     if (input.operation === 'payment-options') return reply(await readPaymentOptions(commercialGateway, input.query, scope));
     if (input.operation === 'history') return reply(await readHistory(commercialGateway, input.query, scope));
+    if(input.operation==='indicator-series')return reply(await readIndicatorSeries(commercialGateway,input.query,scope));
     if(input.operation==='ranking-report')return reply(await readRanking(commercialGateway,input.query,scope,async(month,companies)=>{const r=await profile.client.rpc('erp_sales_targets_read',{p_month:month,p_company_codes:companies});if(r.error)throw new SankhyaError('ERP_CONTEXT_REQUIRED','Metas locais indisponíveis para conferência.',502);return r.data;}));
     if (input.operation === 'sales-report') return reply(await readSalesReport(commercialGateway, input.query, scope));
     if (input.operation === 'receivables-report') return reply(await readReceivables(commercialGateway,input.query,scope));
