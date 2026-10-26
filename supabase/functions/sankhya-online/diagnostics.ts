@@ -70,6 +70,20 @@ export async function readCommercialDiagnostic(gateway: Transport, value: unknow
   }
   if (input['kind'] !== 'analytics') return invalid();
   if (input['section'] === 'billing') return readBillingDiagnostic(gateway, input);
+  if (input['section'] === 'native-source-discovery') {
+    keys(input,['kind','section','target','offset']);
+    const target=input['target'],offset=input['offset']??0;
+    if(!['abc','commission-schema','commission-options','commission-totals','item-commission-totals'].includes(String(target))||typeof target!=='string'||typeof offset!=='number'||!Number.isSafeInteger(offset)||offset<0||offset>2147483597)return invalid();
+    await requireDictionary(gateway);
+    let sql:string;
+    if(target==='abc')sql=`SELECT C.NOMETAB AS TABLE_NAME,C.NOMECAMPO AS FIELD_NAME,C.DESCRCAMPO AS DESCRIPTION,C.NUCAMPO AS FIELD_ID,D.DATA_TYPE FROM TDDCAM C JOIN USER_TAB_COLUMNS D ON D.TABLE_NAME=C.NOMETAB AND D.COLUMN_NAME=C.NOMECAMPO WHERE C.NOMETAB<>'TSIUSU' AND (UPPER(C.DESCRCAMPO) LIKE '%CURVA%' OR UPPER(C.DESCRCAMPO) LIKE '%CLASSIF%ABC%' OR UPPER(C.DESCRCAMPO) LIKE '%ABC%CLIENT%' OR UPPER(C.DESCRCAMPO) LIKE '%CLIENT%ABC%') ORDER BY C.NOMETAB,C.NOMECAMPO,C.NUCAMPO OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`;
+    else if(target==='commission-schema')sql=`SELECT D.TABLE_NAME,D.COLUMN_NAME AS FIELD_NAME,D.DATA_TYPE,D.NULLABLE,C.DESCRCAMPO AS DESCRIPTION,C.NUCAMPO AS FIELD_ID FROM USER_TAB_COLUMNS D LEFT JOIN TDDCAM C ON C.NOMETAB=D.TABLE_NAME AND C.NOMECAMPO=D.COLUMN_NAME WHERE D.TABLE_NAME IN ('TGFCOM','TGFCMF') ORDER BY D.TABLE_NAME,D.COLUMN_NAME OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`;
+    else if(target==='commission-options')sql=`SELECT C.NOMETAB AS TABLE_NAME,C.NOMECAMPO AS FIELD_NAME,C.DESCRCAMPO AS DESCRIPTION,O.VALOR AS CODE_VALUE,O.OPCAO AS OPTION_DESCRIPTION FROM TDDCAM C JOIN TDDOPC O ON O.NUCAMPO=C.NUCAMPO WHERE C.NOMETAB IN ('TGFCOM','TGFCMF','TGFCAB','TGFITE') AND (C.NOMETAB IN ('TGFCOM','TGFCMF') OR C.NOMECAMPO IN ('COMISSAO','VLRCOM')) ORDER BY C.NOMETAB,C.NOMECAMPO,O.VALOR OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`;
+    else if(target==='commission-totals')sql=`SELECT M.CODEMP,M.CODVEND,M.TIPO,COUNT(*) AS SOURCE_ROWS,COUNT(CASE WHEN M.VLRCOM IS NULL THEN 1 END) AS MISSING_AMOUNT,TO_CHAR(SUM(M.VLRCOM),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS NATIVE_AMOUNT FROM TGFCOM M WHERE M.CODEMP IN (1,4) GROUP BY M.CODEMP,M.CODVEND,M.TIPO ORDER BY M.CODEMP,M.CODVEND,M.TIPO OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`;
+    else sql=`SELECT C.CODEMP,COUNT(*) AS ITEM_COUNT,COUNT(CASE WHEN I.VLRCOM IS NULL THEN 1 END) AS MISSING_AMOUNT,COUNT(CASE WHEN I.VLRCOM<>0 THEN 1 END) AS NONZERO_AMOUNT,TO_CHAR(SUM(I.VLRCOM),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS NATIVE_AMOUNT FROM TGFCAB C JOIN TGFITE I ON I.NUNOTA=C.NUNOTA AND I.CODEMP=C.CODEMP JOIN TGFTOP T ON T.CODTIPOPER=C.CODTIPOPER AND T.DHALTER=C.DHTIPOPER WHERE C.CODEMP IN (1,4) AND C.TIPMOV='P' AND C.CODTIPOPER=1001 AND C.CODNAT=10100000 AND C.STATUSNOTA='L' AND T.TIPMOV='P' AND T.BONIFICACAO='N' AND T.GOLDEV=1 GROUP BY C.CODEMP ORDER BY C.CODEMP OFFSET ${offset} ROWS FETCH NEXT 50 ROWS ONLY`;
+    const rows=await gateway.select(sql,50);
+    return{...observation(),supported:true,target,offset,rows,hasMore:rows.length===50,rulesInferred:false,amountsCalculated:false};
+  }
   if (input['section'] === 'pending-sources') {
     keys(input,['kind','section','after']);
     const after=input['after']??'';
