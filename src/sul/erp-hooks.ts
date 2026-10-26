@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
-import { ERPOnlineError, type createERPClient, type ERPPageQuery, type ERPHistoryQuery, type ERPSalesQuery, type ERPBillingQuery, type ERPOrderItemsQuery, type ERPItemSummary, type ERPSalesSummary, type ERPResource, type ERPRow } from '../lib/erp-online';
+import { ERPOnlineError, type createERPClient, type ERPPageQuery, type ERPHistoryQuery, type ERPSalesQuery, type ERPBillingQuery, type ERPOrderItemsQuery, type ERPItemSummary, type ERPSalesSummary, type ERPResource, type ERPRow, type ERPNonBuyersQuery, type ERPNonBuyersSummary } from '../lib/erp-online';
 import { compareERP, foldERPText, type ERPSortKey } from '../lib/erp-order';
 import { paginateERP, type ERPMergedPage } from '../lib/erp-paging';
 import { decimalUnits, formatERPShare } from '../lib/erp-decimal';
 
 export type ERPClient = ReturnType<typeof createERPClient>;
-export type ERPDescriptor = { client: ERPClient; registerExport?: false; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters']; salesParticipation?: boolean; salesReport?: Omit<ERPSalesQuery, 'resource' | 'offset' | 'limit'>; billingReport?: Omit<ERPBillingQuery, 'resource' | 'offset' | 'limit'>; orderItemsReport?: Omit<ERPOrderItemsQuery,'resource'|'offset'|'limit'>; onSummary?: (summary: ERPSalesSummary | undefined, source?: ERPReportSource) => void; onItemsSummary?: (summary: ERPItemSummary | undefined, source?: ERPReportSource) => void };
+export type ERPDescriptor = { client: ERPClient; registerExport?: false; nonBuyersReport?: Omit<ERPNonBuyersQuery,'resource'|'offset'|'limit'>; onNonBuyersSummary?: (summary:ERPNonBuyersSummary|undefined)=>void; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters']; salesParticipation?: boolean; salesReport?: Omit<ERPSalesQuery, 'resource' | 'offset' | 'limit'>; billingReport?: Omit<ERPBillingQuery, 'resource' | 'offset' | 'limit'>; orderItemsReport?: Omit<ERPOrderItemsQuery,'resource'|'offset'|'limit'>; onSummary?: (summary: ERPSalesSummary | undefined, source?: ERPReportSource) => void; onItemsSummary?: (summary: ERPItemSummary | undefined, source?: ERPReportSource) => void };
 export type ERPQueryMetadata = { exportRows: () => Promise<ERPRow[]> };
 export type ERPQueryRef = MutableRefObject<Partial<Record<ERPResource | 'orders' | 'invoices', ERPQueryMetadata>>>;
-type ERPTableQuery = ERPPageQuery | Omit<ERPHistoryQuery, 'offset' | 'limit'> | Omit<ERPSalesQuery, 'offset' | 'limit'> | Omit<ERPBillingQuery, 'offset' | 'limit'>;
+type ERPTableQuery = ERPPageQuery | Omit<ERPHistoryQuery, 'offset' | 'limit'> | Omit<ERPSalesQuery, 'offset' | 'limit'> | Omit<ERPBillingQuery, 'offset' | 'limit'> | Omit<ERPNonBuyersQuery,'offset'|'limit'>;
 export type ERPReportSource = { query: ERPTableQuery; companyCodes: readonly (1 | 4)[] };
 const historyResource = (resource: string | undefined) => resource === 'orders' || resource === 'invoices';
 export function historyPresentation(row: ERPRow): ERPRow {
@@ -18,6 +18,7 @@ export function historyPresentation(row: ERPRow): ERPRow {
   return { ...row, seller: row['sellerName'], type: row['operationName'], payment: payment?.['label'], value: row['total'], delivery: null, agenda: null, freight: null, cargoStatus: null };
 }
 async function tableWindow(descriptor: ERPDescriptor, query: ERPTableQuery, offset: number, limit: number) {
+  if(descriptor.nonBuyersReport)return descriptor.client.nonBuyersReport({...descriptor.nonBuyersReport,...query,resource:'customers',offset,limit});
   const participation = descriptor.salesParticipation;
   if (participation && (descriptor.resource !== 'orders' || query.resource !== 'orders' || descriptor.billingReport || descriptor.orderItemsReport || descriptor.salesReport?.groupBy !== 'customer' || !('groupBy' in query) || query.groupBy !== 'customer')) throw new ERPOnlineError('INVALID_RESPONSE');
   const shareSort = participation && query.sort === 'share';
@@ -56,6 +57,7 @@ function filtered(rows: ERPRow[], _resource: ERPDescriptor['resource'], search: 
   return rows.filter(row => foldERPText(Object.values(row).filter(value => typeof value !== 'object').join(' ')).includes(needle));
 }
 function queryFor(descriptor: ERPDescriptor, search: string, sort: Sort): ERPTableQuery {
+  if(descriptor.nonBuyersReport)return{...descriptor.nonBuyersReport,resource:'customers',search,...(sort?{sort:sort.key as ERPSortKey,direction:sort.dir}:{})};
   if (descriptor.resource === 'orders' || descriptor.resource === 'invoices') {
     // Entrega/carga não foram extraídas: todos os valores são desconhecidos e empatam pelo código.
     const candidate = sort && (['delivery', 'cargoStatus'].includes(sort.key) ? 'code' : sort.key);
@@ -90,7 +92,7 @@ export async function exportERPRows(descriptor: ERPDescriptor, query: ERPTableQu
   assertCurrent();
   if (check.total !== total || check.totalWithoutSearch !== unfiltered || rows.length !== total || summaryKey !== ('summary' in check ? JSON.stringify(check.summary) : undefined)) throw new ERPOnlineError('INVALID_RESPONSE');
   // P/V são universos documentais separados, nunca mesclados a pedidos locais sem vínculo.
-  if (historyResource(descriptor.resource)) return rows;
+  if (historyResource(descriptor.resource) || descriptor.nonBuyersReport) return rows;
   const all = [...locals, ...rows];
   return query.sort ? all.sort(compareERP(query.sort as ERPSortKey, query.direction)) : all;
 }
@@ -98,9 +100,9 @@ export async function exportERPRows(descriptor: ERPDescriptor, query: ERPTableQu
 export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[], search: string, sort: Sort, metadata: ERPQueryRef) {
   const rowsKey = JSON.stringify(rows);
   const client = descriptor?.client, resource = descriptor?.resource;
-  const locals = useMemo(() => historyResource(resource) ? emptyRows : manualRows(rows), [rowsKey, resource]);
+  const locals = useMemo(() => historyResource(resource) || descriptor?.nonBuyersReport ? emptyRows : manualRows(rows), [rowsKey, resource, !!descriptor?.nonBuyersReport]);
   const categoryName = descriptor?.categoryName, customerId = descriptor?.customerId;
-  const scopeKey = JSON.stringify([resource, categoryName, customerId, descriptor?.filters, descriptor?.salesReport, descriptor?.billingReport, descriptor?.orderItemsReport, descriptor?.salesParticipation, rowsKey]);
+  const scopeKey = JSON.stringify([resource, categoryName, customerId, descriptor?.filters, descriptor?.salesReport, descriptor?.billingReport, descriptor?.orderItemsReport, descriptor?.salesParticipation, descriptor?.nonBuyersReport, rowsKey]);
   const baseKey = JSON.stringify([scopeKey, search, sort]);
   const current = useRef({ key: baseKey, client });
   current.current = { key: baseKey, client };
@@ -133,13 +135,15 @@ export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[
   useEffect(() => {
     descriptor?.onSummary?.(undefined);
     descriptor?.onItemsSummary?.(undefined);
+    descriptor?.onNonBuyersSummary?.(undefined);
     if (!descriptor || !query || search !== debounced) return;
-    let alive = true, summary: ERPSalesSummary | undefined, itemsSummary: ERPItemSummary | undefined, source: ERPReportSource | undefined;
+    let alive = true, summary: ERPSalesSummary | undefined, itemsSummary: ERPItemSummary | undefined, nonBuyersSummary: ERPNonBuyersSummary | undefined, source: ERPReportSource | undefined;
     void paginateERP({ localRows: localFiltered, localTotalWithoutSearch: locals.length, skip: (page - 1) * pageSize, pageSize,
       getWindow: async (offset, limit) => {
         const window = await tableWindow(descriptor, query, offset, limit);
         if ('summary' in window) {
-          if(descriptor.orderItemsReport)itemsSummary=window.summary as ERPItemSummary;
+          if(descriptor.nonBuyersReport)nonBuyersSummary=window.summary as ERPNonBuyersSummary;
+          else if(descriptor.orderItemsReport)itemsSummary=window.summary as ERPItemSummary;
           else summary = window.summary as ERPSalesSummary;
           if ('companyCodes' in window) {
             const codes = window.companyCodes;
@@ -157,6 +161,7 @@ export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[
       setResult({ key: requestKey, scope: scopeKey, client: descriptor.client, data });
       descriptor.onSummary?.(summary, source);
       descriptor.onItemsSummary?.(itemsSummary, source);
+      descriptor.onNonBuyersSummary?.(nonBuyersSummary);
     }).catch(error => { if (alive) setResult({ key: requestKey, scope: scopeKey, client: descriptor.client, error: message(error) }); });
     return () => { alive = false; };
   }, [client, requestKey, debounced]);

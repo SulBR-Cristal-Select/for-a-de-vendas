@@ -13,11 +13,12 @@ import { customerReportFilters, localCustomerReportRows, remoteCustomerReport } 
 import { completionOwners, completionRecords, filterCompletions } from './completion-report';
 import { opportunityReportRows, filterOpportunityRows, opportunityReportOwners } from './opportunity-report';
 import { salesReportQuery } from './erp-sales-report';
+import { nonBuyersQuery } from './nonbuyers-report';
 import { useERPSalesChart } from './erp-sales-chart';
 import { useERPProductsChart } from './erp-products-chart';
 import { formatERPAmount, formatERPQuantity } from '../lib/erp-decimal';
 import { ERPCombobox as Sl } from './erp-combobox';
-import type { ERPPrice, ERPRow, ERPSalesSummary, ERPItemSummary } from '../lib/erp-online';
+import type { ERPPrice, ERPRow, ERPSalesSummary, ERPItemSummary, ERPNonBuyersSummary } from '../lib/erp-online';
 import { workspaceERPSeller } from '../lib/erp-identity';
 import './sul.css';
 const He: any = React;
@@ -3020,6 +3021,12 @@ function xz(): any {
 function bz({ id: e }: any): any {
     let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
     const customerReport = e === 'clientes' && !!online;
+    const nonBuyerReport = e === 'nao-compraram' && !!online;
+    const reportMonth=r.f.from?.slice(0,7) || r.f.to?.slice(0,7) || businessDate().slice(0,7);
+    const nonBuyerKey=JSON.stringify([r.f,reportMonth]);
+    const [nonBuyerResult,setNonBuyerResult]=He.useState(undefined);
+    const onNonBuyersSummary=He.useCallback((summary:ERPNonBuyersSummary|undefined)=>setNonBuyerResult({key:nonBuyerKey,summary}),[nonBuyerKey]);
+    const nonBuyerSummary:ERPNonBuyersSummary|undefined=nonBuyerResult?.key===nonBuyerKey?nonBuyerResult.summary:undefined;
     const chartReport = ['resumo','vendas-anterior'].includes(e) && !!online;
     const abcReport = e === 'abc' && !!online;
     const mixReport = e === 'mix' && !!online;
@@ -3046,7 +3053,9 @@ function bz({ id: e }: any): any {
     const managementProducts = He.useMemo(() => managementReport
         ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},registerExport:false}
         : undefined,[online,e,salesKey]);
-    const remote = He.useMemo(() => managementReport
+    const remote = He.useMemo(() => nonBuyerReport
+        ? {client:online,resource:'customers',nonBuyersReport:nonBuyersQuery(r.f,reportMonth),onNonBuyersSummary}
+        : managementReport
         ? {client:online,resource:'orders',salesReport:salesReportQuery(r.f,'cliente')}
         : productReport
         ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},onItemsSummary}
@@ -3058,10 +3067,9 @@ function bz({ id: e }: any): any {
         ? { client: online, resource: 'orders', salesReport: { ...salesReportQuery(r.f, abcReport || mixReport ? 'cliente' : l), ...(mixReport ? {productMix:true} : {}) }, ...(abcReport ? { salesParticipation:true } : {}), onSummary: onSalesSummary }
         : customerReport && remoteCustomerReport(r.f)
         ? { client: online, resource: 'customers', filters: customerReportFilters(r.f) } : undefined,
-        [online, e, l, salesKey, onSalesSummary, onItemsSummary]);
+        [online, e, l, salesKey, onSalesSummary, onItemsSummary,nonBuyerKey,onNonBuyersSummary]);
     if (!n)
         return (0, b.jsx)(Wu, {});
-    const reportMonth=r.f.from?.slice(0,7) || r.f.to?.slice(0,7) || businessDate().slice(0,7);
     let d: any = ['faturados', 'faturamento'].includes(e) ? invoicedOrders(r.rows, t.invoices) : r.rows, m: any = [], p: any = [], y: any = "Dados persistidos no sistema, conforme os filtros selecionados.", C: any = null, x: any = null, v: any = d.filter((h: any) => h.type === "Venda" && h.status === "Conclu\xEDdo");
     if ([
         "resumo",
@@ -3179,7 +3187,7 @@ function bz({ id: e }: any): any {
                 "Metas persistidas por vendedor para " + businessMonthLabel(reportMonth) + "."));
     else if (e === "nao-compraram") {
         let h: any = new Set(v.filter((S:any)=>S.date?.startsWith(reportMonth)).map((S: any) => S.customerId)), mes: any = reportMonth;
-        ((m = t.customers
+        ((m = (nonBuyerReport ? [] : t.customers)
             .filter((S: any) => !S.blocked && (!r.f.seller || S.seller===r.f.seller) && (!r.f.customer || S.id===r.f.customer) && !h.has(S.id))
             .map((S: any) => ({
             id: S.id,
@@ -3199,7 +3207,7 @@ function bz({ id: e }: any): any {
             ]),
             (y =
                 "Clientes da carteira sem pedidos conclu\u00EDdos de venda no m\u00EAs selecionado (use os filtros de Emiss\u00E3o para escolher o m\u00EAs). Total: " +
-                    m.length +
+                    (nonBuyerReport ? nonBuyerSummary?.customerCount ?? pa : m.length) +
                     " cliente(s)."));
     }
     else if (e === "meta-vendedor") {
@@ -3644,7 +3652,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport || productReport || managementReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport || itemReport || productReport || managementReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
+            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport || productReport || managementReport || nonBuyerReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport || itemReport || productReport || managementReport || nonBuyerReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),
