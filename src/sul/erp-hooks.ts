@@ -1,3 +1,4 @@
+import type {ERPReceivablesQuery} from '../lib/erp-receivables';
 import type {ERPCommissionQuery,ERPCommissionSummary} from '../lib/erp-commission';
 import type {ERPStockQuery} from '../lib/erp-stock';
 import type { ERPWalletQuery, ERPWalletSummary } from '../lib/erp-wallet';
@@ -9,10 +10,10 @@ import { paginateERP, type ERPMergedPage } from '../lib/erp-paging';
 import { decimalUnits, formatERPShare } from '../lib/erp-decimal';
 
 export type ERPClient = ReturnType<typeof createERPClient>;
-export type ERPDescriptor = { client: ERPClient; commissionReport?:Omit<ERPCommissionQuery,'resource'|'offset'|'limit'>; onCommissionSummary?:(summary:ERPCommissionSummary|undefined)=>void; registerExport?: false; stockReport?: Omit<ERPStockQuery,'resource'|'offset'|'limit'>; walletReport?: Omit<ERPWalletQuery,'resource'|'offset'|'limit'>; onWalletSummary?: (summary:ERPWalletSummary|undefined)=>void; nonBuyersReport?: Omit<ERPNonBuyersQuery,'resource'|'offset'|'limit'>; onNonBuyersSummary?: (summary:ERPNonBuyersSummary|undefined)=>void; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters']; salesParticipation?: boolean; salesReport?: Omit<ERPSalesQuery, 'resource' | 'offset' | 'limit'>; billedOrdersReport?: Omit<ERPSalesQuery,'resource'|'offset'|'limit'>; billingReport?: Omit<ERPBillingQuery, 'resource' | 'offset' | 'limit'>; orderItemsReport?: Omit<ERPOrderItemsQuery,'resource'|'offset'|'limit'>; onSummary?: (summary: ERPSalesSummary | undefined, source?: ERPReportSource) => void; onItemsSummary?: (summary: ERPItemSummary | undefined, source?: ERPReportSource) => void };
+export type ERPDescriptor = { client: ERPClient; receivablesReport?:Omit<ERPReceivablesQuery,'resource'|'offset'|'limit'>; commissionReport?:Omit<ERPCommissionQuery,'resource'|'offset'|'limit'>; onCommissionSummary?:(summary:ERPCommissionSummary|undefined)=>void; registerExport?: false; stockReport?: Omit<ERPStockQuery,'resource'|'offset'|'limit'>; walletReport?: Omit<ERPWalletQuery,'resource'|'offset'|'limit'>; onWalletSummary?: (summary:ERPWalletSummary|undefined)=>void; nonBuyersReport?: Omit<ERPNonBuyersQuery,'resource'|'offset'|'limit'>; onNonBuyersSummary?: (summary:ERPNonBuyersSummary|undefined)=>void; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters']; salesParticipation?: boolean; salesReport?: Omit<ERPSalesQuery, 'resource' | 'offset' | 'limit'>; billedOrdersReport?: Omit<ERPSalesQuery,'resource'|'offset'|'limit'>; billingReport?: Omit<ERPBillingQuery, 'resource' | 'offset' | 'limit'>; orderItemsReport?: Omit<ERPOrderItemsQuery,'resource'|'offset'|'limit'>; onSummary?: (summary: ERPSalesSummary | undefined, source?: ERPReportSource) => void; onItemsSummary?: (summary: ERPItemSummary | undefined, source?: ERPReportSource) => void };
 export type ERPQueryMetadata = { exportRows: () => Promise<ERPRow[]> };
 export type ERPQueryRef = MutableRefObject<Partial<Record<ERPResource | 'orders' | 'invoices', ERPQueryMetadata>>>;
-type ERPTableQuery = Omit<ERPCommissionQuery,'offset'|'limit'> | Omit<ERPStockQuery,'offset'|'limit'> | Omit<ERPWalletQuery,'offset'|'limit'> | ERPPageQuery | Omit<ERPHistoryQuery, 'offset' | 'limit'> | Omit<ERPSalesQuery, 'offset' | 'limit'> | Omit<ERPBillingQuery, 'offset' | 'limit'> | Omit<ERPNonBuyersQuery,'offset'|'limit'>;
+type ERPTableQuery = Omit<ERPReceivablesQuery,'offset'|'limit'> | Omit<ERPCommissionQuery,'offset'|'limit'> | Omit<ERPStockQuery,'offset'|'limit'> | Omit<ERPWalletQuery,'offset'|'limit'> | ERPPageQuery | Omit<ERPHistoryQuery, 'offset' | 'limit'> | Omit<ERPSalesQuery, 'offset' | 'limit'> | Omit<ERPBillingQuery, 'offset' | 'limit'> | Omit<ERPNonBuyersQuery,'offset'|'limit'>;
 export type ERPReportSource = { query: ERPTableQuery; companyCodes: readonly (1 | 4)[] };
 const historyResource = (resource: string | undefined) => resource === 'orders' || resource === 'invoices';
 export function historyPresentation(row: ERPRow): ERPRow {
@@ -21,6 +22,7 @@ export function historyPresentation(row: ERPRow): ERPRow {
   return { ...row, seller: row['sellerName'], type: row['operationName'], payment: payment?.['label'], value: row['total'], delivery: null, agenda: null, freight: null, cargoStatus: null };
 }
 async function tableWindow(descriptor: ERPDescriptor, query: ERPTableQuery, offset: number, limit: number) {
+  if(descriptor.receivablesReport)return descriptor.client.receivablesReport({...descriptor.receivablesReport,...query,resource:'orders',offset,limit});
   if(descriptor.commissionReport)return descriptor.client.commissionReport({...descriptor.commissionReport,...query,resource:'orders',offset,limit} as ERPCommissionQuery);
   if(descriptor.stockReport)return descriptor.client.stockReport({...descriptor.stockReport,...query,resource:'products',offset,limit});
   if(descriptor.walletReport)return descriptor.client.walletReport({...descriptor.walletReport,...query,view:descriptor.walletReport.view,resource:'customers',offset,limit});
@@ -65,6 +67,7 @@ function filtered(rows: ERPRow[], _resource: ERPDescriptor['resource'], search: 
   return rows.filter(row => foldERPText(Object.values(row).filter(value => typeof value !== 'object').join(' ')).includes(needle));
 }
 function queryFor(descriptor: ERPDescriptor, search: string, sort: Sort): ERPTableQuery {
+  if(descriptor.receivablesReport)return{...descriptor.receivablesReport,resource:'orders',search,...(sort?{sort:sort.key,direction:sort.dir}:{})};
   if(descriptor.commissionReport){const allowed=descriptor.commissionReport.view==='sellers'?['name','value']:['date','number','customer','total','commission'];return{...descriptor.commissionReport,resource:'orders',search,...(sort&&allowed.includes(sort.key)?{sort:sort.key,direction:sort.dir}:{})};}
   if(descriptor.stockReport)return{...descriptor.stockReport,resource:'products',search,...(sort?{sort:sort.key,direction:sort.dir}:{})};
   if(descriptor.walletReport)return{...descriptor.walletReport,resource:'customers',search,...(sort?{sort:sort.key,direction:sort.dir}:{})};
@@ -89,7 +92,7 @@ export async function exportERPRows(descriptor: ERPDescriptor, query: ERPTableQu
     assertCurrent();
     const result = await tableWindow(descriptor, query, offset, 50);
     assertCurrent();
-    const nextSummary = descriptor.billedOrdersReport ? JSON.stringify(['summary' in result?result.summary:null,'billedOrdersSummary' in result?result.billedOrdersSummary:null,'billedOrdersPolicy' in result?result.billedOrdersPolicy:null,'companyCodes' in result?result.companyCodes:null]) : descriptor.commissionReport ? JSON.stringify(['summary' in result?result.summary:null,'commissionPolicy' in result?result.commissionPolicy:null,'companyCodes' in result?result.companyCodes:null]) : descriptor.stockReport ? JSON.stringify(['stockPolicy' in result ? result.stockPolicy : null,'companyCodes' in result ? result.companyCodes : null]) : 'summary' in result ? JSON.stringify(result.summary) : undefined;
+    const nextSummary = descriptor.receivablesReport ? JSON.stringify(['summary' in result?result.summary:null,'receivablesPolicy' in result?result.receivablesPolicy:null,'companyCodes' in result?result.companyCodes:null]) : descriptor.billedOrdersReport ? JSON.stringify(['summary' in result?result.summary:null,'billedOrdersSummary' in result?result.billedOrdersSummary:null,'billedOrdersPolicy' in result?result.billedOrdersPolicy:null,'companyCodes' in result?result.companyCodes:null]) : descriptor.commissionReport ? JSON.stringify(['summary' in result?result.summary:null,'commissionPolicy' in result?result.commissionPolicy:null,'companyCodes' in result?result.companyCodes:null]) : descriptor.stockReport ? JSON.stringify(['stockPolicy' in result ? result.stockPolicy : null,'companyCodes' in result ? result.companyCodes : null]) : 'summary' in result ? JSON.stringify(result.summary) : undefined;
     if (total !== undefined && (total !== result.total || unfiltered !== result.totalWithoutSearch || summaryKey !== nextSummary)) throw new ERPOnlineError('INVALID_RESPONSE');
     total = result.total; unfiltered = result.totalWithoutSearch; summaryKey = nextSummary;
     for (const row of result.items) {
@@ -101,7 +104,7 @@ export async function exportERPRows(descriptor: ERPDescriptor, query: ERPTableQu
   // Verifica a contagem novamente antes de permitir criar o arquivo.
   const check = await tableWindow(descriptor, query, 0, 1);
   assertCurrent();
-  if (check.total !== total || check.totalWithoutSearch !== unfiltered || rows.length !== total || summaryKey !== (descriptor.billedOrdersReport ? JSON.stringify(['summary' in check?check.summary:null,'billedOrdersSummary' in check?check.billedOrdersSummary:null,'billedOrdersPolicy' in check?check.billedOrdersPolicy:null,'companyCodes' in check?check.companyCodes:null]) : descriptor.commissionReport ? JSON.stringify(['summary' in check?check.summary:null,'commissionPolicy' in check?check.commissionPolicy:null,'companyCodes' in check?check.companyCodes:null]) : descriptor.stockReport ? JSON.stringify(['stockPolicy' in check ? check.stockPolicy : null,'companyCodes' in check ? check.companyCodes : null]) : 'summary' in check ? JSON.stringify(check.summary) : undefined)) throw new ERPOnlineError('INVALID_RESPONSE');
+  if (check.total !== total || check.totalWithoutSearch !== unfiltered || rows.length !== total || summaryKey !== (descriptor.receivablesReport ? JSON.stringify(['summary' in check?check.summary:null,'receivablesPolicy' in check?check.receivablesPolicy:null,'companyCodes' in check?check.companyCodes:null]) : descriptor.billedOrdersReport ? JSON.stringify(['summary' in check?check.summary:null,'billedOrdersSummary' in check?check.billedOrdersSummary:null,'billedOrdersPolicy' in check?check.billedOrdersPolicy:null,'companyCodes' in check?check.companyCodes:null]) : descriptor.commissionReport ? JSON.stringify(['summary' in check?check.summary:null,'commissionPolicy' in check?check.commissionPolicy:null,'companyCodes' in check?check.companyCodes:null]) : descriptor.stockReport ? JSON.stringify(['stockPolicy' in check ? check.stockPolicy : null,'companyCodes' in check ? check.companyCodes : null]) : 'summary' in check ? JSON.stringify(check.summary) : undefined)) throw new ERPOnlineError('INVALID_RESPONSE');
   // P/V são universos documentais separados, nunca mesclados a pedidos locais sem vínculo.
   if (historyResource(descriptor.resource) || descriptor.nonBuyersReport || descriptor.walletReport || descriptor.stockReport) return rows;
   const all = [...locals, ...rows];
@@ -113,7 +116,7 @@ export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[
   const client = descriptor?.client, resource = descriptor?.resource;
   const locals = useMemo(() => historyResource(resource) || descriptor?.nonBuyersReport || descriptor?.walletReport || descriptor?.stockReport ? emptyRows : manualRows(rows), [rowsKey, resource, !!descriptor?.nonBuyersReport, !!descriptor?.walletReport, !!descriptor?.stockReport]);
   const categoryName = descriptor?.categoryName, customerId = descriptor?.customerId;
-  const scopeKey = JSON.stringify([resource, categoryName, customerId, descriptor?.filters, descriptor?.salesReport, descriptor?.billingReport, descriptor?.billedOrdersReport, descriptor?.orderItemsReport, descriptor?.salesParticipation, descriptor?.nonBuyersReport, descriptor?.walletReport, descriptor?.stockReport, descriptor?.commissionReport, rowsKey]);
+  const scopeKey = JSON.stringify([resource, categoryName, customerId, descriptor?.filters, descriptor?.salesReport, descriptor?.billingReport, descriptor?.billedOrdersReport, descriptor?.receivablesReport, descriptor?.orderItemsReport, descriptor?.salesParticipation, descriptor?.nonBuyersReport, descriptor?.walletReport, descriptor?.stockReport, descriptor?.commissionReport, rowsKey]);
   const baseKey = JSON.stringify([scopeKey, search, sort]);
   const current = useRef({ key: baseKey, client });
   current.current = { key: baseKey, client };

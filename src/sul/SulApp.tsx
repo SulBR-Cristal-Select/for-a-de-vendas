@@ -382,9 +382,9 @@ function w5(e: any): any {
             ((!o.from || l.date >= o.from) && (!o.to || l.date <= o.to))));
     return { open: t, setOpen: a, f: o, setF: n, rows: r };
 }
-function E5({ filter: e, rows: t, customerReport = false, salesReport = false, billingReport = false, localOwners }: any): any {
+function E5({ filter: e, rows: t, customerReport = false, salesReport = false, billingReport = false, receivablesReport = false, localOwners }: any): any {
     let { db: a, online } = qa(), [o, n] = (0, He.useState)(e.f);
-    const remoteFilters = customerReport || salesReport;
+    const remoteFilters = customerReport || salesReport || receivablesReport;
     const lookups = useERPCustomerReportLookups(remoteFilters && e.open ? online : undefined, o.customer || '', o.seller || '');
     const lookupError = lookups.customers.error || lookups.sellers.error;
     (0, He.useEffect)(() => { if (lookupError) go(lookupError); }, [lookupError]);
@@ -396,7 +396,7 @@ function E5({ filter: e, rows: t, customerReport = false, salesReport = false, b
         open: e.open,
         onClose: () => e.setOpen(!1),
         title: "Filtros",
-        kicker: billingReport ? "Consulta ERP" : "Consulta local",
+        kicker: billingReport || receivablesReport ? "Consulta ERP" : "Consulta local",
         footer: (0, b.jsxs)(b.Fragment, {
             children: [
                 (0, b.jsx)(xt, {
@@ -422,7 +422,7 @@ function E5({ filter: e, rows: t, customerReport = false, salesReport = false, b
                     placeholder: "Todos os clientes",
                     value: o.customer,
                     onValueChange: (l: any) => r("customer", l),
-                    options: (salesReport ? lookups.customers.rows : customerReport ? [...manualRows(a.customers), ...lookups.customers.rows] : a.customers).map((l: any) => ({
+                    options: (salesReport || receivablesReport ? lookups.customers.rows : customerReport ? [...manualRows(a.customers), ...lookups.customers.rows] : a.customers).map((l: any) => ({
                         value: l.id,
                         label: l.name + " (" + l.code + ")",
                     })),
@@ -447,7 +447,7 @@ function E5({ filter: e, rows: t, customerReport = false, salesReport = false, b
                     options: La(["", ...new Set(t.map((l: any) => l.status).filter(Boolean))]),
                 }),
                 (0, b.jsx)(Xt, {
-                    children: billingReport ? "Os filtros consultam as notas fiscais do ERP." : "Os filtros consultam os registros salvos na SulBR.",
+                    children: receivablesReport ? "Os filtros consultam recebíveis no ERP; baixa registrada não comprova quitação integral." : billingReport ? "Os filtros consultam as notas fiscais do ERP." : "Os filtros consultam os registros salvos na SulBR.",
                 }),
             ],
         }),
@@ -3035,6 +3035,7 @@ function xz(): any {
 }
 function bz({ id: e }: any): any {
     let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
+    const receivablesReport=e==='titulos'&&!!online;
     const customerReport = e === 'clientes' && !!online;
     const nonBuyerReport = e === 'nao-compraram' && !!online;
     const walletReport = ['carteira-vendedor','positivacao'].includes(e) && !!online;
@@ -3080,7 +3081,9 @@ function bz({ id: e }: any): any {
     const managementProducts = He.useMemo(() => managementReport
         ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},registerExport:false}
         : undefined,[online,e,salesKey]);
-    const remote = He.useMemo(() => commissionReport
+    const remote = He.useMemo(() => receivablesReport
+        ? (()=>{const {status:_ignored,...filters}=salesReportQuery(r.f,'nenhum');return{client:online,resource:'orders',receivablesReport:{...filters,...(r.f.status?{settlement:r.f.status==='Baixa registrada'?'registrada':r.f.status==='Sem baixa registrada'?'sem-registro':'invalid'}:{})}};})()
+        : commissionReport
         ? {client:online,resource:'orders',commissionReport:{...salesReportQuery(r.f,'nenhum'),view:e==='comissoes'?'sellers':'orders'},onCommissionSummary}
         : stockReport
         ? {client:online,resource:'products',stockReport:{}}
@@ -3355,9 +3358,9 @@ function bz({ id: e }: any): any {
                 (y =
                     "Oportunidades persistidas no funil, conforme os filtros selecionados."))
             : e === "titulos"
-                ? ((m = t.titles),
+                ? ((m = receivablesReport?[]:t.titles),
                     (p = [
-                        z("customer", "Raz\xE3o social", (h: any) => Un(t, h.customerId), {
+                        z("customer", "Raz\xE3o social", (h: any) => receivablesReport?h.customerName??pa:Un(t, h.customerId), {
                             primary: !0,
                             wide: !0,
                         }),
@@ -3628,6 +3631,7 @@ function bz({ id: e }: any): any {
                 }),
             ],
         });
+    if(receivablesReport)y='Receitas não provisionadas TGFFIN (RECDESP=1/PROVISAO=N), dos clientes no escopo atual. Valor do título é VLRDESDOB nativo, não saldo em aberto. Situação indica apenas presença de DHBAIXA: não comprova quitação integral, atraso ou valor pago. Período por vencimento DTVENC, sem fallback; documentos não são somados às vendas. Somente leitura.';
     if(commissionReport){
         m=[]; C=null; x=null;
         p=e==='comissoes'?[z('name','Vendedor',void 0,{primary:true}),z('value','Comissão',(h:any)=>rt(h.value))]:[z('date','Emissão',(h:any)=>xo(h.date)),z('number','Pedido',void 0,{primary:true}),z('customer','Razão social',(h:any)=>h.customerName,{wide:true}),z('total','Total do pedido',(h:any)=>rt(h.total)),z('commission','Comissão (R$)',(h:any)=>rt(h.commission))];
@@ -3658,7 +3662,7 @@ function bz({ id: e }: any): any {
         children: [
             (0, b.jsx)(Ua, {
                 title: n.name,
-                description: billedOrdersReport ? "Pedidos padrão com notas fiscais aprovadas, inclusive faturamento parcial" : commissionReport ? "Consulta à comissão nativa no Sankhya, sem comprovação de pagamento" : stockReport ? "Consulta ao estoque registrado no Sankhya" : walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
+                description: receivablesReport ? "Recebíveis nativos no Sankhya, sem geração ou baixa financeira" : billedOrdersReport ? "Pedidos padrão com notas fiscais aprovadas, inclusive faturamento parcial" : commissionReport ? "Consulta à comissão nativa no Sankhya, sem comprovação de pagamento" : stockReport ? "Consulta ao estoque registrado no Sankhya" : walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
                 back: { label: "Relat\xF3rios", to: "/relatorios" },
                 actions: (0, b.jsx)(Gp, {
                     rows: csvRows(m, p.filter((h: any) => !h.action)),
@@ -3711,7 +3715,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport || productReport || managementReport || nonBuyerReport || walletReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport || itemReport || productReport || managementReport || nonBuyerReport || walletReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
+            (0, b.jsx)(E5, { filter: r, rows: receivablesReport ? ['Sem baixa registrada','Baixa registrada'].map(status=>({status})) : completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport || productReport || managementReport || nonBuyerReport || walletReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, receivablesReport, salesReport:commercialReport || itemReport || productReport || managementReport || nonBuyerReport || walletReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),
