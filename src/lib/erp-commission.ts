@@ -1,7 +1,7 @@
 type ERPRow=Record<string,unknown>;
 import { erpDecimal, sumERPDecimals } from './erp-decimal';
 export type ERPCommissionQuery={resource:'orders';view:'sellers'|'orders';offset:number;limit:number;search?:string;sort?:string;direction?:'asc'|'desc';customerId?:string;sellerCode?:number;from?:string;to?:string;status?:'confirmado'};
-export const COMMISSION_POLICY={amountField:'TGFCOM.VLRCOM',sellerField:'TGFCOM.CODVEND',originField:'TGFCOM.NUNOTAORIG',dateField:'TGFCAB.DTNEG',period:'origin-emission',allocation:'unique-standard-order-or-unassigned',returnsPreserved:true,calculatedCommission:false,paid:false,atomicSnapshot:false} as const;
+export const COMMISSION_POLICY={amountField:'TGFCOM.VLRCOM',sellerField:'TGFCOM.CODVEND',originField:'TGFCOM.NUNOTAORIG',dateField:'TGFCAB.DTNEG',period:'origin-emission',allocation:'unique-standard-order-or-unassigned',originQualification:'standard-sales-or-qualified-billing',nativeAmountsPreserved:true,calculatedCommission:false,paid:false,atomicSnapshot:false} as const;
 export type ERPCommissionSummary={entryCount:number;missingAmountCount:number;amount:string|null;unassignedEntryCount:number;unassignedAmount:string|null};
 export type ERPCommissionWindow={source:'sankhya';readOnly:true;readAt:string;items:ERPRow[];offset:number;total:number;totalWithoutSearch:number;view:'sellers'|'orders';companyCodes:(1|4)[];commissionPolicy:typeof COMMISSION_POLICY;summary:ERPCommissionSummary};
 const obj=(v:unknown):v is ERPRow=>!!v&&typeof v==='object'&&!Array.isArray(v);

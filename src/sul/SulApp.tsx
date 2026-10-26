@@ -3628,8 +3628,8 @@ function bz({ id: e }: any): any {
     if(commissionReport){
         m=[]; C=null; x=null;
         p=e==='comissoes'?[z('name','Vendedor',void 0,{primary:true}),z('value','Comissão',(h:any)=>rt(h.value))]:[z('date','Emissão',(h:any)=>xo(h.date)),z('number','Pedido',void 0,{primary:true}),z('customer','Razão social',(h:any)=>h.customerName,{wide:true}),z('total','Total do pedido',(h:any)=>rt(h.total)),z('commission','Comissão (R$)',(h:any)=>rt(h.commission))];
-        y='Comissões nativas TGFCOM.VLRCOM, inclusive devoluções, pelo código do beneficiário. Período: emissão da origem da comissão; não é referência, fechamento nem pagamento. Nenhum percentual é aplicado.';
-        if(e==='comissoes-pedido')y+=' Um pedido só é identificado por vínculo inequívoco com a venda padrão. As demais origens permanecem como Não atribuído, sem rateio ou total de pedido presumido.';
+        y='Comissões nativas TGFCOM.VLRCOM da venda padrão e de suas notas qualificadas, pelo código do beneficiário. Não é o total geral do livro de comissões. Período: emissão da origem da comissão; não é referência, fechamento nem pagamento. Nenhum percentual é aplicado.';
+        if(e==='comissoes-pedido')y+=' Um pedido só é identificado por vínculo inequívoco com a venda padrão. Notas qualificadas com mais de um pedido permanecem como Não atribuído, sem rateio ou total de pedido presumido.';
         if(commissionSummary)y+=' Lançamentos no recorte: '+na(commissionSummary.entryCount)+'; sem vínculo inequívoco a pedido padrão: '+na(commissionSummary.unassignedEntryCount)+'.';
     }
     if(stockReport){
