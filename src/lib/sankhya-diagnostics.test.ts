@@ -154,3 +154,10 @@ describe('Diagnóstico comercial fixo e somente leitura', () => {
     expect(g.select).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('fontes restantes: qualificação nativa restrita, sem valores comerciais',()=>{
+ it('consulta somente estrutura e descrições das fontes fixas',async()=>{const fields=[{TABLE_NAME:'TGFEST',COLUMN_NAME:'ESTOQUE',DATA_TYPE:'NUMBER',DESCRIPTION:'Estoque',FIELD_ID:1}];const g={select:vi.fn().mockResolvedValueOnce(dictionaryColumns).mockResolvedValueOnce(fields)};expect(await readCommercialDictionary(g,{kind:'analytics',section:'pending-sources'},admin)).toMatchObject({fields,hasMore:false,valuesQueried:false,rulesInferred:false});const sql=g.select.mock.calls[1]?.[0];expect(sql).toContain('FROM USER_TAB_COLUMNS D LEFT JOIN TDDCAM C');expect(sql).toContain("'TGFFIN','TGFCOM','TGFCMF','TGFEST'");expect(sql).not.toMatch(/TSIUSU|INTERNO|SELECT \*|FROM TGFFIN|FROM TGFEST/);expect(g.select.mock.calls.every(([,limit])=>limit<=50)).toBe(true);});
+ it('pagina por cursor técnico, sem tabela ou SQL fornecidos pelo navegador',async()=>{const fields=Array.from({length:50},(_,n)=>({TABLE_NAME:'TGFFIN',COLUMN_NAME:'CAMPO'+n}));const g={select:vi.fn().mockResolvedValueOnce(dictionaryColumns).mockResolvedValueOnce(fields)};expect(await readCommercialDictionary(g,{kind:'analytics',section:'pending-sources',after:'TGFCOM.CODVEND'},admin)).toMatchObject({next:'TGFFIN.CAMPO49',hasMore:true});expect(g.select.mock.calls[1]?.[0]).toContain("D.TABLE_NAME||'.'||D.COLUMN_NAME>'TGFCOM.CODVEND'");});
+ it.each([{sql:'SELECT 1'},{table:'TSIUSU'},{after:"X' OR 1=1"}])('recusa desvio: %j',async patch=>{const g={select:vi.fn()};await expect(readCommercialDictionary(g,{kind:'analytics',section:'pending-sources',...patch},admin)).rejects.toBeDefined();expect(g.select).not.toHaveBeenCalled();});
+ it('ausência da estrutura do dicionário não vira fonte vazia ou regra confirmada',async()=>{const g={select:vi.fn().mockResolvedValue([])};await expect(readCommercialDictionary(g,{kind:'analytics',section:'pending-sources'},admin)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});});
+});

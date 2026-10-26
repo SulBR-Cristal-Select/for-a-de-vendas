@@ -70,6 +70,18 @@ export async function readCommercialDiagnostic(gateway: Transport, value: unknow
   }
   if (input['kind'] !== 'analytics') return invalid();
   if (input['section'] === 'billing') return readBillingDiagnostic(gateway, input);
+  if (input['section'] === 'pending-sources') {
+    keys(input,['kind','section','after']);
+    const after=input['after']??'';
+    if(typeof after!=='string'||!/^(?:[A-Z0-9_]{1,40}\.[A-Z0-9_]{1,40})?$/.test(after))return invalid();
+    const cursor=after?` AND D.TABLE_NAME||'.'||D.COLUMN_NAME>'${after}'`:'';
+    // Apenas estrutura e descrições. Nenhum saldo, título, comissão ou cadastro é
+    // inferido da existência de uma coluna; não há tabela/campo escolhido pelo cliente.
+    await requireDictionary(gateway);
+    const fields=await gateway.select(`SELECT D.TABLE_NAME,D.COLUMN_NAME,D.DATA_TYPE,D.NULLABLE,C.DESCRCAMPO AS DESCRIPTION,C.NUCAMPO AS FIELD_ID FROM USER_TAB_COLUMNS D LEFT JOIN TDDCAM C ON C.NOMETAB=D.TABLE_NAME AND C.NOMECAMPO=D.COLUMN_NAME WHERE D.TABLE_NAME IN ('TGFFIN','TGFCOM','TGFCMF','TGFEST','TGFCAB','TGFITE','TGFPAR','TGFPRO') AND (D.COLUMN_NAME IN ('NUFIN','CODEMP','CODVEND','CODPARC','NUNOTA','DTNEG','DTVENC','DHBAIXA','VLRDESDOB','VLRBAIXA','RECDESP','PROVISAO','SEQUENCIA','CODPROD','CODLOCAL','CONTROLE','ESTOQUE','RESERVADO','DISPONIVEL','TIPO','VLRCOM','VLRREP','VLRSELLER') OR D.COLUMN_NAME LIKE '%COMIS%' OR D.COLUMN_NAME LIKE '%ABC%' OR D.COLUMN_NAME LIKE '%CURVA%')${cursor} ORDER BY D.TABLE_NAME,D.COLUMN_NAME FETCH FIRST 50 ROWS ONLY`,50);
+    const last=fields.at(-1);
+    return{...observation(),supported:true,fields,next:fields.length===50&&last?`${last['TABLE_NAME']}.${last['COLUMN_NAME']}`:null,hasMore:fields.length===50,valuesQueried:false,rulesInferred:false};
+  }
   if (input['section'] === 'metadata') {
     keys(input, ['kind', 'section', 'after']);
     const after = input['after'] ?? '';
