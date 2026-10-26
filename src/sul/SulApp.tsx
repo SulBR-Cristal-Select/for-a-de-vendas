@@ -3028,6 +3028,7 @@ function bz({ id: e }: any): any {
     const commercialReport = salesReport || billingReport;
     const itemReport = e === 'produtos-pedido' && !!online;
     const productReport = e === 'produtos' && !!online;
+    const managementReport = e === 'gerencial' && !!online;
     const completionReport = e === 'tarefas';
     const opportunityReport = e === 'funil';
     const localRecordReport = completionReport || opportunityReport;
@@ -3042,7 +3043,12 @@ function bz({ id: e }: any): any {
     const [productResult,setProductResult]=He.useState(undefined);
     const onItemsSummary=He.useCallback((summary:ERPItemSummary|undefined,source?:ERPReportSource)=>setProductResult({key:salesKey,summary,source}),[salesKey]);
     const productChart=useERPProductsChart(online,productReport&&productResult?.key===salesKey?productResult:undefined);
-    const remote = He.useMemo(() => productReport
+    const managementProducts = He.useMemo(() => managementReport
+        ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},registerExport:false}
+        : undefined,[online,e,salesKey]);
+    const remote = He.useMemo(() => managementReport
+        ? {client:online,resource:'orders',salesReport:salesReportQuery(r.f,'cliente')}
+        : productReport
         ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},onItemsSummary}
         : itemReport
         ? {client:online,resource:'orders',orderItemsReport:salesReportQuery(r.f,'nenhum')}
@@ -3265,7 +3271,7 @@ function bz({ id: e }: any): any {
     }
     else if (e === "gerencial") {
         let h: any = {};
-        (d.forEach((S: any) => {
+        (!managementReport && d.forEach((S: any) => {
             let L: any = (h[S.customerId] ||= {
                 id: S.customerId,
                 name: Un(t, S.customerId),
@@ -3281,11 +3287,12 @@ function bz({ id: e }: any): any {
             (C = (0, b.jsx)(cs, {
                 title: "Produtos com itens extra\xEDdos",
                 children: (0, b.jsx)(ya, {
-                    rows: dv(t, d),
+                    rows: managementReport ? [] : dv(t, d),
+                    remote: managementProducts,
                     toolbar: !1,
                     columns: [
                         z("name", "Produto", void 0, { primary: !0 }),
-                        z("qty", "Quantidade"),
+                        z("qty", "Quantidade", managementReport ? (h:any) => h.qty ?? pa : undefined),
                     ],
                 }),
             })));
@@ -3637,7 +3644,7 @@ function bz({ id: e }: any): any {
                     ],
                 }),
             }),
-            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport || productReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport || itemReport || productReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
+            (0, b.jsx)(E5, { filter: r, rows: completionReport ? completions : opportunityReport ? opportunities : commercialReport || itemReport || productReport || managementReport ? [{ status: 'confirmado' }] : customerReport ? ['S', 'N'].map(status => ({ status })) : t.orders, customerReport, salesReport:commercialReport || itemReport || productReport || managementReport, billingReport, localOwners: completionReport ? completionOwners(completions, t.users) : opportunityReport ? opportunityReportOwners(opportunities, t.users) : undefined }),
             (0, b.jsx)(gb, {
                 open: i,
                 onClose: () => u(!1),
