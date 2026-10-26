@@ -1,3 +1,5 @@
+import {billedOrderSQL,billedOrderSource} from './billed-orders-source.ts';
+import {BILLED_ORDERS_POLICY} from '../../../src/lib/erp-billed-orders.ts';
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
 import { scopeOf, sellerAllowed, sellerPredicate, type ReadScope } from './read-model.ts';
 import { foldERPText } from '../../../src/lib/erp-order.ts';
@@ -175,11 +177,16 @@ function salesSummary(row: Row | undefined) {
 }
 
 /** Relatório fixo de venda padrão. Não amplia o histórico genérico nem aceita SQL do navegador. */
+const commercialFromSQL=fromSQL;
 export async function readSalesReport(gateway: Transport, input: SalesReportInput, scope: ReadScope) { return readCommercialReport(gateway,input,scope,false); }
 export async function readBillingReport(gateway: Transport, input: BillingReportInput, scope: ReadScope) { return readCommercialReport(gateway,input,scope,true); }
-async function readCommercialReport(gateway: Transport, input: CommercialReportInput, scope: ReadScope, billing: boolean) {
+export async function readBilledOrdersReport(gateway:Transport,input:SalesReportInput,scope:ReadScope){return readCommercialReport(gateway,input,scope,false,true);}
+async function readCommercialReport(gateway: Transport, input: CommercialReportInput, scope: ReadScope, billing: boolean, billed=false) {
+  let fromSQL=commercialFromSQL,prefix='';
+  const read=async(stage:string,sql:string,limit:number)=>{try{return await gateway.select(prefix?prefix+' '+sql:sql,limit);}catch(e){if(billed&&e instanceof SankhyaError)throw new SankhyaError(e.code,e.message,e.status,e.upstreamStatus,{kind:'billed-orders-query-stage',fields:[],hint:stage});throw e;}};
+  const dataGateway={select:(sql:string,limit:number)=>read('group-count',sql,limit)};
   keys(input, ['resource','offset','limit','customerId','sellerCode','status','search','sort','direction','from','to','companyCode','groupBy','productMix']);
-  if (input.resource !== (billing ? 'invoices' : 'orders') || input.groupBy !== undefined && !['seller','customer'].includes(input.groupBy) || input.status !== undefined && input.status !== 'confirmado' || input.productMix !== undefined && (input.productMix !== true || billing || input.groupBy !== 'customer')) return invalid();
+  if (input.resource !== (billing ? 'invoices' : 'orders') || input.groupBy !== undefined && !['seller','customer'].includes(input.groupBy) || input.status !== undefined && input.status !== 'confirmado' || input.productMix !== undefined && (input.productMix !== true || billing || billed || input.groupBy !== 'customer')) return invalid();
   const mix = input.productMix === true;
   const allowed = scopeOf(scope), page = windowOf(input.offset, input.limit), policy = STANDARD_SALES_REPORT_POLICY, bp = STANDARD_BILLING_REPORT_POLICY, movement = billing ? 'V' : 'P', dateField = billing ? 'DTFATUR' : 'DTNEG';
   let companies = allowed.companies;
@@ -191,7 +198,8 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
   const group = input.groupBy, sort = input.sort ?? (group ? 'name' : 'date'), direction = input.direction ?? (group ? 'asc' : 'desc');
   const groupCode = group === 'seller' ? 'C.CODVEND' : 'C.CODPARC', groupName = group === 'seller' ? 'V.APELIDO' : 'P.RAZAOSOCIAL';
   const groupSorts: Record<string,string> = mix ? { name:foldSQL('C.RAZAOSOCIAL'),qty:'PRODUCT_COUNT',total:'SUM(C.VLRNOTA)' } : { name: foldSQL(groupName), count: 'COUNT(*)', total: 'SUM(C.VLRNOTA)' };
-  const reportSorts = billing ? { ...sorts,date:'C.DTFATUR',number:'C.NUNOTA',nf:'C.NUMNOTA',invoiced:'C.VLRNOTA' } : sorts;
+  const billedSQL=billed?billedOrderSQL():undefined;
+  const reportSorts = billedSQL?{...sorts,nf:billedSQL.labels,invoiced:billedSQL.amount}:billing ? { ...sorts,date:'C.DTFATUR',number:'C.NUNOTA',nf:'C.NUMNOTA',invoiced:'C.VLRNOTA' } : sorts;
   if (typeof sort !== 'string' || !Object.hasOwn(group ? groupSorts : reportSorts, sort) || !['asc','desc'].includes(direction)) return invalid();
   const start = dateInput(input.from), end = dateInput(input.to), search = searchText(input.search);
   if (start && end && start > end) return invalid();
@@ -202,8 +210,8 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
     if (!sellerAllowed(allowed, selected)) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Vendedor fora do escopo autorizado.', 403);
     candidate.push(`C.CODVEND=${selected}`);
   }
-  if (start) candidate.push(`C.${dateField}>=TO_DATE(${literal(start)},'YYYY-MM-DD')`);
-  if (end) candidate.push(`C.${dateField}<TO_DATE(${literal(end)},'YYYY-MM-DD')+1`);
+  if (start&&!billed) candidate.push(`C.${dateField}>=TO_DATE(${literal(start)},'YYYY-MM-DD')`);
+  if (end&&!billed) candidate.push(`C.${dateField}<TO_DATE(${literal(end)},'YYYY-MM-DD')+1`);
   const required: Record<string, Record<string,string>> = {
     TGFCAB: { CODEMP:'NUMBER',NUNOTA:'NUMBER',CODTIPOPER:'NUMBER',DHTIPOPER:'DATE',CODNAT:'NUMBER',DTNEG:'DATE',TIPMOV:'text',STATUSNOTA:'text',VLRNOTA:'amount',CODPARC:'NUMBER',CODVEND:'NUMBER' },
     TGFTOP: { CODTIPOPER:'NUMBER',DHALTER:'DATE',TIPMOV:'text',BONIFICACAO:'text',GOLDEV:'NUMBER' },
@@ -213,27 +221,29 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
     required['TGFITE'] = {NUNOTA:'NUMBER',CODEMP:'NUMBER',CODPROD:'NUMBER'};
     required['TGFPAR']!['RAZAOSOCIAL'] = 'text';
   }
-  if (billing) {
+  if (billing||billed) {
     for (const [table,columns] of Object.entries(BILLING_COLUMNS)) required[table] = { ...required[table],...columns };
     required['TGFCAB']!['VLRNOTA'] = 'amount';
   }
+  if(billed)required['TGFCAB']!['NUMNOTA']='NUMBER';
   const metadataWhere = Object.entries(required).map(([table, columns]) => `(TABLE_NAME='${table}' AND COLUMN_NAME IN (${Object.keys(columns).map(literal).join(',')}))`).join(' OR ');
-  const metadata = await gateway.select(`SELECT TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE ${metadataWhere} ORDER BY TABLE_NAME,COLUMN_NAME FETCH FIRST 50 ROWS ONLY`, 50);
+  const metadata = await read('metadata',`SELECT TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE ${metadataWhere} ORDER BY TABLE_NAME,COLUMN_NAME FETCH FIRST 50 ROWS ONLY`, 50);
   for (const [table, columns] of Object.entries(required)) for (const [name, type] of Object.entries(columns)) {
     if (!metadata.some(r => r['TABLE_NAME'] === table && r['COLUMN_NAME'] === name && (type === 'text' ? ['CHAR','VARCHAR2','NCHAR','NVARCHAR2'].includes(String(r['DATA_TYPE'])) : type === 'amount' ? ['NUMBER','FLOAT'].includes(String(r['DATA_TYPE'])) : r['DATA_TYPE'] === type))) return unsupportedSales();
   }
   const invalidTop = billing
     ? "T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'V' OR T.GOLSINAL IS NULL OR T.GOLSINAL NOT IN (-1,0,1) OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1)"
     : "T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'P' OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1)";
-  const missing = await gateway.select(`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} WHERE ${candidate.join(' AND ')} AND (${invalidTop})`, 1);
+  const missing = await read('source-context',`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} WHERE ${candidate.join(' AND ')} AND (${invalidTop})`, 1);
   if (missing.length !== 1) return incompatible();
   if (salesCount(missing[0], 'MISSING_CONTEXT_COUNT') !== 0) return unsupportedSales();
   const commercial = billing ? [`T.TIPMOV='V'`,`T.GOLSINAL=${bp.salesSignal}`,`T.BONIFICACAO='${bp.bonification}'`,`T.GOLDEV=${bp.devolution}`] : [`T.TIPMOV='${policy.movement}'`, `T.BONIFICACAO='${policy.bonification}'`, `T.GOLDEV=${policy.devolution}`];
   const withoutSearch = [...candidate, ...commercial];
+  if(billed){const source=billedOrderSource(commercialFromSQL,withoutSearch,start,end);prefix=source.cte;fromSQL=source.from;}
   if (billing) {
     const f = billingOriginFlags('C');
     const uncertainty = `(${f.HAS_UNRESOLVED_ORIGIN}) OR ((${f.HAS_STANDARD_ORIGIN}) AND ((${f.HAS_OTHER_ORIGIN}) OR (${f.HAS_UNLINKED_ITEM}) OR NOT (${f.HAS_ITEMS}) OR (${f.HAS_CROSS_COMPANY_ORIGIN}) OR C.VLRNOTA IS NULL))`;
-    const unknown = await gateway.select(`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} WHERE ${withoutSearch.join(' AND ')} AND (${uncertainty})`,1);
+    const unknown = await read('billing-integrity',`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} WHERE ${withoutSearch.join(' AND ')} AND (${uncertainty})`,1);
     if (unknown.length !== 1) return incompatible();
     if (salesCount(unknown[0],'MISSING_CONTEXT_COUNT') !== 0) return unsupportedSales();
     withoutSearch.push(`(${f.HAS_STANDARD_ORIGIN})`,`NOT (${f.HAS_OTHER_ORIGIN})`,`NOT (${f.HAS_UNRESOLVED_ORIGIN})`,`NOT (${f.HAS_UNLINKED_ITEM})`,`(${f.HAS_ITEMS})`,`NOT (${f.HAS_CROSS_COMPANY_ORIGIN})`);
@@ -243,19 +253,23 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
     const term = literal('%' + foldERPText(search).replace(/[!%_]/g, c => '!' + c) + '%');
     where.push(`(${['TO_CHAR(C.NUNOTA)','TO_CHAR(C.NUMNOTA)','P.RAZAOSOCIAL','V.APELIDO','T.DESCROPER','C.STATUSNOTA'].map(f => `${foldSQL(f)} LIKE ${term} ESCAPE '!'`).join(' OR ')})`);
   }
-  const summaryRows = await gateway.select(`SELECT ${salesAggregate} FROM ${fromSQL} WHERE ${where.join(' AND ')}`, 1);
+  const billedCheck=billedSQL?`,COALESCE(SUM(${billedSQL.count}),0) AS INVOICE_LINKS,COUNT(CASE WHEN ${billedSQL.amount} IS NULL THEN 1 END) AS UNKNOWN_INVOICE_ORDERS,TO_CHAR(SUM(${billedSQL.amount}),'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS ASSIGNED_INVOICE_AMOUNT,COUNT(CASE WHEN BI.BILLED_COUNT<>BI.UNIQUE_BILLED_COUNT THEN 1 END) AS INVALID_BILLED_COUNT`:'';
+  const summaryRows = await read('selected-summary',`SELECT ${salesAggregate}${billedCheck} FROM ${fromSQL} WHERE ${where.join(' AND ')}`, 1);
   if (summaryRows.length !== 1) return incompatible();
+  if(billed&&salesCount(summaryRows[0],'INVALID_BILLED_COUNT')!==0)return incompatible();
   const summary = salesSummary(summaryRows[0]);
+  const billedOrdersSummary=billed?{invoiceLinks:salesCount(summaryRows[0],'INVOICE_LINKS'),unattributedOrders:salesCount(summaryRows[0],'UNKNOWN_INVOICE_ORDERS'),assignedInvoiceAmount:summaryRows[0]?.['ASSIGNED_INVOICE_AMOUNT']===null?null:salesAmount(summaryRows[0]?.['ASSIGNED_INVOICE_AMOUNT'])}:undefined;
+  if(billedOrdersSummary&&(billedOrdersSummary.invoiceLinks<summary.documentCount||billedOrdersSummary.unattributedOrders>summary.documentCount||(billedOrdersSummary.unattributedOrders===summary.documentCount)!==(billedOrdersSummary.assignedInvoiceAmount===null)))return incompatible();
   const groupedFrom = (conditions: string[]) => `(SELECT ${groupCode},${groupName} FROM ${fromSQL} WHERE ${conditions.join(' AND ')} GROUP BY ${groupCode},${groupName}) G`;
-  const total = group ? await count(gateway, groupedFrom(where), ['1=1']) : summary.documentCount;
-  const totalWithoutSearch = search ? await count(gateway, group ? groupedFrom(withoutSearch) : fromSQL, group ? ['1=1'] : withoutSearch) : total;
+  const total = group ? await count(dataGateway, groupedFrom(where), ['1=1']) : summary.documentCount;
+  const totalWithoutSearch = search ? await count(dataGateway, group ? groupedFrom(withoutSearch) : fromSQL, group ? ['1=1'] : withoutSearch) : total;
   if (total > totalWithoutSearch || group && total > summary.documentCount) return incompatible();
   let items: Row[];
   if (group) {
     // O cabeçalho financeiro não participa do join de itens: cada pedido soma uma vez.
     // SKU repetido em pedidos/unidades diferentes conta uma vez por cliente, não é quantidade.
     const mixSQL = mix ? `WITH MIX_SOURCE AS (SELECT C.NUNOTA,C.CODEMP,C.CODPARC,C.VLRNOTA,P.RAZAOSOCIAL FROM ${fromSQL} WHERE ${where.join(' AND ')}) SELECT C.CODPARC AS GROUP_CODE,C.RAZAOSOCIAL AS GROUP_NAME,${salesAggregate},(SELECT CASE WHEN COUNT(DISTINCT H.NUNOTA)<>COUNT(DISTINCT I.NUNOTA) OR COUNT(CASE WHEN I.CODPROD IS NULL OR I.CODPROD<1 OR I.CODPROD>2147483647 OR I.CODPROD<>ROUND(I.CODPROD,0) OR I.CODEMP IS NULL OR I.CODEMP<>H.CODEMP THEN 1 END)>0 THEN NULL ELSE COUNT(DISTINCT I.CODPROD) END FROM MIX_SOURCE H LEFT JOIN TGFITE I ON I.NUNOTA=H.NUNOTA WHERE H.CODPARC=C.CODPARC OR (H.CODPARC IS NULL AND C.CODPARC IS NULL)) AS PRODUCT_COUNT FROM MIX_SOURCE C GROUP BY C.CODPARC,C.RAZAOSOCIAL ORDER BY ${groupSorts[sort]} ${direction.toUpperCase()} NULLS LAST,C.CODPARC ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY` : undefined;
-    const rows = await gateway.select(mixSQL ?? `SELECT ${groupCode} AS GROUP_CODE,${groupName} AS GROUP_NAME,${salesAggregate} FROM ${fromSQL} WHERE ${where.join(' AND ')} GROUP BY ${groupCode},${groupName} ORDER BY ${groupSorts[sort]} ${direction.toUpperCase()} NULLS LAST,${groupCode} ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`, page.limit);
+    const rows = await read('page',mixSQL ?? `SELECT ${groupCode} AS GROUP_CODE,${groupName} AS GROUP_NAME,${salesAggregate} FROM ${fromSQL} WHERE ${where.join(' AND ')} GROUP BY ${groupCode},${groupName} ORDER BY ${groupSorts[sort]} ${direction.toUpperCase()} NULLS LAST,${groupCode} ${direction.toUpperCase()} NULLS LAST OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`, page.limit);
     items = rows.map(r => {
       const code = nullableCode(r['GROUP_CODE']), subtotal = salesSummary(r);
       if (subtotal.documentCount < 1) return incompatible();
@@ -265,12 +279,13 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
     });
   } else {
     const order = `${reportSorts[sort]} ${direction.toUpperCase()} NULLS LAST${sort !== 'code' ? `,C.NUNOTA ${direction.toUpperCase()} NULLS LAST` : ''}`;
-    const reportFields = billing ? fields.replace("TO_CHAR(C.DTNEG,'YYYY-MM-DD') AS DOCUMENT_DATE","TO_CHAR(C.DTFATUR,'YYYY-MM-DD') AS DOCUMENT_DATE") + ',C.STATUSNFE' : fields;
-    const rows = await gateway.select(`SELECT ${reportFields},TO_CHAR(C.VLRNOTA,'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS DOCUMENT_AMOUNT FROM ${fromSQL} WHERE ${where.join(' AND ')} ORDER BY ${order} OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`, page.limit);
+    const reportFields = billedSQL?fields+','+billedSQL.fields:billing ? fields.replace("TO_CHAR(C.DTNEG,'YYYY-MM-DD') AS DOCUMENT_DATE","TO_CHAR(C.DTFATUR,'YYYY-MM-DD') AS DOCUMENT_DATE") + ',C.STATUSNFE' : fields;
+    const rows = await read('page',`SELECT ${reportFields},TO_CHAR(C.VLRNOTA,'TM9','NLS_NUMERIC_CHARACTERS=''.,''') AS DOCUMENT_AMOUNT FROM ${fromSQL} WHERE ${where.join(' AND ')} ORDER BY ${order} OFFSET ${page.offset} ROWS FETCH NEXT ${page.limit} ROWS ONLY`, page.limit);
     items = rows.map(r => {
       if ((!billing && code(r['CODTIPOPER']) !== 1001) || r['STATUSNOTA'] !== 'L' || billing && r['STATUSNFE'] !== 'A') return incompatible();
       const item = documentDTO(r,movement,companies,{total:r['DOCUMENT_AMOUNT'] === null ? null : salesAmount(r['DOCUMENT_AMOUNT'])});
-      if (input.customerId && item.customerId !== input.customerId || input.sellerCode !== undefined && item.sellerCode !== input.sellerCode || start && (!item.date || item.date < start) || end && (!item.date || item.date > end)) return incompatible();
+      if (input.customerId && item.customerId !== input.customerId || input.sellerCode !== undefined && item.sellerCode !== input.sellerCode || !billed&&start && (!item.date || item.date < start) || !billed&&end && (!item.date || item.date > end)) return incompatible();
+      if(billed){const invoiceCount=salesCount(r,'BILLED_COUNT'),sharedInvoiceCount=salesCount(r,'SHARED_BILLED_COUNT'),unqualifiedInvoiceCount=salesCount(r,'UNQUALIFIED_BILLED_COUNT'),missingAmountCount=salesCount(r,'MISSING_BILLED_AMOUNT'),missingNumberCount=salesCount(r,'MISSING_BILLED_NUMBER');if(invoiceCount<1||salesCount(r,'UNIQUE_BILLED_COUNT')!==invoiceCount||sharedInvoiceCount>invoiceCount||missingAmountCount>invoiceCount||missingNumberCount>invoiceCount)return incompatible();const known=sharedInvoiceCount===0&&missingAmountCount===0&&unqualifiedInvoiceCount===0,nf=text(r['BILLED_NUMBERS']);if(missingNumberCount===0&&(!nf||!/^\d+(?:, \d+)*$/.test(nf))||missingNumberCount>0&&nf!==null||!known&&r['BILLED_AMOUNT']!==null)return incompatible();return{...item,nf,invoiced:known?salesAmount(r['BILLED_AMOUNT']):null,billingFacts:{invoiceCount,sharedInvoiceCount,unqualifiedInvoiceCount,missingAmountCount,missingNumberCount}};}
       return billing ? { ...item,nf:item.number,invoiced:item.total,erp:{...item.erp,dateField:'DTFATUR',fiscalStatusCode:text(r['STATUSNFE'])} } : item;
     });
   }
@@ -283,7 +298,7 @@ async function readCommercialReport(gateway: Transport, input: CommercialReportI
       if (items.some(r => r['total'] === null) || decimalUnits(sumERPDecimals(items.map(r => salesAmount(r['total'])))) !== decimalUnits(summary.documentAmount)) return incompatible();
     }
   }
-  return { ...observed(),items,total,totalWithoutSearch,offset:page.offset,summary,...(billing ? {billingPolicy:bp,linkMode:'direct-item-reference',quantitiesAllocated:false,ordersAdded:false,undatedTreatment:'excluded-without-date-fallback'} : {salesPolicy:policy}),...(mix ? {productCountPolicy:{field:'TGFITE.CODPROD',distinctPerCustomer:true,quantitiesAdded:false,missingItems:'unavailable'}} : {}),companyCodes:companies,groupBy:group ?? null };
+  return { ...observed(),items,total,totalWithoutSearch,offset:page.offset,summary,...(billed?{billedOrdersPolicy:BILLED_ORDERS_POLICY,billedOrdersSummary}:{}),...(billing ? {billingPolicy:bp,linkMode:'direct-item-reference',quantitiesAllocated:false,ordersAdded:false,undatedTreatment:'excluded-without-date-fallback'} : {salesPolicy:policy}),...(mix ? {productCountPolicy:{field:'TGFITE.CODPROD',distinctPerCustomer:true,quantitiesAdded:false,missingItems:'unavailable'}} : {}),companyCodes:companies,groupBy:group ?? null };
 }
 
 export type OrderItemsReportInput = Omit<SalesReportInput,'groupBy'|'productMix'> & {productReport?:true};

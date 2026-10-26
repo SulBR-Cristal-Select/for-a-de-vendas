@@ -1,3 +1,4 @@
+import {readBilledOrdersReport} from './history.ts';
 import {readCommissions} from './commissions.ts';
 import {readStock} from './stock.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2.118.0';
@@ -134,6 +135,7 @@ Deno.serve(async (request: Request) => {
     if (input.operation === 'wallet-report') return reply(await readWallet(commercialGateway, input.query, scope));
     if (input.operation === 'nonbuyers-report') return reply(await readNonBuyers(commercialGateway, input.query, scope));
     if (input.operation === 'order-items-report') return reply(await readOrderItemsReport(commercialGateway, input.query, scope));
+    if (input.operation === 'billed-orders-report') return reply(await readBilledOrdersReport(commercialGateway, input.query, scope));
     if (input.operation === 'billing-report') return reply(await readBillingReport(commercialGateway, input.query, scope));
     if (input.operation === 'document') return reply(await readDocument(commercialGateway, input.query, scope));
     if (input.operation === 'commercial-options') return reply(await readOperationOptions(commercialGateway, input.query, scope));

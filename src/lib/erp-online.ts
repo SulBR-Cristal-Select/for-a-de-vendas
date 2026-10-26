@@ -1,3 +1,4 @@
+import {BILLED_ORDERS_POLICY} from './erp-billed-orders';
 import {decodeCommission,validCommissionQuery,type ERPCommissionQuery,type ERPCommissionWindow} from './erp-commission';
 import {decodeStock,validStockQuery,type ERPStockQuery,type ERPStockWindow} from './erp-stock';
 import { decodeWallet, validWalletQuery, type ERPWalletQuery, type ERPWalletWindow } from './erp-wallet';
@@ -30,7 +31,7 @@ export type ERPDocument = ERPObservation & { record: ERPRow | null; items: ERPRo
 export type ERPPriceQuery = { resource?: never; customerId: string; productId: string; paymentCode: number; type: 'Venda'; sellerCode?: number; quantity?: number; unit?: string; date?: string };
 export type ERPPaymentQuery = { resource?: never; customerId: string; offset: number; limit: number; search?: string; date?: string };
 export type ERPPrice = ERPObservation & { customer: ERPRow; product: ERPRow; seller: ERPRow; companyCode: 1 | 4; operationCode: 1001; operationVersion: string; quantity: number; payment: { code: number; label: string; version: string }; price: { amount: number; unit: string; localCode: number | null; control: string | null; tableVersion: number | null; provider: 'native-context-api' } };
-export type ERPOperation = 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'billing-report' | 'order-items-report' | 'nonbuyers-report' | 'wallet-report' | 'stock-report' | 'commission-report' | 'document' | 'price-query' | 'payment-options';
+export type ERPOperation = 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'billing-report' | 'billed-orders-report' | 'order-items-report' | 'nonbuyers-report' | 'wallet-report' | 'stock-report' | 'commission-report' | 'document' | 'price-query' | 'payment-options';
 type ERPQuery = ERPCommissionQuery | ERPStockQuery | ERPWalletQuery | ERPPageQuery | ERPWindowQuery | ERPRecordQuery | ERPFacetQuery | ERPHistoryQuery | ERPSalesQuery | ERPBillingQuery | ERPOrderItemsQuery | ERPNonBuyersQuery | ERPDocumentQuery | ERPPriceQuery | ERPPaymentQuery;
 export type ERPTransport = (body: { operation: ERPOperation; query: ERPQuery }, signal: AbortSignal) => Promise<{ data: unknown; error: unknown }>;
 const messages = {
@@ -92,7 +93,7 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
   const items = data['items'], total = data['total'], unfiltered = data['totalWithoutSearch'];
   if (!Array.isArray(items) || !items.every(object) || !natural(total) || !natural(unfiltered) || total > unfiltered) invalid();
   let offset: number, limit: number;
-  if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'order-items-report' || operation === 'nonbuyers-report' || operation === 'wallet-report' || operation === 'stock-report' || operation === 'commission-report' || operation === 'payment-options') {
+  if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'nonbuyers-report' || operation === 'wallet-report' || operation === 'stock-report' || operation === 'commission-report' || operation === 'payment-options') {
     const q = query as ERPWindowQuery | ERPHistoryQuery | ERPPaymentQuery;
     if (data['offset'] !== q.offset) invalid();
     offset = q.offset; limit = q.limit;
@@ -145,8 +146,8 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
     }
     if(offset===0&&items.length===total&&((products?items.reduce((n,r)=>n+Number(r['missingSubtotalCount']),0):items.filter(r=>r['total']===null).length)!==summary['missingSubtotalCount']||products&&items.reduce((n,r)=>n+Number(r['lineCount']),0)!==summary['lineCount']||summary['subtotal']!==null&&sumERPDecimals(items.map(r=>String(r['total'])))!==summary['subtotal']))invalid();
   }
-  if (operation === 'sales-report' || operation === 'billing-report') {
-    const billing = operation === 'billing-report';
+  if (operation === 'sales-report' || operation === 'billing-report' || operation === 'billed-orders-report') {
+    const billing = operation === 'billing-report',billed=operation==='billed-orders-report';
     const q = query as ERPSalesQuery, summary = data['summary'], policy = data[billing ? 'billingPolicy' : 'salesPolicy'], companies = data['companyCodes'];
     const mix = q.productMix === true, productPolicy = data['productCountPolicy'];
     if (mix ? billing || q.groupBy !== 'customer' || !object(productPolicy) || productPolicy['field'] !== 'TGFITE.CODPROD' || productPolicy['distinctPerCustomer'] !== true || productPolicy['quantitiesAdded'] !== false || productPolicy['missingItems'] !== 'unavailable' : productPolicy !== undefined) invalid();
@@ -158,16 +159,19 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
     const sale = billing && object(policy) ? policy['origin'] : policy;
     if (!object(sale) || sale['movement'] !== 'P' || sale['operationCode'] !== 1001 || sale['natureCode'] !== 10100000 || sale['statusCode'] !== 'L' || sale['dateField'] !== 'DTNEG' || sale['bonification'] !== 'N' || sale['devolution'] !== 1) invalid();
     if (billing && (!object(policy) || policy['movement'] !== 'V' || policy['dateField'] !== 'DTFATUR' || policy['statusCode'] !== 'L' || policy['fiscalStatusCode'] !== 'A' || policy['salesSignal'] !== -1 || policy['bonification'] !== 'N' || policy['devolution'] !== 1 || data['linkMode'] !== 'direct-item-reference' || data['quantitiesAllocated'] !== false || data['ordersAdded'] !== false || data['undatedTreatment'] !== 'excluded-without-date-fallback')) invalid();
+    if(billed){const p=data['billedOrdersPolicy'],c=data['billedOrdersSummary'];if(!object(p)||Object.entries(BILLED_ORDERS_POLICY).some(([k,v])=>p[k]!==v)||!object(c)||!natural(c['invoiceLinks'])||c['invoiceLinks']<summary['documentCount']||!natural(c['unattributedOrders'])||c['unattributedOrders']>summary['documentCount']||(c['assignedInvoiceAmount']===null)!==(c['unattributedOrders']===summary['documentCount'])||c['assignedInvoiceAmount']!==null&&(typeof c['assignedInvoiceAmount']!=='string'||erpDecimal(c['assignedInvoiceAmount'])!==c['assignedInvoiceAmount']))invalid();}
     if (new Set(items.map(row => row['id'])).size !== items.length) invalid();
     for (const row of items) {
       if (row['total'] !== null && (typeof row['total'] !== 'string' || erpDecimal(row['total']) !== row['total'])) invalid();
       if (q.groupBy) {
         if (!natural(row['count']) || row['count'] < 1 || row['groupBy'] !== q.groupBy || !((row['groupCode'] === null) || natural(row['groupCode'])) || row['id'] !== `sankhya:${billing ? 'billing' : 'sales'}:${q.groupBy}:${row['groupCode'] ?? 'unknown'}` || mix && row['qty'] !== null && (!natural(row['qty']) || row['qty'] < 1)) invalid();
       } else {
+        if(billed){const f=row['billingFacts'];if(!object(f)||!natural(f['invoiceCount'])||f['invoiceCount']<1||!natural(f['sharedInvoiceCount'])||f['sharedInvoiceCount']>f['invoiceCount']||!natural(f['missingAmountCount'])||f['missingAmountCount']>f['invoiceCount']||!natural(f['unqualifiedInvoiceCount'])||!natural(f['missingNumberCount'])||f['missingNumberCount']>f['invoiceCount']||(f['sharedInvoiceCount']>0||f['missingAmountCount']>0||f['unqualifiedInvoiceCount']>0?row['invoiced']!==null:typeof row['invoiced']!=='string'||erpDecimal(row['invoiced'])!==row['invoiced'])||(f['missingNumberCount']>0?row['nf']!==null:typeof row['nf']!=='string'||!/^\d+(?:, \d+)*$/.test(row['nf'])))invalid();}
         const erp = row['erp'];
         if (!object(erp) || erp['movement'] !== (billing ? 'V' : 'P') || (billing ? !natural(erp['operationCode']) || erp['operationCode'] < 1 || erp['dateField'] !== 'DTFATUR' || erp['fiscalStatusCode'] !== 'A' : erp['operationCode'] !== 1001) || erp['statusCode'] !== 'L' || !companies.includes(erp['companyCode']) || row['id'] !== `sankhya:${billing ? 'invoice' : 'order'}:${erp['documentCode']}` || q.customerId && row['customerId'] !== q.customerId || q.sellerCode !== undefined && row['sellerCode'] !== q.sellerCode) invalid();
       }
     }
+    if(billed&&!q.groupBy&&offset===0&&items.length===total){const c=data['billedOrdersSummary'] as {invoiceLinks:number;unattributedOrders:number;assignedInvoiceAmount:string|null};const known=items.filter(r=>r['invoiced']!==null);const links=items.reduce((n,r)=>n+Number((r['billingFacts'] as Record<string,unknown>)['invoiceCount']),0);if(!natural(links)||links!==c.invoiceLinks||items.length-known.length!==c.unattributedOrders||known.length>0&&sumERPDecimals(known.map(r=>String(r['invoiced'])))!==c.assignedInvoiceAmount)invalid();}
   }
   return data;
 }
@@ -220,8 +224,8 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
         const p = q as ERPPriceQuery;
         if (!/^sankhya:product:[1-9]\d*$/.test(p.productId) || !natural(p.paymentCode) || p.paymentCode < 1 || p.type !== 'Venda') throw new ERPOnlineError('INVALID_REQUEST');
       }
-    } else if (!(operation === 'billing-report' ? ['invoices'] : operation === 'sales-report' || operation === 'order-items-report' || operation === 'commission-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(query.resource!)) throw new ERPOnlineError('INVALID_REQUEST');
-    if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'order-items-report' || operation === 'nonbuyers-report' || operation === 'wallet-report' || operation === 'stock-report' || operation === 'commission-report' || operation === 'payment-options') {
+    } else if (!(operation === 'billing-report' ? ['invoices'] : operation === 'sales-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'commission-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(query.resource!)) throw new ERPOnlineError('INVALID_REQUEST');
+    if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'nonbuyers-report' || operation === 'wallet-report' || operation === 'stock-report' || operation === 'commission-report' || operation === 'payment-options') {
       const q = query as ERPWindowQuery | ERPHistoryQuery | ERPPaymentQuery;
       if (!natural(q.offset) || !natural(q.limit) || q.limit < 1 || q.limit > 50) throw new ERPOnlineError('INVALID_REQUEST');
     }
@@ -256,6 +260,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     stockReport: (query: ERPStockQuery) => request<ERPStockWindow>('stock-report', query),
     walletReport: (query: ERPWalletQuery) => request<ERPWalletWindow>('wallet-report', query),
     nonBuyersReport: (query: ERPNonBuyersQuery) => request<ERPNonBuyersWindow>('nonbuyers-report', query),
+    billedOrdersReport: (query:ERPSalesQuery) => request<ERPSalesWindow & {billedOrdersPolicy:typeof BILLED_ORDERS_POLICY;billedOrdersSummary:{invoiceLinks:number;unattributedOrders:number;assignedInvoiceAmount:string|null}}>('billed-orders-report',query),
     billingReport: (query: ERPBillingQuery) => request<ERPSalesWindow>('billing-report', query),
     document: (query: ERPDocumentQuery) => request<ERPDocument>('document', query),
     price: (query: ERPPriceQuery) => request<ERPPrice>('price-query', query),

@@ -3058,7 +3058,8 @@ function bz({ id: e }: any): any {
     const mixReport = e === 'mix' && !!online;
     const salesReport = (e === 'vendas' || chartReport || abcReport || mixReport) && !!online;
     const billingReport = e === 'faturamento' && !!online;
-    const commercialReport = salesReport || billingReport;
+    const billedOrdersReport=e==='faturados'&&!!online;
+    const commercialReport = salesReport || billingReport || billedOrdersReport;
     const itemReport = e === 'produtos-pedido' && !!online;
     const productReport = e === 'produtos' && !!online;
     const managementReport = e === 'gerencial' && !!online;
@@ -3093,6 +3094,8 @@ function bz({ id: e }: any): any {
         ? {client:online,resource:'orders',orderItemsReport:{...salesReportQuery(r.f,'nenhum'),productReport:true},onItemsSummary}
         : itemReport
         ? {client:online,resource:'orders',orderItemsReport:salesReportQuery(r.f,'nenhum')}
+        : billedOrdersReport
+        ? {client:online,resource:'orders',billedOrdersReport:salesReportQuery(r.f,l),onSummary:onSalesSummary}
         : billingReport
         ? { client: online, resource:'invoices',billingReport:salesReportQuery(r.f,l),onSummary:onSalesSummary }
         : salesReport
@@ -3116,13 +3119,13 @@ function bz({ id: e }: any): any {
                 ((p = [
                     ...p,
                     z("invoiced", "Valor faturado", (h: any) => (h.invoiced != null ? rt(h.invoiced) : pa), { align: "right" }),
-                    z("nf", "Nota fiscal", (h: any) => billingReport ? h.nf ?? pa : t.invoices
+                    z("nf", "Nota fiscal", (h: any) => billingReport || billedOrdersReport ? h.nf ?? pa : t.invoices
                         .filter((S: any) => S.orderId === h.id)
                         .map((S: any) => S.number)
                         .join(", ") || pa),
                 ]),
                     (y =
-                        billingReport ? "Notas fiscais aprovadas vinculadas à venda padrão, por data de faturamento. Pedidos e notas não são somados." : "Somente pedidos com documentos fiscais disponíveis. A integração fiscal não está configurada; vendas não são apresentadas como faturamento.")),
+                        billingReport ? "Notas fiscais aprovadas vinculadas à venda padrão, por data de faturamento. Pedidos e notas não são somados." : billedOrdersReport ? "Pedidos padrão com pelo menos uma nota fiscal qualificada, incluindo parciais, sem presumir faturamento integral. Período por DTFATUR da nota, sem substituir a emissão do pedido. Valor faturado só é atribuído quando todas as notas selecionadas têm este pedido como origem única; nota de vários pedidos ou referência fiscal incompleta mantém valor não extraído, sem rateio ou soma parcial apresentada como total. Valores de pedidos e notas não são somados." : "Somente pedidos com documentos fiscais disponíveis. A integração fiscal não está configurada; vendas não são apresentadas como faturamento.")),
             l !== "nenhum")) {
             let h: any = {};
             (!commercialReport && d.forEach((S: any) => {
@@ -3655,7 +3658,7 @@ function bz({ id: e }: any): any {
         children: [
             (0, b.jsx)(Ua, {
                 title: n.name,
-                description: commissionReport ? "Consulta à comissão nativa no Sankhya, sem comprovação de pagamento" : stockReport ? "Consulta ao estoque registrado no Sankhya" : walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
+                description: billedOrdersReport ? "Pedidos padrão com notas fiscais aprovadas, inclusive faturamento parcial" : commissionReport ? "Consulta à comissão nativa no Sankhya, sem comprovação de pagamento" : stockReport ? "Consulta ao estoque registrado no Sankhya" : walletReport ? "Consulta à carteira atual no Sankhya" : "Consulta aos dados persistidos, conforme os filtros selecionados",
                 back: { label: "Relat\xF3rios", to: "/relatorios" },
                 actions: (0, b.jsx)(Gp, {
                     rows: csvRows(m, p.filter((h: any) => !h.action)),
