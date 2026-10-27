@@ -1,5 +1,6 @@
 import {readIndicatorSeries} from './indicator-series.ts';
 import {prepareSellerAccess} from './prepare-seller-access.ts';
+import {provisionSellerAccess} from './provision-seller-access.ts';
 import {readRanking} from './ranking.ts';
 import {readReceivables} from './receivables.ts';
 import {readBilledOrdersReport} from './history.ts';
@@ -124,6 +125,13 @@ Deno.serve(async (request: Request) => {
     // Mesmo usuário Auth e vínculo privado em catálogo, cotação e preparação.
     // Nenhum vendedor/filial do corpo HTTP se transforma em autoridade.
     const scope = actorScope(profile);
+    if(input.operation==='seller-access-provision'){
+      if(profile.id!=='a46afcc5-14fd-4dd9-bd00-759e91b946ca'||profile.role!=='administrador')throw new SankhyaError('FORBIDDEN','Provisionamento reservado ao administrador autorizado.',403);
+      const url=Deno.env.get('SUPABASE_URL'),key=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||jsonKeys('SUPABASE_SECRET_KEYS')['default'];
+      if(url!=='https://cxurczhmrvxcuvklyiht.supabase.co'||!key)throw new SankhyaError('SERVER_CONFIGURATION','Administração Auth indisponível.',503);
+      const admin=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+      return reply(await provisionSellerAccess({users:async()=>{const r=await admin.auth.admin.listUsers({page:1,perPage:50});return r.error?null:{users:r.data.users,complete:(r.data.total??r.data.users.length)<=50&&!r.data.nextPage};},profile:async id=>{const r=await admin.from('profiles').select('id,company_id,role,active').eq('id',id).eq('company_id','432299').maybeSingle();return r.error?null:r.data;},createUser:async attributes=>{const r=await admin.auth.admin.createUser(attributes);return r.error?null:r.data.user;}},profile,input.query));
+    }
     if(input.operation==='seller-access-prepare'){
       if(profile.id!=='a46afcc5-14fd-4dd9-bd00-759e91b946ca'||profile.role!=='administrador')throw new SankhyaError('FORBIDDEN','Preparação reservada ao administrador autorizado.',403);
       const url=Deno.env.get('SUPABASE_URL'),key=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||jsonKeys('SUPABASE_SECRET_KEYS')['default'];
