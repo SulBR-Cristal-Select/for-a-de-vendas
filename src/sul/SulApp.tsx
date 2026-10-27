@@ -1231,7 +1231,7 @@ function sz(): any {
                                                 (0, b.jsx)(vr, {
                                                     label: "N\xBA Pedido do Cliente",
                                                     value: k,
-                                                    onChange: M,
+                                                    onChange: (v: any) => M(String(v ?? "").slice(0, 15)),
                                                 }),
                                             ],
                                         }),
@@ -3115,7 +3115,7 @@ function bz({ id: e }: any): any {
         : billedOrdersReport
         ? {client:online,resource:'orders',billedOrdersReport:salesReportQuery(r.f,l),onSummary:onSalesSummary}
         : billingReport
-        ? { client: online, resource:'invoices',billingReport:salesReportQuery(r.f,l),onSummary:onSalesSummary }
+        ? { client: online, resource:'invoices',billingReport:salesReportQuery(r.f.from||r.f.to?r.f:(()=>{const m=businessDate().slice(0,7),y=Number(m.slice(0,4)),mo=Number(m.slice(5,7));return {...r.f,from:m+'-01',to:m+'-'+String(new Date(Date.UTC(y,mo,0)).getUTCDate()).padStart(2,'0')};})(),l),onSummary:onSalesSummary }
         : salesReport
         ? { client: online, resource: 'orders', salesReport: { ...salesReportQuery(r.f, abcReport || mixReport ? 'cliente' : l), ...(mixReport ? {productMix:true} : {}) }, ...(abcReport ? { salesParticipation:true } : {}), onSummary: onSalesSummary }
         : customerReport && remoteCustomerReport(r.f)
@@ -3143,7 +3143,7 @@ function bz({ id: e }: any): any {
                         .join(", ") || pa),
                 ]),
                     (y =
-                        billingReport ? "Notas fiscais aprovadas vinculadas à venda padrão, por data de faturamento. Pedidos e notas não são somados." : billedOrdersReport ? "Pedidos padrão com pelo menos uma nota fiscal qualificada, incluindo parciais, sem presumir faturamento integral. Período por DTFATUR da nota, sem substituir a emissão do pedido. Valor faturado só é atribuído quando todas as notas selecionadas têm este pedido como origem única; nota de vários pedidos ou referência fiscal incompleta mantém valor não extraído, sem rateio ou soma parcial apresentada como total. Valores de pedidos e notas não são somados." : "Somente pedidos com documentos fiscais disponíveis. A integração fiscal não está configurada; vendas não são apresentadas como faturamento.")),
+                        billingReport ? "Notas fiscais aprovadas vinculadas à venda padrão, por data de faturamento. Pedidos e notas não são somados. Sem período informado, é usado o mês corrente." : billedOrdersReport ? "Pedidos padrão com pelo menos uma nota fiscal qualificada, incluindo parciais, sem presumir faturamento integral. Período por DTFATUR da nota, sem substituir a emissão do pedido. Valor faturado só é atribuído quando todas as notas selecionadas têm este pedido como origem única; nota de vários pedidos ou referência fiscal incompleta mantém valor não extraído, sem rateio ou soma parcial apresentada como total. Valores de pedidos e notas não são somados." : "Somente pedidos com documentos fiscais disponíveis. A integração fiscal não está configurada; vendas não são apresentadas como faturamento.")),
             l !== "nenhum")) {
             let h: any = {};
             (!commercialReport && d.forEach((S: any) => {
@@ -3425,7 +3425,7 @@ function bz({ id: e }: any): any {
                         e === "abc" &&
                             ((p = [
                                 z("name", "Raz\xE3o social", void 0, { primary: !0, wide: !0 }),
-                                z("curve", "Curva", () => "N\xE3o verificada"),
+                                z("curve", "Curva", (h: any) => abcReport ? h.curve ?? "N\xE3o verificada" : "N\xE3o verificada"),
                                 z("total", "Valor no recorte", (h: any) => rt(h.total), {
                                     align: "right",
                                 }),
@@ -3434,7 +3434,7 @@ function bz({ id: e }: any): any {
                                     : "\u2014"),
                             ]),
                                 (y =
-                                    "Limiares A/B/C não foram confirmados. O sistema não atribui curvas arbitrárias; apresenta valores e participação no período.")),
+                                    abcReport ? "Curva ABC pelo critério Pareto adotado: A até 80% do valor acumulado, B até 95% e C acima, sobre a venda padrão do recorte. Não é classificação nativa do ERP." : "Limiares A/B/C não foram confirmados. O sistema não atribui curvas arbitrárias; apresenta valores e participação no período.")),
                         e === "mix" &&
                             ((p = [
                                 z("name", "Raz\xE3o social", void 0, { primary: !0, wide: !0 }),

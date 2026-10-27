@@ -8,7 +8,7 @@ import type { MutableRefObject } from 'react';
 import { ERPOnlineError, type createERPClient, type ERPPageQuery, type ERPHistoryQuery, type ERPSalesQuery, type ERPBillingQuery, type ERPOrderItemsQuery, type ERPItemSummary, type ERPSalesSummary, type ERPResource, type ERPRow, type ERPNonBuyersQuery, type ERPNonBuyersSummary } from '../lib/erp-online';
 import { compareERP, foldERPText, type ERPSortKey } from '../lib/erp-order';
 import { paginateERP, type ERPMergedPage } from '../lib/erp-paging';
-import { decimalUnits, formatERPShare } from '../lib/erp-decimal';
+import { decimalUnits, erpDecimal, formatERPShare } from '../lib/erp-decimal';
 
 export type ERPClient = ReturnType<typeof createERPClient>;
 export type ERPDescriptor = { client: ERPClient; rankingReport?:Omit<ERPRankingQuery,'resource'|'offset'|'limit'>; receivablesReport?:Omit<ERPReceivablesQuery,'resource'|'offset'|'limit'>; commissionReport?:Omit<ERPCommissionQuery,'resource'|'offset'|'limit'>; onCommissionSummary?:(summary:ERPCommissionSummary|undefined)=>void; registerExport?: false; stockReport?: Omit<ERPStockQuery,'resource'|'offset'|'limit'>; walletReport?: Omit<ERPWalletQuery,'resource'|'offset'|'limit'>; onWalletSummary?: (summary:ERPWalletSummary|undefined)=>void; nonBuyersReport?: Omit<ERPNonBuyersQuery,'resource'|'offset'|'limit'>; onNonBuyersSummary?: (summary:ERPNonBuyersSummary|undefined)=>void; resource: 'customers' | 'products' | 'orders' | 'invoices'; categoryName?: string; customerId?: string; filters?: ERPPageQuery['filters']; salesParticipation?: boolean; salesReport?: Omit<ERPSalesQuery, 'resource' | 'offset' | 'limit'>; billedOrdersReport?: Omit<ERPSalesQuery,'resource'|'offset'|'limit'>; billingReport?: Omit<ERPBillingQuery, 'resource' | 'offset' | 'limit'>; orderItemsReport?: Omit<ERPOrderItemsQuery,'resource'|'offset'|'limit'>; onSummary?: (summary: ERPSalesSummary | undefined, source?: ERPReportSource) => void; onItemsSummary?: (summary: ERPItemSummary | undefined, source?: ERPReportSource) => void };
@@ -21,6 +21,37 @@ export function historyPresentation(row: ERPRow): ERPRow {
   const erp = row['erp'] as ERPRow | undefined;
   const payment = erp?.['payment'] as ERPRow | undefined;
   return { ...row, seller: row['sellerName'], type: row['operationName'], payment: payment?.['label'], value: row['total'], delivery: null, agenda: null, freight: null, cargoStatus: null };
+}
+/** Critério ABC (Pareto) adotado: A até 80% do valor acumulado, B até 95%, C acima. Não é classe nativa do ERP. */
+const abcCache = new WeakMap<object, Map<string, { at: number; job: Promise<Map<string, 'A' | 'B' | 'C'> | null> }>>();
+async function abcCurves(descriptor: ERPDescriptor, base: ERPTableQuery): Promise<Map<string, 'A' | 'B' | 'C'> | null> {
+  const { search: _s, offset: _o, limit: _l, sort: _so, direction: _d, ...rest } = base as Record<string, unknown>;
+  const key = JSON.stringify(rest);
+  const perClient = abcCache.get(descriptor.client) ?? new Map();
+  abcCache.set(descriptor.client, perClient);
+  const cached = perClient.get(key);
+  if (cached && Date.now() - cached.at < 60_000) return cached.job;
+  const job = (async () => {
+    const items: ERPRow[] = [];
+    for (let offset = 0; offset < 5000; offset += 50) {
+      const page = await descriptor.client.salesReport({ ...(rest as object), sort: 'total', direction: 'desc', resource: 'orders', offset, limit: 50 } as ERPSalesQuery & { offset: number; limit: number });
+      items.push(...page.items);
+      if (page.items.length < 50 || items.length >= page.total) break;
+    }
+    if (items.some(r => typeof r['total'] !== 'string' || erpDecimal(r['total']) === null)) return null;
+    const units = items.map(r => decimalUnits(String(r['total'])));
+    const total = units.reduce((a, b) => a + b, 0n);
+    if (total <= 0n || units.some(u => u < 0n)) return null;
+    const out = new Map<string, 'A' | 'B' | 'C'>();
+    let before = 0n;
+    items.forEach((r, i) => {
+      out.set(String(r['id']), before * 100n < total * 80n ? 'A' : before * 100n < total * 95n ? 'B' : 'C');
+      before += units[i]!;
+    });
+    return out;
+  })().catch(() => { perClient.delete(key); return null; });
+  perClient.set(key, { at: Date.now(), job });
+  return job;
 }
 async function tableWindow(descriptor: ERPDescriptor, query: ERPTableQuery, offset: number, limit: number) {
   if(descriptor.rankingReport)return descriptor.client.rankingReport({...descriptor.rankingReport,...query,resource:'orders',offset,limit} as ERPRankingQuery);
@@ -49,9 +80,10 @@ async function tableWindow(descriptor: ERPDescriptor, query: ERPTableQuery, offs
       if (JSON.stringify([result.total,result.totalWithoutSearch,'summary' in result ? result.summary : null,'companyCodes' in result ? result.companyCodes : null]) !== JSON.stringify([reversed.total,reversed.totalWithoutSearch,reversed.summary,reversed.companyCodes])) throw new ERPOnlineError('INVALID_RESPONSE');
       result = reversed;
     }
+    const curves = participation ? await abcCurves(descriptor, nativeQuery) : null;
     return { ...result, items: result.items.map(row => {
       const item = historyPresentation(row);
-      if (participation) return { ...item, share: formatERPShare(row['total'], amount) };
+      if (participation) return { ...item, share: formatERPShare(row['total'], amount), curve: curves?.get(String(row['id'])) };
       return descriptor.billingReport && !descriptor.billingReport.groupBy ? {...item,number:(row['erp'] as ERPRow)['documentCode']} : item;
     }) };
   }
