@@ -11,5 +11,5 @@ export async function readPartnerIdentity(g:Pick<SankhyaGateway,'select'>,value:
  if(!['CODPARC','NOMEPARC','RAZAOSOCIAL','ATIVO','CLIENTE','CODVEND'].every(x=>has('TGFPAR',x))||!['CODVEND','CODPARC','APELIDO','ATIVO','TIPVEND','CODEMP'].every(x=>has('TGFVEN',x)))throw new SankhyaError('ERP_CONTEXT_REQUIRED','Esquema de identidade não confirmado.',502);
  const partner=await g.select(`SELECT P.CODPARC,P.NOMEPARC,P.RAZAOSOCIAL,P.ATIVO,P.CLIENTE,${has('TGFPAR','VENDEDOR')?'P.VENDEDOR':'CAST(NULL AS VARCHAR2(1)) AS VENDEDOR'},P.CODVEND AS ASSIGNED_SELLER_CODE FROM TGFPAR P WHERE P.CODPARC=${code} FETCH FIRST 1 ROWS ONLY`,1);
  const sellers=await g.select(`SELECT V.CODVEND,V.CODPARC,V.APELIDO,V.ATIVO,V.TIPVEND,V.CODEMP FROM TGFVEN V WHERE V.CODPARC=${code} ORDER BY V.CODVEND FETCH FIRST 50 ROWS ONLY`,50);
- return {source:'sankhya',readOnly:true,readAt:new Date().toISOString(),partnerCode:code,partner:partner[0]??null,sellerLinks:sellers,hasMore:sellers.length===50,identityRelation:'TGFVEN.CODPARC = TGFPAR.CODPARC',assignedSellerIsIdentity:false};
+ return {supported:true,source:'sankhya',readOnly:true,readAt:new Date().toISOString(),partnerCode:code,partner:partner[0]??null,sellerLinks:sellers,hasMore:sellers.length===50,identityRelation:'TGFVEN.CODPARC = TGFPAR.CODPARC',assignedSellerIsIdentity:false};
 }

@@ -1,4 +1,5 @@
 import {readIndicatorSeries} from './indicator-series.ts';
+import {readOrderRegistry} from './order-registry.ts';
 import {prepareSellerAccess} from './prepare-seller-access.ts';
 import {provisionSellerAccess} from './provision-seller-access.ts';
 import {readRanking} from './ranking.ts';
@@ -161,6 +162,7 @@ Deno.serve(async (request: Request) => {
     if (input.operation === 'billing-report') return reply(await readBillingReport(commercialGateway, input.query, scope));
     if (input.operation === 'document') return reply(await readDocument(commercialGateway, input.query, scope));
     if (input.operation === 'commercial-options') return reply(await readOperationOptions(commercialGateway, input.query, scope));
+    if (input.operation === 'order-registry') return reply(await readOrderRegistry(commercialGateway,input.query,scope));
     if (input.operation === 'commercial-dictionary') return reply(await readCommercialDictionary(commercialGateway, input.query, scope));
     if (input.operation === 'price-query') return reply(await readPrice({ ...commercialGateway, contextPrices: q => gateway.contextPrices(q) }, input.query, scope));
     if (input.operation === 'window') return reply(await readWindow(commercialGateway, input.query, scope));
