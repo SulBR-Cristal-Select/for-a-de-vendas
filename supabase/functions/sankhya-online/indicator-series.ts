@@ -1,6 +1,6 @@
 import {SankhyaError,type SankhyaGateway} from './gateway.ts';
 import {readBillingReport,readBillingDays,readSalesDays,readOrderItemsReport} from './history.ts';
-import {readWallet} from './nonbuyers.ts';
+import {readWallet,readWalletDays} from './nonbuyers.ts';
 import {readCommissions} from './commissions.ts';
 import {readCustomerMetrics} from './customer-metrics.ts';
 import type {ReadScope} from './read-model.ts';
@@ -27,10 +27,10 @@ export async function readIndicatorSeries(g:Pick<SankhyaGateway,'select'>,value:
   summary={value:r.summary.amount,recordCount:r.summary.entryCount,missingValueCount:r.summary.missingAmountCount,buyerCount:null,activeCount:null,newCount:null};
   items=r.items.map((x:Row)=>point(x['sellerCode'],x['name'],x['entryCount'],x['commission'],x['missingAmountCount']));
  }else if(spec.family==='wallet'){
-  const r=await readWallet(g,{resource:'customers',view:'sellers',month:q.month,offset:q.offset,limit:q.limit,sort:'code',direction:'asc',...seller},scope);readAt=r.readAt;total=r.total;companyCodes=r.companyCodes;
+  const r=spec.dimension==='day'?await readWalletDays(g,{resource:'customers',month:q.month,offset:q.offset,limit:q.limit,...seller},scope):await readWallet(g,{resource:'customers',view:'sellers',month:q.month,offset:q.offset,limit:q.limit,sort:'code',direction:'asc',...seller},scope);readAt=r.readAt;total=r.total;companyCodes=r.companyCodes;
   if(!('buyerCount'in r.summary))throw new SankhyaError('ERP_INVALID_RESPONSE','Carteira incompleta.',502);
   summary={value:null,recordCount:r.summary.walletCount,missingValueCount:0,buyerCount:r.summary.buyerCount,activeCount:r.summary.walletCount,newCount:null};
-  items=r.items.map((x:Row)=>point(x['sellerCode'],x['name'],x['walletCount'],null,0,{buyerCount:x['buyerCount'] as number,activeCount:x['walletCount'] as number}));
+  items=r.items.map((x:Row)=>point(spec.dimension==='day'?x['dayCode']:x['sellerCode'],spec.dimension==='day'?x['day']:x['name'],x['walletCount'],null,0,{buyerCount:x['buyerCount'] as number,activeCount:x['walletCount'] as number}));
  }else{
   const r=await readCustomerMetrics(g,{kind:'analytics',section:'customers',from:period.from,to:period.to,offset:q.offset,...seller},scope,true);readAt=r.readAt;total=r.groupCount!;companyCodes=r.companyCodes!;
   summary={value:null,recordCount:r.totals.customerCount,missingValueCount:0,buyerCount:null,activeCount:r.totals.activeCustomerCount,newCount:r.totals.newCustomerCount};

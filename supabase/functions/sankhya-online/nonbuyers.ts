@@ -1,3 +1,4 @@
+import {walletDays} from './wallet-days.ts';
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
 import { currentCustomerWhere, scopeOf, sellerAllowed, type ReadScope } from './read-model.ts';
 import { STANDARD_SALES_REPORT_POLICY } from './policy.ts';
@@ -26,7 +27,11 @@ export async function readWallet(gateway:Transport,value:unknown,trustedScope:Re
  const view=(value as Row)['view'];if(view!=='sellers'&&view!=='customers')return invalid();
  return readCurrentWallet(gateway,value,trustedScope,view);
 }
-async function readCurrentWallet(gateway:Transport,value:unknown,trustedScope:ReadScope,view:'sellers'|'customers'|null){
+export async function readWalletDays(gateway:Transport,value:unknown,trustedScope:ReadScope){
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!['resource','month','offset','limit','sellerCode'].includes(k)))return invalid();
+ return readCurrentWallet(gateway,value,trustedScope,'days');
+}
+async function readCurrentWallet(gateway:Transport,value:unknown,trustedScope:ReadScope,view:'sellers'|'customers'|'days'|null){
  if(!value||typeof value!=='object'||Array.isArray(value))return invalid();const q=value as Row;
  if(Object.keys(q).some(k=>![...['resource','month','offset','limit','search','sort','direction','customerId','sellerCode','status'],...(view?['view']:[])].includes(k))||q['resource']!=='customers')return invalid();
  const month=q['month'];if(typeof month!=='string'||!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month)||Number(month.slice(0,4))<1||Number(month.slice(0,4))>9998)return invalid();
@@ -45,9 +50,10 @@ async function readCurrentWallet(gateway:Transport,value:unknown,trustedScope:Re
  const valid=`T.TIPMOV='${p.movement}' AND T.BONIFICACAO='${p.bonification}' AND T.GOLDEV=${p.devolution}`;
  const unknown="T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'P' OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1)";
  const cte=`WITH W AS (SELECT P.CODPARC,P.RAZAOSOCIAL,P.CODVEND,V.APELIDO FROM TGFPAR P LEFT JOIN TGFVEN V ON V.CODVEND=P.CODVEND WHERE ${where.join(' AND ')}), H AS (SELECT C.CODPARC,COUNT(CASE WHEN ${valid} AND C.DTNEG>=${start} AND C.DTNEG<${end} THEN 1 END) AS BOUGHT,COUNT(CASE WHEN C.NUNOTA IS NOT NULL AND ((${unknown}) OR (C.DTNEG IS NULL AND (${valid}))) THEN 1 END) AS UNKNOWN_COUNT,COUNT(*) AS SOURCE_ROWS,COUNT(DISTINCT C.NUNOTA) AS SOURCE_DOCUMENTS FROM TGFCAB C JOIN (SELECT DISTINCT CODPARC FROM W) X ON X.CODPARC=C.CODPARC LEFT JOIN TGFTOP T ON T.CODTIPOPER=C.CODTIPOPER AND T.DHALTER=C.DHTIPOPER WHERE C.CODEMP IN (${scope.companies.join(',')}) AND C.TIPMOV='${p.movement}' AND C.CODTIPOPER=${p.operationCode} AND C.CODNAT=${p.natureCode} AND C.STATUSNOTA='${p.statusCode}' AND (C.DTNEG IS NULL OR (C.DTNEG>=${start} AND C.DTNEG<${end})) GROUP BY C.CODPARC), Q AS (SELECT W.CODPARC,W.RAZAOSOCIAL,W.CODVEND,W.APELIDO,COALESCE(H.BOUGHT,0) AS BOUGHT,COALESCE(H.UNKNOWN_COUNT,0) AS UNKNOWN_COUNT,COALESCE(H.SOURCE_ROWS,0) AS SOURCE_ROWS,COALESCE(H.SOURCE_DOCUMENTS,0) AS SOURCE_DOCUMENTS FROM W LEFT JOIN H ON H.CODPARC=W.CODPARC)`;
- const stats=await gateway.select(`${cte} SELECT COUNT(*) AS WALLET_COUNT,COUNT(DISTINCT CODPARC) AS UNIQUE_CUSTOMERS,COUNT(CASE WHEN SOURCE_ROWS<>SOURCE_DOCUMENTS THEN 1 END) AS DUPLICATES,COUNT(CASE WHEN BOUGHT=0 AND UNKNOWN_COUNT>0 THEN 1 END) AS UNKNOWN_ABSENCE,COUNT(CASE WHEN BOUGHT=0 AND UNKNOWN_COUNT=0 THEN 1 END) AS NON_BUYERS FROM Q`,1);
+ const stats=await gateway.select(`${cte} SELECT COUNT(*) AS WALLET_COUNT,COUNT(DISTINCT CODPARC) AS UNIQUE_CUSTOMERS,COUNT(CASE WHEN SOURCE_ROWS<>SOURCE_DOCUMENTS THEN 1 END) AS DUPLICATES,COUNT(CASE WHEN ${view==='days'?'UNKNOWN_COUNT>0':'BOUGHT=0 AND UNKNOWN_COUNT>0'} THEN 1 END) AS UNKNOWN_ABSENCE,COUNT(CASE WHEN BOUGHT=0 AND UNKNOWN_COUNT=0 THEN 1 END) AS NON_BUYERS${view==='days'?',COALESCE(SUM(BOUGHT),0) AS PURCHASE_COUNT':''} FROM Q`,1);
  if(stats.length!==1)return incompatible();const st=stats[0]!,walletCount=integer(st['WALLET_COUNT']),unique=integer(st['UNIQUE_CUSTOMERS']),duplicates=integer(st['DUPLICATES']),pending=integer(st['UNKNOWN_ABSENCE']),unfiltered=integer(st['NON_BUYERS']);
  if(walletCount!==unique||duplicates>0||pending>0)return incomplete();if(unfiltered>walletCount)return incompatible();
+ if(view==='days')return walletDays(gateway,{cte,walletCount,nonBuyerCount:unfiltered,purchaseCount:integer(st['PURCHASE_COUNT']),offset,limit,month,from,until,companies:scope.companies});
  if(view)return walletWindow(gateway,q,view,{cte,walletCount,nonBuyerCount:unfiltered,offset,limit,sort,direction,search,month,from,until,companies:scope.companies,sellers:scope.sellers});
  const conditions=['Q.BOUGHT=0','Q.UNKNOWN_COUNT=0'],label='Sem compra no mês '+month;
  if(search.trim()){const pattern=literal('%'+foldERPText(search.trim()).replace(/[!%_]/g,c=>'!'+c)+'%');conditions.push(`(${['Q.RAZAOSOCIAL','TO_CHAR(Q.CODPARC)','Q.APELIDO',literal(label)].map(field=>`${fold(field)} LIKE ${pattern} ESCAPE '!'`).join(' OR ')})`);}
