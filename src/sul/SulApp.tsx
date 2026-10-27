@@ -3050,7 +3050,7 @@ function bz({ id: e }: any): any {
     const receivablesReport=e==='titulos'&&!!online;
     const customerReport = e === 'clientes' && !!online;
     const nonBuyerReport = e === 'nao-compraram' && !!online;
-    const walletReport = ['carteira-vendedor','positivacao'].includes(e) && !!online;
+    const walletReport = ['carteira-vendedor','positivacao','carteira'].includes(e) && !!online;
     const stockReport = e==='estoque' && !!online;
     const commissionReport=['comissoes','comissoes-pedido'].includes(e)&&!!online;
     const commissionKey=JSON.stringify([e,r.f]);
