@@ -2,11 +2,13 @@ import { SankhyaError, type SankhyaGateway } from './gateway.ts';
 import type { ReadScope } from './read-model.ts';
 import { readCommercialDiagnostic } from './diagnostics.ts';
 import { readCustomerMetrics } from './customer-metrics.ts';
+import { readSellerAccessInventory } from './seller-access-inventory.ts';
 type Transport = Pick<SankhyaGateway, 'select'>;
 export async function readCommercialDictionary(gateway: Transport, value: unknown, scope: ReadScope) {
   if (scope.role !== 'administrador') throw new SankhyaError('ERP_IDENTITY_REQUIRED', 'Vínculo ERP explícito necessário.', 403);
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SankhyaError('INVALID_REQUEST', 'Consulta de dicionário inválida.', 400);
   const input = value as Record<string, unknown>;
+  if (input['kind'] === 'seller-access-inventory') return readSellerAccessInventory(gateway, input, scope);
   if (input['kind'] === 'analytics' && input['section'] === 'customers') return readCustomerMetrics(gateway, input, scope);
   if (input['kind'] === 'stock-context' || input['kind'] === 'stock-overview' || input['kind'] === 'analytics') return readCommercialDiagnostic(gateway, input);
   if (Object.keys(input).some(k => k !== 'kind') || typeof input['kind'] !== 'string' || !['payments','products','eligibility'].includes(input['kind'])) throw new SankhyaError('INVALID_REQUEST', 'Consulta de dicionário inválida.', 400);
