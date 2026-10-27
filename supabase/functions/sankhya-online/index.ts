@@ -1,4 +1,5 @@
 import {readIndicatorSeries} from './indicator-series.ts';
+import {prepareSellerAccess} from './prepare-seller-access.ts';
 import {readRanking} from './ranking.ts';
 import {readReceivables} from './receivables.ts';
 import {readBilledOrdersReport} from './history.ts';
@@ -123,6 +124,13 @@ Deno.serve(async (request: Request) => {
     // Mesmo usuário Auth e vínculo privado em catálogo, cotação e preparação.
     // Nenhum vendedor/filial do corpo HTTP se transforma em autoridade.
     const scope = actorScope(profile);
+    if(input.operation==='seller-access-prepare'){
+      if(profile.id!=='a46afcc5-14fd-4dd9-bd00-759e91b946ca'||profile.role!=='administrador')throw new SankhyaError('FORBIDDEN','Preparação reservada ao administrador autorizado.',403);
+      const url=Deno.env.get('SUPABASE_URL'),key=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||jsonKeys('SUPABASE_SECRET_KEYS')['default'];
+      if(url!=='https://cxurczhmrvxcuvklyiht.supabase.co'||!key)throw new SankhyaError('SERVER_CONFIGURATION','Administração Auth indisponível.',503);
+      const admin=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+      return reply(await prepareSellerAccess({profile:async id=>{const r=await admin.from('profiles').select('id,company_id,role,active').eq('id',id).eq('company_id','432299').maybeSingle();return r.error?null:r.data;},getUser:async id=>{const r=await admin.auth.admin.getUserById(id);return r.error?null:r.data.user;},updateUser:async(id,attributes)=>{const r=await admin.auth.admin.updateUserById(id,attributes);return r.error?null:r.data.user;}},profile,input.query));
+    }
     if (['order-send-review','order-send-submit','order-send-status'].includes(input.operation)) {
       const deps = { gateway: { ...commercialGateway, contextPrices: gateway.contextPrices.bind(gateway), includeOrder: gateway.includeOrder.bind(gateway), confirmOrder: gateway.confirmOrder.bind(gateway) }, actor: profile, rpc: async (name: string, args: Record<string, unknown>) => await profile.client.rpc(name, args), write: writeSubmission };
       if (input.operation === 'order-send-review') return reply(await reviewSubmission(deps, input.query));
