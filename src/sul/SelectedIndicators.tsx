@@ -1,7 +1,7 @@
 import {SpecificIndicator} from './SpecificIndicator';
 import type {ERPClient} from './erp-hooks';
 import React from 'react';
-import {BarChart,ChartCard,DataTable,Empty,KpiCard,formatCurrency,formatNumber} from '@g4ai/ds';
+import {BarChart,ChartCard,DataTable,Empty,KpiCard,Spinner,formatCurrency,formatNumber} from '@g4ai/ds';
 import {formatERPAmount,formatERPShare} from '../lib/erp-decimal';
 import {INDICATOR_SERIES,indicatorPeriod} from '../lib/erp-indicator-series';
 import {salesChartCoordinate} from './erp-sales-chart';
@@ -21,7 +21,7 @@ export function SelectedIndicators({names,data,db,month,seller,client,specificRe
    else{const users=new Map<string,string>((db.users??[]).map((u:any)=>[String(u.id),String(u.name)])),groups=new Map<string,number>();for(const r of rows){const key=b.local==='day'?String(r['date']):typeof r['sellerId']==='string'?r['sellerId']:'Responsável não informado';groups.set(key,(groups.get(key)??0)+1);}const points=[...groups].sort(([a],[b])=>a.localeCompare(b)).map(([key,value])=>({label:b.local==='day'?key.split('-').reverse().join('/'):users.has(key)?users.get(key)+' ['+key+']':key,value}));node=<ChartCard title={name} description={hint}>{points.length?<BarChart label={name} data={points} index="label" series={[{key:'value',label:'Realizadas'}]} format={formatNumber} height={300}/>:<Empty title="Nenhuma atividade Realizada com data válida no período" framed={false}/>}</ChartCard>;}
   }
  }else{const r=data?.series[b.series],spec=INDICATOR_SERIES[b.series],error=data?.errors[b.series];
-  if(!r)node=note(name,error??'Consulta nativa ainda não disponível neste recorte.');
+  if(!r)node=error?note(name,error):<ChartCard title={name}><Spinner size="md" label="Carregando"/></ChartCard>;
   else if(b.view==='money-total')node=<KpiCard label={name} value={formatERPAmount(r.summary.value)??absent} hint="Notas fiscais qualificadas; DTFATUR, cabeçalho uma vez. Não somar com pedidos ou itens."/>;
   else if(b.view==='positivation')node=<KpiCard label={name} value={`${formatNumber(r.summary.buyerCount!)} de ${formatNumber(r.summary.recordCount)}`} hint={`${formatERPShare(String(r.summary.buyerCount),String(r.summary.recordCount))??absent} da carteira atual ativa; compras padrão no mês, sem somar filiais.`}/>;
   else if(b.view==='quantity-value')node=<ChartCard title={name} description="Itens da venda padrão no recorte escolhido: VLRTOT nativo, quantidades por produto/unidade, sem preço × quantidade ou rateio. Categoria é a atual do cadastro."><DataTable label={name} rows={r.items} rowKey={x=>x.id} columns={[{key:'label',header:'Produto',cell:x=>`${x.label??absent} [${x.groupCode??absent}]`},{key:'quantity',header:'Quantidade',cell:x=>x.quantity===null?absent:x.quantity.replace('.',',')},{key:'unit',header:'Unidade',cell:x=>x.unit??absent},{key:'value',header:'Valor dos itens',cell:x=>formatERPAmount(x.value)??absent}]}/></ChartCard>;

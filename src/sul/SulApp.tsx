@@ -6,7 +6,7 @@ import type { ERPWalletSummary } from '../lib/erp-wallet';
 import { formatERPShare } from '../lib/erp-decimal';
 import {FileText as $s} from 'lucide-react';
 import { ArrowLeft as gm, Download as vm, ArrowRight as Jr, Plus as Sa, Printer as td, Trash as Ws, Check as ka, FileCheck as Cm, Pencil as tl, Link2 as Jc, Package as du, ChevronRight as so, Target as od, Lock as Im, ListFilter as ed, Layers as Xl, Settings as ad, Users as Wl, ClipboardList as ym, Building2 as qs, Mail as Lm, Globe as Qc, CreditCard as Kc, ShieldCheck as Mm, ChartNoAxesCombined as Yc, Truck as nd, Sparkles as al, Send as Nm, ChartColumn as zs, Handshake as Sm, Search as tr } from 'lucide-react';
-import { Pagination as GI } from '@g4ai/ds';
+import { Pagination as GI, Spinner as LoadingSpinner } from '@g4ai/ds';
 import React, { useRef, useEffect } from 'react';
 import { commercialItem, commercialPaymentOptions, commercialTotal, isERP, prepareCommercialOrder, quantityRules, validQuantity } from '../lib/erp-commercial';
 import * as runtime from 'react/jsx-runtime';
@@ -285,11 +285,12 @@ function L5(e: any, t: any): any {
         .filter((o: any) => typeof o != "object")
         .join(" ")).includes(ol(t)));
 }
-function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r = !0, actions: l, q: s, onQuery: i, remote, exportRef, }: any): any {
-    let [u, c] = (0, He.useState)(""), f: any = s ?? u, d: any = L5(e, f), m: any = (0, He.useMemo)(() => Object.fromEntries(t.map((x: any) => [x.key, x.get || ((v: any) => v[x.key] ?? "")])), [t]), p: any = UI(remote ? [] : d, m), local: any = zI(p.rows, 10, { resetKey: f }), context = qa(), onlinePage = useERPTable(remote, e, f, p.sort, context.queryMetadata), y: any = remote ? onlinePage : local, C: any = t.map((x: any) => ({
+function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r = !0, actions: l, q: s, onQuery: i, remote, exportRef, onStatus, }: any): any {
+    let [u, c] = (0, He.useState)(""), f: any = s ?? u, d: any = L5(e, f), m: any = (0, He.useMemo)(() => Object.fromEntries(t.map((x: any) => [x.key, x.get || ((v: any) => v[x.key] ?? "")])), [t]), p: any = UI(remote ? [] : d, m), local: any = zI(p.rows, 10, { resetKey: f }), context = qa(), onlinePage = useERPTable(remote, e, f, p.sort, context.queryMetadata), y: any = remote ? onlinePage : local, tableLoading = !!remote && !!onlinePage.loading, tableError = !!remote && !!onlinePage.error, C: any = t.map((x: any) => ({
         ...x,
         sortKey: x.action || x.selection ? void 0 : x.key,
     }));
+    He.useEffect(() => { onStatus?.({ loading: tableLoading, error: tableError }); }, [tableLoading, tableError]);
     if (exportRef) exportRef.current = () => p.rows;
     return (0, b.jsxs)("div", {
         className: "space-y-3",
@@ -299,8 +300,8 @@ function ya({ rows: e, columns: t, label: a, onRowClick: o, empty: n, toolbar: r
                     children: (0, b.jsx)(cv, {
                         query: f,
                         onQuery: i || c,
-                        shown: remote ? onlinePage.total ?? pa : d.length,
-                        total: remote ? onlinePage.totalWithoutSearch ?? pa : e.length,
+                        shown: remote ? (onlinePage.loading && onlinePage.total === undefined ? (0, b.jsx)(LoadingSpinner, { size: "xs", label: "Carregando" }) : onlinePage.total ?? pa) : d.length,
+                        total: remote ? (onlinePage.loading && onlinePage.totalWithoutSearch === undefined ? (0, b.jsx)(LoadingSpinner, { size: "xs", label: "Carregando" }) : onlinePage.totalWithoutSearch ?? pa) : e.length,
                         noun: "registro",
                         hideSearch: !1,
                         dirty: !!f,
@@ -566,6 +567,9 @@ function nz(): any {
         12: "dezembro",
     };
     let nomeMes: any = MESES[mes] || mes;
+    const spin: any = (0, b.jsx)(LoadingSpinner, { size: "md", label: "Carregando" });
+    const waitSeries = (k: string) => !!online && !(native as any)?.series?.[k] && !(native as any)?.errors?.[k];
+    const waitRanking = !!online && !native?.ranking && !native?.errors?.['ranking'];
     return (0, b.jsxs)(fa, {
         width: "wide",
         children: [
@@ -645,7 +649,7 @@ function nz(): any {
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Vendido",
-                        value: rt(f),
+                        value: waitRanking ? spin : rt(f),
                         hint: online ? "Pedidos padrão por DTNEG no mês selecionado; não é faturamento." : "Pedidos conclu\xEDdos do tipo Venda",
                     }),
                     (0, b.jsx)(Ha, {
@@ -657,24 +661,24 @@ function nz(): any {
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Clientes atendidos",
-                        value: online && (atendidos===null||base===null) ? pa : na(atendidos) + " de " + na(base),
+                        value: online && (atendidos===null||base===null) ? (waitSeries('wallet-seller') ? spin : pa) : na(atendidos) + " de " + na(base),
                         hint: online ? base!==null&&atendidos!==null ? (formatERPShare(String(atendidos),String(base))??pa)+" da carteira atual ATIVO=S" : "Carteira nativa ainda indisponível" : base > 0 ? na((atendidos / base) * 100) + "% da base" : "",
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Sem compra no m\u00EAs",
-                        value: online ? nativeAbsent===null ? pa : na(nativeAbsent) : na(naoCompraram.length),
+                        value: online ? nativeAbsent===null ? (waitSeries('wallet-seller') ? spin : pa) : na(nativeAbsent) : na(naoCompraram.length),
                         hint: online ? "Carteira atual ativa sem compra padrão no mês; filiais não são somadas." : "Clientes da base sem pedido no m\u00EAs",
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Comiss\u00E3o do m\u00EAs",
-                        value: temComissao ? rt(comissaoMes) : "\u2014",
+                        value: temComissao ? rt(comissaoMes) : online && waitSeries('commissions-seller') ? spin : "\u2014",
                         hint: online ? "Livro TGFCOM por emissão da origem; não comprova pagamento." : temComissao
                             ? "Comiss\xE3o dos itens com % definida no produto"
                             : "Defina Comiss\xE3o (%) na ficha dos produtos",
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Novos clientes " + ano,
-                        value: online ? nativeNewCount===null ? pa : na(nativeNewCount) : na(novos.length),
+                        value: online ? nativeNewCount===null ? (waitSeries('customers-seller-year') ? spin : pa) : na(nativeNewCount) : na(novos.length),
                         hint: online ? "Primeira compra padrão histórica no ano, não data de cadastro. Financeiro do grupo não conectado." : "Faturamento no ano: " + rt(novosFat),
                     }),
                 ],
@@ -3060,6 +3064,7 @@ function bz({ id: e }: any): any {
     const reportMonth=r.f.from?.slice(0,7) || r.f.to?.slice(0,7) || businessDate().slice(0,7);
     const nonBuyerKey=JSON.stringify([r.f,reportMonth]);
     const walletKey=JSON.stringify([e,r.f,reportMonth]);
+    const [tableStatus,setTableStatus]=He.useState({loading:true,error:false});
     const [walletResult,setWalletResult]=He.useState(undefined);
     const onWalletSummary=He.useCallback((summary:ERPWalletSummary|undefined)=>setWalletResult({key:walletKey,summary}),[walletKey]);
     const walletSummary:ERPWalletSummary|undefined=walletResult?.key===walletKey?walletResult.summary:undefined;
@@ -3695,15 +3700,15 @@ function bz({ id: e }: any): any {
                     children: [
                         (0, b.jsx)(Ha, {
                             label: billingReport ? "Notas no recorte filtrado" : "Pedidos no recorte filtrado",
-                            value: commercialReport ? salesSummary?.documentCount ?? pa : d.length,
+                            value: commercialReport ? salesSummary?.documentCount ?? (tableStatus.loading ? (0, b.jsx)(LoadingSpinner, { size: "md", label: "Carregando" }) : pa) : d.length,
                         }),
                         (0, b.jsx)(Ha, {
                             label: billingReport ? "Valor faturado" : "Valor em pedidos",
-                            value: commercialReport ? rt(salesSummary?.documentAmount) : rt(Zo(d, "total")),
+                            value: commercialReport ? (salesSummary || !tableStatus.loading ? rt(salesSummary?.documentAmount) : (0, b.jsx)(LoadingSpinner, { size: "md", label: "Carregando" })) : rt(Zo(d, "total")),
                         }),
                         (0, b.jsx)(Ha, {
                             label: billingReport ? "Ticket médio em notas" : "Ticket m\xE9dio em pedidos",
-                            value: commercialReport ? salesSummary ? formatERPAmount(salesSummary.documentAmount, salesSummary.documentCount) ?? (salesSummary.documentCount === 0 ? "\u2014" : pa) : pa : d.length ? rt(Zo(d, "total") / d.length) : "\u2014",
+                            value: commercialReport ? salesSummary ? formatERPAmount(salesSummary.documentAmount, salesSummary.documentCount) ?? (salesSummary.documentCount === 0 ? "\u2014" : pa) : tableStatus.loading ? (0, b.jsx)(LoadingSpinner, { size: "md", label: "Carregando" }) : pa : d.length ? rt(Zo(d, "total") / d.length) : "\u2014",
                         }),
                     ],
                 }),
@@ -3711,6 +3716,7 @@ function bz({ id: e }: any): any {
             (0, b.jsx)(ya, {
                 rows: m,
                 remote,
+                onStatus: setTableStatus,
                 exportRef: localRecordReport ? completionExport : undefined,
                 label: n.name,
                 columns: g,
