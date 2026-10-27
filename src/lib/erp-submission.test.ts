@@ -14,7 +14,7 @@ describe('equivalência com skill Pedidos2.0.2',()=>{
     for(const item of expected.nota.itens.item){for(const field of ['QTDNEG','VLRUNIT'] as const)item[field].$=canonicalDecimal(Number(item[field].$));}
     const controls=actual.nota.itens.item.map(i=>i['CONTROLE']);
     for(const item of actual.nota.itens.item)delete item['CONTROLE'];
-    expect(actual).toEqual(expected);expect(controls).toEqual(c.pedidos_fiscais[0].itens.map(i=>({$:i.controle})));
+    expect(actual).toEqual(expected);expect(controls).toEqual(c.pedidos_fiscais[0].itens.map(i=>i.controle.trim()?{$:i.controle}:undefined));
   });
   it('aprovação e estado não mudam o hash de conteúdo, mas frete muda',async()=>{const c=canonicalFixture(),hash=await canonicalHash(c);c.estado='aprovado';c.aprovacao.status='aprovado';expect(await canonicalHash(c)).toBe(hash);c.pedidos_fiscais[0].frete_codigo='F';expect(await canonicalHash(c)).not.toBe(hash);});
 });

@@ -60,6 +60,7 @@ async function prepare(d:SubmissionDeps,order:Row,freight:FreightType,reprice:bo
   let canonical:Canonical;
   try {canonical=makeCanonical(order,{cnpj:String(buyer?.['cnpj']??''),uf:String(buyer?.['state']??'')},freight);}
   catch(e){return fail('ERP_CONTEXT_REQUIRED',e instanceof Error?e.message:'Pedido incompleto.',400);}
+  if(canonical.pedidos_fiscais[0].numero_externo.length>15)return fail('ERP_EXTERNAL_NUMBER_TOO_LONG','O Nº Pedido do Cliente excede 15 caracteres (limite do Sankhya). Ajuste o pedido antes de enviar; nenhum envio foi feito.',400);
   await checkRegistry(d,canonical.pedidos_fiscais[0]);
   return canonical;
 }
@@ -83,7 +84,7 @@ FROM TGFITE I WHERE I.NUNOTA=${nunota} AND ROWNUM<=50 ORDER BY I.SEQUENCIA`,50);
   if(rows.length===50){const extra=await d.gateway.select(`SELECT X.NUNOTA FROM (SELECT I.NUNOTA,ROW_NUMBER() OVER(ORDER BY I.SEQUENCIA) RN FROM TGFITE I WHERE I.NUNOTA=${nunota}) X WHERE X.RN=51 AND ROWNUM<=1`,1);if(extra.length)return fail('ERP_ORDER_DIVERGED','Pedido ERP contém itens além da versão aprovada.');}
   const signature=(product:number,unit:string,local:number,control:string,qty:string,price:string,total:string,discount:string)=>JSON.stringify([product,unit.trim(),local,control,decimalUnits(qty).toString(),decimalUnits(price).toString(),decimalUnits(total).toString(),decimalUnits(discount).toString()]);
   let actual:string[];
-  try{actual=rows.map(r=>{if(typeof r['CONTROLE']!=='string'||typeof r['CODVOL']!=='string'||r['CODLOCALORIG']===null||!Number.isSafeInteger(Number(r['CODLOCALORIG'])))throw new Error();return signature(positiveCode(Number(r['CODPROD'])),r['CODVOL'],Number(r['CODLOCALORIG']),r['CONTROLE'],String(r['QTDNEG']),String(r['VLRUNIT']),String(r['VLRTOT']),String(r['PERCDESC']));}).sort();}
+  try{actual=rows.map(r=>{if(typeof r['CONTROLE']!=='string'||typeof r['CODVOL']!=='string'||r['CODLOCALORIG']===null||!Number.isSafeInteger(Number(r['CODLOCALORIG'])))throw new Error();const approved=p.itens.find(i=>i.codigo_produto===Number(r['CODPROD'])),local=approved?.codigo_estoque===0&&Number(r['CODLOCALORIG'])>0?0:Number(r['CODLOCALORIG']);return signature(positiveCode(Number(r['CODPROD'])),r['CODVOL'],local,r['CONTROLE'],String(r['QTDNEG']),String(r['VLRUNIT']),String(r['VLRTOT']),String(r['PERCDESC']));}).sort();}
   catch{return fail('ERP_ORDER_DIVERGED','Itens ERP sem correspondência exata com a aprovação.');}
   const expected=p.itens.map(i=>signature(i.codigo_produto,i.unidade,i.codigo_estoque,i.controle,canonicalDecimal(i.quantidade),canonicalDecimal(i.valor_unitario),canonicalDecimal(i.valor_total),'0')).sort();
   if(JSON.stringify(actual)!==JSON.stringify(expected)||typeof cab['STATUSNOTA']!=='string'||!/^[A-Z]$/.test(cab['STATUSNOTA']))return fail('ERP_ORDER_DIVERGED','Itens ou status ERP divergentes; não confirmar nem reincluir.');

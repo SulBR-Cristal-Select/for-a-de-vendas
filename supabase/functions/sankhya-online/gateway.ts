@@ -91,6 +91,7 @@ export class SankhyaGateway {
     let result: ObjectValue;
     try { const raw=await response.text(); if(raw.length>1000000)throw new Error(); result=object(JSON.parse(raw)); }
     catch { throw new SankhyaError(uncertain, 'Resposta de envio incompatível; não repetir a inclusão.', 502); }
+    if (String(result['status']) === '0') { console.error('ERP_REJECTION_DETAIL', service, String(result['statusMessage'] ?? result['message'] ?? 'sem mensagem').replace(/[\r\n]+/g,' ').slice(0, 600)); }
     if (String(result['status']) === '0') throw new SankhyaError(inclusion ? 'ERP_INCLUSION_REJECTED' : 'ERP_CONFIRMATION_REJECTED', 'O Sankhya recusou a operação. Confira o mesmo pedido.', 409);
     if (String(result['status']) !== '1') throw new SankhyaError(uncertain, 'Resposta de envio sem confirmação.', 502);
     return object(result['responseBody']);
