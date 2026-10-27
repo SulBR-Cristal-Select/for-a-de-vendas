@@ -9,7 +9,7 @@ const invalid=():never=>{throw new ERPOnlineError('INVALID_RESPONSE');};
 /** Somente agregados transitórios, até50 grupos por requisição. Sem gravação/fallback local. */
 export async function collectIndicatorSeries(client:ERPClient,q:Omit<ERPIndicatorQuery,'offset'|'limit'>,check:()=>void=()=>{}):Promise<ERPIndicatorWindow>{
  const rows:ERPIndicatorWindow['items']=[];let first:ERPIndicatorWindow|undefined,key:string|undefined;
- for(let offset=0;;offset+=50){check();const r=await client.indicatorSeries({...q,offset,limit:50});check();const signature=JSON.stringify([r.summary,r.total,r.month,r.period,r.indicatorPolicy,r.companyCodes]);if(key!==undefined&&key!==signature)invalid();key=signature;first??=r;if(r.total>10000)throw new ERPOnlineError('INVALID_RESPONSE');rows.push(...r.items);if(rows.length>=r.total)break;}
+ for(let offset=0;;offset+=50){check();const r=await client.indicatorSeries({...q,offset,limit:50});check();const signature=JSON.stringify([r.summary,r.total,r.month,r.period,r.indicatorPolicy,r.companyCodes,r.selection]);if(key!==undefined&&key!==signature)invalid();key=signature;first??=r;if(r.total>10000)throw new ERPOnlineError('INVALID_RESPONSE');rows.push(...r.items);if(rows.length>=r.total)break;}
  const complete={...first!,items:rows,offset:0};decodeIndicatorSeries(complete,{...q,offset:0,limit:50},invalid);return complete;
 }
 export function useOnlineIndicators(client:ERPClient|undefined,month:string,seller:string,names:readonly string[],identity:string){

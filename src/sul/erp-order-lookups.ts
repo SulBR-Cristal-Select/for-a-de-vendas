@@ -19,12 +19,12 @@ type Consulta = {
 };
 
 /** Só reconhece o popup que contém a busca exata do Combobox do DS. */
-function popupDoCampo(input: HTMLInputElement, recurso: ERPResource): HTMLElement | null {
+function popupDoCampo(input: HTMLInputElement, recurso: ERPResource, label:string = rotulos[recurso]): HTMLElement | null {
   if (
-    input.getAttribute("aria-label") !== `Buscar em ${rotulos[recurso].toLocaleLowerCase("pt-BR")}`
+    input.getAttribute("aria-label") !== `Buscar em ${label.toLocaleLowerCase("pt-BR")}`
   )
     return null;
-  const popup = input.closest<HTMLElement>(`[aria-label="${rotulos[recurso]}"]`);
+  const popup = input.closest<HTMLElement>(`[aria-label="${label}"]`);
   return popup && popup.tagName !== "BUTTON" ? popup : null;
 }
 function idDeRegistro(recurso: ERPResource, id: string): string | number | undefined {
@@ -39,7 +39,7 @@ function unir(linhas: ERPRow[], selecionados: ERPRow[]): ERPRow[] {
   return [...new Map([...selecionados, ...linhas].map((linha) => [linha["id"], linha])).values()];
 }
 
-function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: readonly string[], filters?: ERPPageQuery['filters']) {
+function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: readonly string[], filters?: ERPPageQuery['filters'], label:string = rotulos[recurso]) {
   const [estado, definirEstado] = useState<Consulta>({
     rows: [],
     loading: !!client,
@@ -134,14 +134,14 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
     }
     function entrada(evento: Event) {
       const alvo = evento.target;
-      if (alvo instanceof HTMLInputElement && popupDoCampo(alvo, recurso)) buscar(alvo.value);
+      if (alvo instanceof HTMLInputElement && popupDoCampo(alvo, recurso, label)) buscar(alvo.value);
     }
     function rolagem(evento: Event) {
       const lista = evento.target;
       if (!(lista instanceof HTMLElement) || lista.getAttribute("role") !== "listbox") return;
-      const popup = lista.closest<HTMLElement>(`[aria-label="${rotulos[recurso]}"]`);
+      const popup = lista.closest<HTMLElement>(`[aria-label="${label}"]`);
       const input = popup?.querySelector<HTMLInputElement>("input");
-      if (!input || popupDoCampo(input, recurso) !== popup || input.value !== consulta) return;
+      if (!input || popupDoCampo(input, recurso, label) !== popup || input.value !== consulta) return;
       if (
         lista.scrollHeight > lista.clientHeight &&
         lista.scrollTop + lista.clientHeight >= lista.scrollHeight - 4 &&
@@ -161,7 +161,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
       document.removeEventListener("focusin", entrada, true);
       document.removeEventListener("scroll", rolagem, true);
     };
-  }, [client, recurso, JSON.stringify(filters)]);
+  }, [client, recurso, JSON.stringify(filters), label]);
 
   useEffect(() => {
     if (!client) return;
@@ -256,3 +256,6 @@ export function useERPOrderLookups(
     hasMore: Object.fromEntries(recursos.map((recurso) => [recurso, estados[recurso].hasMore])),
   };
 }
+
+/** Reaproveita busca/paginação de cadastros para filtros transitórios dos indicadores. */
+export function useERPIndicatorLookup(client:ERPClient|undefined,resource:'customers'|'products',id:string,label:string){return useConsulta(client,resource,id?[id]:[],resource==='customers'?{active:'all'}:undefined,label);}

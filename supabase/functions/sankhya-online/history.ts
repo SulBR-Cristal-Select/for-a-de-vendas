@@ -1,3 +1,5 @@
+import {checkedSelection,itemSelection} from './indicator-selection.ts';
+import type {IndicatorSelection} from '../../../src/lib/erp-indicator-series.ts';
 import {billedOrderSQL,billedOrderSource} from './billed-orders-source.ts';
 import {BILLED_ORDERS_POLICY} from '../../../src/lib/erp-billed-orders.ts';
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
@@ -315,7 +317,8 @@ function itemSummary(row: Row | undefined) {
   return {lineCount,subtotal,missingSubtotalCount,quantityField:'TGFITE.QTDNEG' as const,unitPriceField:'TGFITE.VLRUNIT' as const,subtotalField:'TGFITE.VLRTOT' as const,calculatedSubtotal:false as const,headerAmountsAdded:false as const,atomicSnapshot:false as const};
 }
 /** Itens da venda padrão, sem cotação, rateio ou multiplicação de preço/quantidade. */
-export async function readOrderItemsReport(gateway: Transport,input: OrderItemsReportInput,scope: ReadScope, dimension:'product'|'day'|'seller'|'category'='product') {
+export async function readOrderItemsReport(gateway: Transport,input: OrderItemsReportInput,scope: ReadScope, dimension:'product'|'day'|'seller'|'category'='product',selection:IndicatorSelection={}) {
+  checkedSelection(selection);
   keys(input,['resource','offset','limit','customerId','sellerCode','status','search','sort','direction','from','to','companyCode','productReport']);
   if(input.resource!=='orders'||input.status!==undefined&&input.status!=='confirmado'||input.productReport!==undefined&&input.productReport!==true)return invalid();
   const products=input.productReport===true;
@@ -342,14 +345,15 @@ export async function readOrderItemsReport(gateway: Transport,input: OrderItemsR
     TGFITE:{NUNOTA:'NUMBER',SEQUENCIA:'NUMBER',CODEMP:'NUMBER',CODPROD:'NUMBER',CODVOL:'text',QTDNEG:'decimal',VLRUNIT:'decimal',VLRTOT:'decimal'},
     TGFPRO:{CODPROD:'NUMBER',DESCRPROD:'text'},TGFVEN:{CODVEND:'NUMBER',APELIDO:'text'},
   };
+  if(selection.categoryCode!==undefined)required['TGFPRO']!['CODGRUPOPROD']='NUMBER';
   if(dimension==='category'){required['TGFPRO']!['CODGRUPOPROD']='NUMBER';required['TGFGRU']={CODGRUPOPROD:'NUMBER',DESCRGRUPOPROD:'text'};}
   const meta=await gateway.select(`SELECT TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE ${Object.entries(required).map(([t,cols])=>`(TABLE_NAME='${t}' AND COLUMN_NAME IN (${Object.keys(cols).map(literal).join(',')}))`).join(' OR ')} ORDER BY TABLE_NAME,COLUMN_NAME FETCH FIRST 50 ROWS ONLY`,50);
   for(const [table,cols]of Object.entries(required))for(const [name,type]of Object.entries(cols))if(!meta.some(r=>r['TABLE_NAME']===table&&r['COLUMN_NAME']===name&&(type==='text'?['CHAR','VARCHAR2','NCHAR','NVARCHAR2'].includes(String(r['DATA_TYPE'])):type==='decimal'?['NUMBER','FLOAT'].includes(String(r['DATA_TYPE'])):r['DATA_TYPE']===type)))return unsupportedSales();
   const invalidTop="T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'P' OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1)";
-  const groupedIdentity=products?' OR I.CODPROD<1 OR I.CODPROD>2147483647 OR I.CODPROD<>ROUND(I.CODPROD,0) OR I.SEQUENCIA< -2147483648 OR I.SEQUENCIA>2147483647 OR I.SEQUENCIA<>ROUND(I.SEQUENCIA,0) OR C.NUNOTA<1 OR C.NUNOTA>2147483647 OR C.NUNOTA<>ROUND(C.NUNOTA,0)':'';
+  const groupedIdentity=(selection.categoryCode!==undefined?' OR NOT EXISTS(SELECT 1 FROM TGFPRO CP WHERE CP.CODPROD=I.CODPROD)':'')+(products?' OR I.CODPROD<1 OR I.CODPROD>2147483647 OR I.CODPROD<>ROUND(I.CODPROD,0) OR I.SEQUENCIA< -2147483648 OR I.SEQUENCIA>2147483647 OR I.SEQUENCIA<>ROUND(I.SEQUENCIA,0) OR C.NUNOTA<1 OR C.NUNOTA>2147483647 OR C.NUNOTA<>ROUND(C.NUNOTA,0)':'');
   const guard=await gateway.select(`SELECT COUNT(*) AS MISSING_CONTEXT_COUNT FROM ${fromSQL} LEFT JOIN TGFITE I ON I.NUNOTA=C.NUNOTA WHERE ${candidate.join(' AND ')} AND ((${invalidTop}) OR (T.BONIFICACAO='N' AND T.GOLDEV=1 AND I.NUNOTA IS NOT NULL AND (I.CODEMP IS NULL OR I.CODEMP<>C.CODEMP OR I.CODPROD IS NULL OR I.SEQUENCIA IS NULL${groupedIdentity})))`,1);
   if(guard.length!==1)return incompatible();if(salesCount(guard[0],'MISSING_CONTEXT_COUNT')!==0)return unsupportedSales();
-  const withoutSearch=[...candidate,`T.TIPMOV='${policy.movement}'`,`T.BONIFICACAO='${policy.bonification}'`,`T.GOLDEV=${policy.devolution}`];
+  const withoutSearch=[...candidate,`T.TIPMOV='${policy.movement}'`,`T.BONIFICACAO='${policy.bonification}'`,`T.GOLDEV=${policy.devolution}`,...(selection.productId||selection.categoryCode!==undefined?[itemSelection(selection)]:[])];
   const where=[...withoutSearch],itemFrom=`${fromSQL} JOIN TGFITE I ON I.NUNOTA=C.NUNOTA LEFT JOIN TGFPRO PR ON PR.CODPROD=I.CODPROD${dimension==='category'?' LEFT JOIN TGFGRU G ON G.CODGRUPOPROD=PR.CODGRUPOPROD':''}`;
   if(search){const term=literal('%'+foldERPText(search).replace(/[!%_]/g,c=>'!'+c)+'%');const fields=products?['TO_CHAR(I.CODPROD)','PR.DESCRPROD']:['TO_CHAR(C.NUNOTA)','TO_CHAR(C.NUMNOTA)','TO_CHAR(I.CODPROD)','PR.DESCRPROD','P.RAZAOSOCIAL','V.APELIDO','I.CODVOL'];where.push(`(${fields.map(f=>`${foldSQL(f)} LIKE ${term} ESCAPE '!'`).join(' OR ')})`);}
   const sums=await gateway.select(`SELECT ${itemAggregate} FROM ${itemFrom} WHERE ${where.join(' AND ')}`,1);if(sums.length!==1)return incompatible();const summary=itemSummary(sums[0]);

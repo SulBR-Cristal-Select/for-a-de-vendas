@@ -679,7 +679,7 @@ function nz(): any {
                     }),
                 ],
             }),
-            online && (0,b.jsx)(SelectedIndicators,{names:e.extraIndicators,data:native,db:e,month:o,seller:r}),
+            online && (0,b.jsx)(SelectedIndicators,{names:e.extraIndicators,data:native,db:e,month:o,seller:r,client:online}),
             meta > 0 &&
                 (0, b.jsx)(cs, {
                     title: "Acompanhamento da meta",
