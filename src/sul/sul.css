@@ -19,3 +19,16 @@ html,body,#root{height:100%;margin:0}body{background:var(--ds-page);color:var(--
 .chat-question{margin-left:32px;border:1px solid var(--ds-line);border-radius:12px;padding:16px;background:var(--ds-soft)}
 @media(max-width:639.98px){.mock-topbar{gap:4px}.mock-topbar>div:last-child{gap:0}.cart-item{padding:12px}.chat-question{margin-left:12px}}
 @media print{aside,.mock-topbar,.mock-footer,button,[role="toolbar"]{display:none!important}html,body,#root,main{height:auto!important;overflow:visible!important}main{width:100%!important}a{color:inherit!important;text-decoration:none!important}}
+/* Respostas da Sul IA: hierarquia Markdown sem alterar o restante do chat. */
+.sul-ai-answer{line-height:1.65;overflow-wrap:anywhere;min-width:0}
+.sul-ai-answer>:first-child{margin-top:0}.sul-ai-answer>:last-child{margin-bottom:0}
+.sul-ai-answer p{margin:0 0 12px}
+.sul-ai-answer h1,.sul-ai-answer h2,.sul-ai-answer h3,.sul-ai-answer h4{font-weight:600;line-height:1.35;margin:24px 0 12px;color:var(--ds-ink)}
+.sul-ai-answer h1,.sul-ai-answer h2{font-size:1.125rem}.sul-ai-answer h3,.sul-ai-answer h4{font-size:1rem}
+.sul-ai-answer ul,.sul-ai-answer ol{padding-left:24px;margin:0 0 16px}.sul-ai-answer ul{list-style:disc}.sul-ai-answer ol{list-style:decimal}
+.sul-ai-answer li{margin:6px 0}.sul-ai-answer li>p{margin:0}.sul-ai-answer strong{font-weight:600}
+.sul-ai-answer blockquote{border-left:3px solid var(--ds-line);padding-left:16px;margin:16px 0;color:var(--ds-muted)}
+.sul-ai-answer hr{border:0;border-top:1px solid var(--ds-line);margin:24px 0}
+.sul-ai-answer code{background:var(--ds-soft);padding:2px 4px;border-radius:4px;font-size:.875em}.sul-ai-answer pre{overflow-x:auto;background:var(--ds-soft);padding:16px;border-radius:8px;margin:16px 0}
+.sul-ai-answer a{color:var(--ds-ink);text-decoration:underline;text-underline-offset:3px}
+.sul-ai-table{overflow-x:auto;margin:16px 0}.sul-ai-table table{border-collapse:collapse;width:100%;font-size:.875rem}.sul-ai-table th,.sul-ai-table td{padding:10px 12px;border-bottom:1px solid var(--ds-line);text-align:left;vertical-align:top}.sul-ai-table th{font-weight:600;background:var(--ds-soft)}

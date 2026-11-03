@@ -1,6 +1,7 @@
 import {useCustomerPerformance,customerPerformancePeriods} from './customer-performance';
 const customerNativeEnd=(month:string)=>customerPerformancePeriods(month).year.to;
 import CustomerGroups from './CustomerGroups';
+import AIAnswer from './AIAnswer';
 import { groupForCustomer, groupLabel } from '../lib/customer-groups';
 import { businessDate, proratedMonthlyTarget } from '../lib/business-month';
 import {SelectedIndicators} from './SelectedIndicators';
@@ -4630,10 +4631,7 @@ function wz(): any {
                                         tone: "warn",
                                         children: s.model ? "IA · " + s.model : "Resposta antiga · simulada",
                                     }),
-                                    (0, b.jsx)("p", {
-                                        className: "text-body whitespace-pre-line leading-relaxed",
-                                        children: s.answer,
-                                    }),
+                                    (0, b.jsx)(AIAnswer, { text: s.answer }),
                                 ],
                             }),
                         ],
