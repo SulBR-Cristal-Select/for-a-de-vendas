@@ -140,6 +140,7 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
         customerId: customer.id,
         productId: product.id,
         paymentCode: 31,
+        sellerCode: 8,
         type: "Venda",
         date: context.date,
       },
@@ -272,6 +273,15 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
       assertOrderMutation({ ...before, orders: [{ ...order, id: "sankhya:order:1" }] }, before),
     ).toThrow("inválido");
     expect(persist).toHaveBeenCalledTimes(1);
+  });
+  it('gestor seleciona integrante explícito, cota e salva sem trocar a identidade Auth',async()=>{
+    location.hash='#/pedidos/novo';const id='00000000-0000-4000-8000-000000000001',team={...seller,id:'sankhya:seller:12',code:'12',name:'Integrante autorizado'};
+    const state=createAppState({company:{userId:id,role:'Gestor',erpSeller:{userId:id,sellerId:seller.id,sellerCode:8,companyCodes:[4],teamSellerCodes:[12]}},customers:[],products:[],orders:[]});const client=fakeClient(),persist=vi.fn(async value=>value);
+    vi.mocked(client.window).mockImplementation(async({resource}:any)=>({items:resource==='customers'?[customer]:resource==='products'?[product]:[seller,team],total:resource==='sellers'?2:1}) as any);
+    vi.mocked(client.record).mockImplementation(async({resource,id}:any)=>({record:resource==='customers'?customer:resource==='products'?product:Number(id)===12?team:seller}) as any);
+    vi.mocked(client.price).mockImplementation(async({quantity,sellerCode}:any)=>({...preview(quantity),seller:sellerCode===12?team:seller}));
+    render(<SulApp initialState={state} online={client} persist={persist} onSignOut={async()=>{}}/>);
+    await screen.findByRole('option',{name:'Cliente ERP (7)'});fireEvent.change(screen.getByLabelText('Cliente'),{target:{value:customer.id}});await screen.findByRole('option',{name:payment.label});await screen.findByRole('option',{name:team.name});fireEvent.change(screen.getByLabelText('Vendedor'),{target:{value:team.id}});fireEvent.change(screen.getByLabelText('Produto'),{target:{value:product.id}});fireEvent.click(screen.getByRole('button',{name:/Adicionar produto/}));await screen.findByText('Produto ERP',{selector:'strong'});fireEvent.click(screen.getByRole('button',{name:/Salvar pedido/}));await waitFor(()=>expect(persist).toHaveBeenCalledTimes(1));expect(persist.mock.calls[0]![0].company.userId).toBe(id);expect(persist.mock.calls[0]![0].orders[0].erp.sellerCode).toBe(12);expect(client.price).toHaveBeenCalledWith(expect.objectContaining({sellerCode:12}));
   });
   it("integra os seletores existentes, preço contextual e persistência sem baixar carteira", async () => {
     location.hash = "#/pedidos/novo";

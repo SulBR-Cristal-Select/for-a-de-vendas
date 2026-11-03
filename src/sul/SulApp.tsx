@@ -1,4 +1,5 @@
-import {useCustomerPerformance} from './customer-performance';
+import {useCustomerPerformance,customerPerformancePeriods} from './customer-performance';
+const customerNativeEnd=(month:string)=>customerPerformancePeriods(month).year.to;
 import CustomerGroups from './CustomerGroups';
 import { groupForCustomer, groupLabel } from '../lib/customer-groups';
 import { businessDate, proratedMonthlyTarget } from '../lib/business-month';
@@ -158,7 +159,7 @@ export async function quoteERPOrderItem(client: ERPClient, context: OnlineOrderC
     if (!/^sankhya:customer:[1-9]\d*$/.test(context.customerId) || !Number.isSafeInteger(context.paymentCode) || context.paymentCode < 1 ||
         !Number.isSafeInteger(sellerCode) || sellerCode < 1 || context.type !== 'Venda' || !unit || !validQuantity(product, quantity, unit))
         throw new Error('Confirme cliente, condição de pagamento, vendedor ERP, unidade e quantidade antes de consultar o preço.');
-    const quote = await client.price({ customerId: context.customerId, productId: product.id, paymentCode: context.paymentCode, type: 'Venda', quantity, unit, date: context.date });
+    const quote = await client.price({ customerId: context.customerId, productId: product.id, paymentCode: context.paymentCode, type: 'Venda', sellerCode, quantity, unit, date: context.date });
     if (quote.seller['id'] !== context.sellerId || quote.quantity !== quantity || quote.price.unit !== unit || quote.customer['id'] !== context.customerId || quote.product['id'] !== product.id || quote.payment.code !== context.paymentCode)
         throw new Error('O preço retornado não corresponde ao contexto selecionado.');
     if (quote.price.amount <= 0) throw new Error('Preço ERP não confirmado.');
@@ -383,8 +384,8 @@ function Gp({ rows: e, name: t, columns: a, remoteResource, transformRows, local
         children: [(0, b.jsx)(vm, {}), "Exportar CSV"],
     });
 }
-function w5(e: any): any {
-    let [t, a] = (0, He.useState)(!1), [o, n] = (0, He.useState)({ seller: "", status: "", customer: "", from: "", to: "" }), r: any = e.filter((l: any) => (!o.seller || l.seller === o.seller) &&
+function w5(e: any, initial?: any): any {
+    let [t, a] = (0, He.useState)(!1), [o, n] = (0, He.useState)({ seller: "", status: "", customer: "", from: "", to: "", ...initial }), r: any = e.filter((l: any) => (!o.seller || l.seller === o.seller) &&
         (!o.status || l.status === o.status) && (!o.customer || l.customerId === o.customer) &&
         (!l.date ||
             ((!o.from || l.date >= o.from) && (!o.to || l.date <= o.to))));
@@ -724,7 +725,7 @@ function nz(): any {
                     (MESES[mesAnt.slice(5, 7)] || mesAnt) +
                     " de " +
                     mesAnt.slice(0, 4) +
-                    " \xB7 seta verde = cresceu, vermelha = caiu" + (online ? " · meses completos · histórico disponível no ERP" : ""),
+                    " \xB7 seta verde = cresceu, vermelha = caiu" + (online ? " · meses completos · histórico disponível no ERP; sem registros não comprova ausência histórica" : ""),
                 children: clientesPerf.length
                     ? (0, b.jsx)(ya, {
                         toolbar: !1,
@@ -762,11 +763,11 @@ function nz(): any {
                         title: "Acumulado por cliente",
                         description: online ? "Vendas padrão de janeiro até o fim do mês selecionado · histórico disponível no ERP" : "Total hist\xF3rico de vendas conclu\xEDdas por cliente",
                         action: (0, b.jsx)(xt, {
-                            href: "#/relatorios/gerencial",
+                            href: "#/relatorios/gerencial?de=" + ano + "-01-01&ate=" + customerNativeEnd(o) + (r ? "&vendedor=" + encodeURIComponent(r) : ""),
                             children: "Detalhar",
                         }),
                         children: acumCliente.length
-                            ? (0, b.jsx)(Zy, { items: acumCliente, format: Vd })
+                            ? (0, b.jsx)("div", {style: online ? {maxHeight:420,overflowY:"auto"} : undefined,children:(0, b.jsx)(Zy, { items: acumCliente, format: Vd })})
                             : (0, b.jsx)(hn, {
                                 title: online ? customerNative?.errors['accumulated'] ?? (customerNative?.accumulated ? "Nenhuma venda registrada no ano selecionado" : "Carregando acumulado por cliente") : "Sem vendas neste recorte",
                                 framed: !1,
@@ -3071,7 +3072,7 @@ function xz(): any {
     });
 }
 function bz({ id: e }: any): any {
-    let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
+    let { db: t, editor: a, update: o, online } = qa(), n: any = t.reports.find((h: any) => h.id === e), r: any = w5(t.orders, e === 'gerencial' ? (()=>{const q=new URLSearchParams(location.hash.split('?')[1]||'');return {from:q.get('de')||'',to:q.get('ate')||'',seller:q.get('vendedor')||''};})() : undefined), [l, s] = (0, He.useState)("nenhum"), [i, u] = (0, He.useState)(!1), [c, f] = (0, He.useState)([]);
     const rankingReport=['ranking','meta-vendedor'].includes(e)&&!!online;
     const receivablesReport=e==='titulos'&&!!online;
     const customerReport = e === 'clientes' && !!online;
