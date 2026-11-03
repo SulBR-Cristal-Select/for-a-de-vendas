@@ -91,7 +91,7 @@ function queryParts(input: PageInput & Partial<WindowInput>, trustedScope: ReadS
   const filters = input.filters ?? {};
   keys(filters, ['companyCode', 'sellerCode', 'managerCode', 'categoryCode', 'categoryName', 'cityCode', 'customerCode', 'active']);
   if (filters.active !== undefined && (r !== 'customers' || !['S', 'N', 'all'].includes(filters.active))) invalid();
-  if (filters.customerCode !== undefined && r !== 'customers') invalid();
+  if (filters.customerCode !== undefined && r !== 'customers' && r !== 'products') invalid();
   let companies = scope.companies;
   if (filters.companyCode !== undefined) {
     const company = integer(filters.companyCode);
@@ -102,7 +102,15 @@ function queryParts(input: PageInput & Partial<WindowInput>, trustedScope: ReadS
   // Catálogo e seletores mantêm ATIVO=S quando o filtro não é informado.
   const where = baseWhere(r, scope, filters.active !== 'N' && filters.active !== 'all', companies);
   if (filters.active === 'N') where.push("P.ATIVO='N'");
-  if (filters.customerCode !== undefined) where.push(`P.CODPARC=${integer(filters.customerCode)}`);
+  // Listagem de produtos: somente "Usado como: Venda (fabricação própria)".
+  if (r === 'products') where.push("P.USOPROD='V'");
+  if (filters.customerCode !== undefined && r === 'customers') where.push(`P.CODPARC=${integer(filters.customerCode)}`);
+  // Em produtos, customerCode restringe à tabela de preço do cliente: a do cadastro e a da condição de pagamento fixa,
+  // na vigência mais recente de cada uma (mesma regra do motor de preço).
+  if (filters.customerCode !== undefined && r === 'products') {
+    const customer = integer(filters.customerCode, 1);
+    where.push(`EXISTS (SELECT 1 FROM TGFEXC E JOIN (SELECT T.NUTAB,ROW_NUMBER() OVER (PARTITION BY T.CODTAB ORDER BY T.DTVIGOR DESC,T.DTALTER DESC,T.NUTAB DESC) AS RN FROM TGFTAB T JOIN TGFNTA N ON N.CODTAB=T.CODTAB WHERE T.CODTAB IN (SELECT X.CODTAB FROM (SELECT PA.CODTAB FROM TGFPAR PA WHERE PA.CODPARC=${customer} UNION SELECT TP.CODTAB FROM TGFCPL L JOIN TGFTPV TP ON TP.CODTIPVENDA=L.SUGTIPNEGSAID AND TP.DHALTER=(SELECT MAX(V.DHALTER) FROM TGFTPV V WHERE V.CODTIPVENDA=TP.CODTIPVENDA AND V.DHALTER<=SYSDATE) WHERE L.CODPARC=${customer}) X WHERE X.CODTAB>0) AND N.ATIVO='S' AND T.DTVIGOR<=SYSDATE AND (T.DTALTER IS NULL OR T.DTALTER<=SYSDATE)) V ON V.NUTAB=E.NUTAB AND V.RN=1 WHERE E.CODPROD=P.CODPROD AND E.TIPO='V')`);
+  }
   if (filters.sellerCode !== undefined) {
     const seller = integer(filters.sellerCode);
     if (r === 'products') invalid();

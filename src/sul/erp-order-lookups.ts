@@ -239,7 +239,9 @@ export function useERPOrderLookups(
   actorSellerId?: string,
 ) {
   const customers = useConsulta(client, "customers", customerId ? [customerId] : []);
-  const products = useConsulta(client, "products", productIds);
+  // Somente produtos da tabela de preço do cliente (cadastro + condição fixa); sem cliente, a lista fica livre.
+  const customerCode = /^sankhya:customer:([1-9]\d*)$/.exec(customerId)?.[1];
+  const products = useConsulta(client, "products", productIds, customerCode ? { customerCode: Number(customerCode) } : undefined);
   // A carteira do cliente não identifica a pessoa autenticada. Fixar somente o vínculo da sessão.
   const sellerId = typeof actorSellerId === 'string' && /^sankhya:seller:[1-9]\d*$/.test(actorSellerId) ? actorSellerId : '';
   const sellers = useConsulta(client, "sellers", sellerId ? [sellerId] : []);

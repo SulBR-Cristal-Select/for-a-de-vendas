@@ -183,7 +183,8 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
     expect(result.current.customers).toContainEqual(linha("customers", 900));
     rerender({ cliente: "", produtos: [] });
     await waitFor(() => expect(result.current.customers).toHaveLength(1));
-    expect(result.current.products).toHaveLength(50);
+    // A lista de produtos é recarregada quando o cliente muda (filtro por tabela de preço).
+    await waitFor(() => expect(result.current.products).toHaveLength(50));
     expect(transporte.mock.calls.filter(([corpo]) => corpo.operation === "record")).toHaveLength(2);
   });
   it("mantém vendedor da sessão fora da busca e não o substitui pelo vendedor do cliente", async () => {

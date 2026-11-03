@@ -67,11 +67,13 @@ describe('modelo Sankhya somente leitura', () => {
     const sql = g.select.mock.calls[1]![0];
     expect(sql).toContain('TGFITE I JOIN TGFCAB H ON H.NUNOTA=I.NUNOTA');
     expect(sql).toContain('I.CODPROD=P.CODPROD AND H.CODEMP IN (4)');
-    expect(sql).not.toContain('USOPROD');
+    // Listagens de produtos: somente "Usado como: Venda (fabricação própria)"; a leitura de um registro não filtra.
+    expect(sql).toContain("P.USOPROD='V'");
     const detail = transport([{ CODPROD: 33, AGRUPMIN: null, BLOQVENDAFRAC: 'N', ATIVO: 'N' }]);
     await readRecord(detail, { resource: 'products', id: 33 }, seller);
     expect(detail.select.mock.calls[0]![0]).not.toContain("P.ATIVO='S'");
     expect(detail.select.mock.calls[0]![0]).toContain('H.CODEMP IN (4)');
+    expect(detail.select.mock.calls[0]![0]).not.toContain('USOPROD');
   });
   it('não trata regra de quantidade ausente como agrupamento zero ou permissão fracionada', async () => {
     const g = transport([{ CODPROD: 33, DECQTD: 5, ATIVO: 'S' }]);
@@ -208,6 +210,18 @@ describe('roteamento sem substituição da sessão comercial', () => {
 });
 
 
+describe('produtos da tabela de preço do cliente', () => {
+  it('customerCode em produtos restringe à tabela do cadastro e da condição fixa, na vigência mais recente', async () => {
+    const g = transport([]);
+    await readPage(g, { resource: 'products', filters: { customerCode: 131 } }, seller).catch(() => undefined);
+    const sql = g.select.mock.calls.map(c => c[0]).find(q => String(q).includes('TGFEXC')) as string;
+    expect(sql).toContain("P.USOPROD='V'");
+    expect(sql).toContain('PA.CODPARC=131');
+    expect(sql).toContain('L.SUGTIPNEGSAID');
+    expect(sql).toContain("E.TIPO='V'");
+    expect(sql).toContain('V.RN=1');
+  });
+});
 describe('cadastro atual no relatório de clientes', () => {
   it.each(['all', 'S', 'N'] as const)('filtra ATIVO=%s sem trocar a carteira nem o histórico autorizado', async active => {
     const g = transport([{ CODPARC: 10, CODEMP: null, ATIVO: active === 'all' ? null : active }], 1);
@@ -234,7 +248,7 @@ describe('cadastro atual no relatório de clientes', () => {
     { filters: { customerCode: 0 } }, { filters: { customerCode: '10' } }, { filters: { customerCode: 1.5 } },
     { filters: { customerCode: 2147483648 } }, { filters: { customerCode: '1 OR 1=1' } },
     { resource: 'products', filters: { active: 'all' } }, { resource: 'sellers', filters: { active: 'N' } },
-    { resource: 'products', filters: { customerCode: 10 } }, { resource: 'sellers', filters: { customerCode: 10 } },
+    { resource: 'sellers', filters: { customerCode: 10 } },
   ])('recusa filtro incompatível sem consultar o ERP: %j', async bad => {
     const g = transport();
     await expect(readWindow(g, { resource: 'customers', offset: 0, limit: 10, ...bad } as WindowInput, admin)).rejects.toBeDefined();

@@ -58,7 +58,8 @@ export async function readPaymentOptions(gateway: Transport, input: { customerId
   if (!customer || customer['active'] !== true) throw new SankhyaError('ERP_CONTEXT_REQUIRED', 'Cliente ERP ativo necessário.', 400);
   const erp = customer['erp'] as Row;
   const context: PaymentContext = { partnerCode: integer(erp['partnerCode'], 1), companyCode: partnerCompany(erp['companyCode']), date: dateValue(input.date), creditBlocked: erp['creditBlocked'] === true };
-  const base = `FROM TGFTPV T JOIN TGFPAR C ON C.CODPARC=${context.partnerCode} WHERE ${predicate(context, scope)}`;
+  // Condição fixa do cadastro do cliente (TGFCPL.SUGTIPNEGSAID), a mesma exigida pela conferência de envio.
+  const base = `FROM TGFTPV T JOIN TGFPAR C ON C.CODPARC=${context.partnerCode} WHERE ${predicate(context, scope)} AND T.CODTIPVENDA IN (SELECT L.SUGTIPNEGSAID FROM TGFCPL L WHERE L.CODPARC=C.CODPARC AND L.SUGTIPNEGSAID>0)`;
   const needle = foldERPText(input.search?.trim() ?? '');
   const folded = "ASCIISTR(TRANSLATE(UPPER(T.DESCRTIPVENDA),'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑ','AAAAAEEEEIIIIOOOOOUUUUCN'))";
   const escaped = needle.replaceAll('!', '!!').replaceAll('%', '!%').replaceAll('_', '!_');

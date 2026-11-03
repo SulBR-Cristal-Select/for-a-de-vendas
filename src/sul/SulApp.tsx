@@ -976,6 +976,13 @@ function sz(): any {
     const paymentMenu = useERPOrderPayments(online, n);
     const [paymentChoice, setPaymentChoice] = React.useState<{ customerId: string; row: ERPRow }>();
     const selectedPayment = paymentChoice && paymentChoice.customerId === n && paymentChoice.row['id'] === i ? paymentChoice.row : undefined;
+    // Condição de pagamento fixa do cadastro do cliente: a consulta devolve somente ela.
+    useEffect(() => {
+        if (!onlineOrder || paymentMenu.rows.length !== 1) return;
+        const only = paymentMenu.rows[0]!;
+        if (i === String(only['id']) && paymentChoice?.customerId === n && paymentChoice?.row['id'] === only['id']) return;
+        u(String(only['id'])); setPaymentChoice({ customerId: n, row: only });
+    }, [onlineOrder, n, paymentMenu.rows, i]);
     const context: OnlineOrderContext = { customerId: n, paymentCode: Number(selectedPayment?.['code']), sellerId: onlineOrder ? actorSeller?.sellerId ?? '' : l, type: c, date: businessDate() };
     const prices = useERPOrderPrices(onlineOrder ? online : undefined, context, h, e.products);
     const contextKey = JSON.stringify([context, v]);
@@ -1212,6 +1219,7 @@ function sz(): any {
                                                     label: "Condi\xE7\xE3o de pagamento",
                                                     value: i,
                                                     options: onlineOrder ? [...new Map([...(selectedPayment ? [selectedPayment] : []), ...paymentMenu.rows].map(row => [row['id'], row])).values()].map(row => ({ value: String(row['id']), label: String(row['label']) })) : La(commercialPaymentOptions(e, zp(e, n), businessDate())),
+                                                    disabled: onlineOrder,
                                                     onValueChange: (D: any) => { u(String(D)); if (onlineOrder) { const row = paymentMenu.rows.find(row => row['id'] === String(D)); setPaymentChoice(row ? { customerId: n, row } : undefined); } },
                                                     required: !0,
                                                 }),
@@ -4042,20 +4050,9 @@ function Cz({ area: e, section: t }: any): any {
 var C5: any = [
     { id: "perfil", label: "Meu perfil", icon: Wl },
     { id: "usuarios", label: "Todos os usu\xE1rios", icon: Wl },
-    { id: "equipes", label: "Equipes", icon: Wl },
-    { id: "atividades", label: "Atividades", icon: ym },
     { id: "logs", label: "Logs", icon: $s },
     { id: "empresa", label: "Minha empresa", icon: qs },
-    { id: "email", label: "Envio de e-mail", icon: Lm },
-    { id: "apps", label: "Aplicativos", icon: Qc },
-    { id: "pagamento", label: "Condi\xE7\xF5es de pagamento", icon: Kc },
-    { id: "politicas", label: "Pol\xEDticas comerciais", icon: Mm },
-    { id: "rentabilidade", label: "Rentabilidade", icon: Yc },
     { id: "frete", label: "Op\xE7\xF5es de frete", icon: nd },
-    { id: "transportadoras", label: "Transportadoras", icon: nd },
-    { id: "pay", label: "Sul Pay", icon: Kc },
-    { id: "plano", label: "Meu plano", icon: Xl },
-    { id: "creditos", label: "Cr\xE9ditos IA", icon: al },
 ];
 function Sz({ section: e = "perfil" }: any): any {
     let { db: t, editor: a, update: o, onSignOut } = qa(), n: any = C5.find((s: any) => s.id === e);
@@ -4691,11 +4688,6 @@ var Ez: any = [
         "/clientes",
     ],
     [
-        "Pol\xEDticas Comerciais",
-        "Confira as condi\xE7\xF5es comerciais locais, sem alterar pre\xE7os automaticamente.",
-        "/conta/politicas",
-    ],
-    [
         "Emiss\xE3o de Pedidos",
         "Crie pedidos locais com cliente, itens, pagamento e entrega.",
         "/pedidos/novo",
@@ -4714,11 +4706,6 @@ var Ez: any = [
         "E-commerce B2B",
         "A tela original oferecia cria\xE7\xE3o; a ativa\xE7\xE3o do arquivo \xE9 simulada.",
         "/portal",
-    ],
-    [
-        "Sul Pay",
-        "Conhe\xE7a o estado de ativa\xE7\xE3o sem executar transa\xE7\xF5es.",
-        "/conta/pay",
     ],
     [
         "Atendimento",
