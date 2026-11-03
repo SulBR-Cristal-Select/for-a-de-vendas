@@ -2,6 +2,7 @@ import{afterEach,describe,expect,it}from'vitest';
 import{indicatorFixture}from'../test/indicator-series-fixture';
 import{closeBilledFixtures}from'../test/billed-orders-fixture';
 import{readIndicatorSeries}from'../../supabase/functions/sankhya-online/indicator-series';
+import{createERPClient}from'./erp-online';
 import{validIndicatorQuery}from'./erp-indicator-series';
 const q={resource:'orders' as const,month:'2026-10',series:'items-day' as const,offset:0,limit:50};
 afterEach(closeBilledFixtures);
@@ -20,4 +21,6 @@ describe('Séries de indicadores — SQLite adaptado, não Oracle',()=>{
  it('janelas remotas de série diária não se sobrepõem',async()=>{const f=indicatorFixture();f.order(1);f.item(1);f.order(2,'10',{date:'2026-10-26'});f.item(2);const a=await f.client.indicatorSeries({...q,limit:1}),b=await f.client.indicatorSeries({...q,limit:1,offset:1});expect(a.items[0]?.id).not.toBe(b.items[0]?.id);});
  it('vazio é observado; falha nunca substitui por dados locais',async()=>{const f=indicatorFixture();expect((await f.client.indicatorSeries(q)).summary).toMatchObject({value:'0',recordCount:0});f.g.select.mockRejectedValueOnce(Error('Falha sintética'));await expect(f.client.indicatorSeries(q)).rejects.toMatchObject({code:'ERP_UNAVAILABLE'});});
  it('valida grupo, mês, janela e campos antes de consultar',async()=>{const f=indicatorFixture();for(const change of [{series:'qualquer'},{month:'2026-13'},{limit:51},{sellerCode:0},{sql:'select'},{from:'2026-01-01'}]){expect(validIndicatorQuery({...q,...change} as any)).toBe(false);await expect(f.client.indicatorSeries({...q,...change} as any)).rejects.toMatchObject({code:'INVALID_REQUEST'});}expect(f.transport).not.toHaveBeenCalled();});
+ it('agrupamento consolida carteira mensal, diária e clientes antes das contagens',async()=>{const f=indicatorFixture();f.db.exec("UPDATE TGFPAR SET ATIVO='S';");const group={id:'00000000-0000-4000-8000-000000000001',name:'Grupo',version:1,editable:true,memberIds:['sankhya:customer:1','sankhya:customer:2'],members:[]};f.order(9000,'10',{customer:3,seller:99,date:'2025-09-30'});f.order(1,'10',{customer:1,date:'2026-10-25'});f.order(2,'10',{customer:2,seller:12,date:'2026-10-25'});const c=createERPClient(async({query}:any)=>({data:await readIndicatorSeries(f.g,query,{role:'administrador'},[group]),error:null}));const monthly=await c.indicatorSeries({...q,series:'wallet-seller'});expect(monthly.summary).toMatchObject({recordCount:2,buyerCount:1,activeCount:2});const daily=await c.indicatorSeries({...q,series:'wallet-day'});expect(daily.items.find(x=>x.label==='2026-10-25')).toMatchObject({count:2,buyerCount:1});const customers=await c.indicatorSeries({...q,series:'customers-seller'});expect(customers.summary).toMatchObject({recordCount:2,activeCount:2,newCount:1});});
+
 });

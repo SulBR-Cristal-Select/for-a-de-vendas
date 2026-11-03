@@ -1,3 +1,4 @@
+import { SALES_OPERATION_CODES } from '../../../src/lib/sales-operations.ts';
 import { SankhyaError } from './gateway.ts';
 
 // Definições expressas pelo usuário em 23/10/2026, 19h19 (America/Sao_Paulo).
@@ -12,6 +13,7 @@ export const COMMERCIAL_POLICY = Object.freeze({
 export const STANDARD_SALES_REPORT_POLICY = Object.freeze({
   movement: 'P' as const,
   operationCode: 1001 as const,
+  operationCodes: SALES_OPERATION_CODES,
   natureCode: 10100000 as const,
   statusCode: 'L' as const,
   bonification: 'N' as const,

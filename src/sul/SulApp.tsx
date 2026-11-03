@@ -1,3 +1,6 @@
+import CustomerGroups from './CustomerGroups';
+import { groupForCustomer, groupLabel } from '../lib/customer-groups';
+import { businessDate, proratedMonthlyTarget } from '../lib/business-month';
 import {SelectedIndicators} from './SelectedIndicators';
 import {useOnlineIndicators} from './online-indicators';
 import {useRankingChart} from './erp-ranking-chart';
@@ -31,11 +34,7 @@ import OrderSubmission from './OrderSubmission';
 import './sul.css';
 const He: any = React;
 const b: any = runtime;
-export function businessDate(now = new Date()): string { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now); }
-/** Dias úteis (seg–sex) do mês, no fuso de São Paulo. */
-export function monthBusinessDays(month: string): number { if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month)) return 0; const [y, m] = month.split('-').map(Number); const last = new Date(Date.UTC(y, m, 0)).getUTCDate(); let n = 0; for (let d = 1; d <= last; d++) { const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); if (day !== 0 && day !== 6) n++; } return n; }
-/** Dias úteis restantes do mês (seg–sex) contando hoje, no fuso de São Paulo; null fora do mês corrente. */
-export function remainingBusinessDays(month: string, now = new Date()): number | null { if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month)) return null; const today = businessDate(now); if (today.slice(0, 7) !== month) return null; const [y, m] = month.split('-').map(Number); const last = new Date(Date.UTC(y, m, 0)).getUTCDate(); let rest = 0; for (let d = Number(today.slice(8)); d <= last; d++) { const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); if (day !== 0 && day !== 6) rest++; } return rest; }
+export { businessDate, monthBusinessDays, remainingBusinessDays } from '../lib/business-month';
 export function percentageChange(previous: number, current: number): number | null { return previous > 0 ? ((current - previous) / previous) * 100 : null; }
 export function invoicedOrders(orders: any[], invoices: any[]): any[] { const ids = new Set(invoices.map((invoice: any) => invoice.orderId).filter(Boolean)); return orders.filter((order: any) => ids.has(order.id)); }
 export function csvRows(rows: any[], columns: any[]): any[] {
@@ -556,8 +555,8 @@ function nz(): any {
         .sort((p: any, y: any) => y.atual - p.atual);
     let nativeNewCount:any=null,nativeAbsent:any=null;
     if(online){f=native?.ranking?.summary.documentAmount??null;meta=native?.ranking?.summary.targetAmount!=null?Number(native!.ranking!.summary.targetAmount):null;ating=null;base=native?.series['wallet-seller']?.summary.recordCount??null;atendidos=native?.series['wallet-seller']?.summary.buyerCount??null;nativeAbsent=base!==null&&atendidos!==null?base-atendidos:null;comissaoMes=native?.series['commissions-seller']?.summary.value??null;temComissao=comissaoMes!==null;nativeNewCount=native?.series['customers-seller-year']?.summary.newCount??null;novosFat=null;novos=[];naoCompraram=[];acumCliente=[];clientesPerf=[];}
-    const businessTotal = monthBusinessDays(o), businessGone = businessTotal - (remainingBusinessDays(o) ?? 0);
-    if (meta > 0 && f != null) ating = businessGone > 0 && businessGone < businessTotal ? (f / Math.ceil((meta * businessGone) / businessTotal)) * 100 : (f / meta) * 100;
+    meta = proratedMonthlyTarget(meta ?? null, o);
+    if (meta > 0 && f != null) ating = (f / meta) * 100;
     const MESES: any = {
         "01": "janeiro",
         "02": "fevereiro",
@@ -1613,6 +1612,7 @@ function uz(): any {
                 area: "clientes",
                 items: [
                     ["/clientes", "Clientes"],
+                    ["/clientes/agrupamentos", "Agrupamentos"],
                     ["/clientes/vinculos", "V\xEDnculos e permiss\xF5es"],
                     ["/config/clientes/campos", "Configura\xE7\xF5es"],
                 ],
@@ -1621,14 +1621,14 @@ function uz(): any {
                 rows: online ? manualRows(e.customers) : e.customers,
                 remote,
                 label: "Clientes",
-                onRowClick: (o: any) => bn("/clientes/" + o.id),
+                onRowClick: (o: any) => bn(o.isGroup ? "/clientes/agrupamentos/" + o.groupId : "/clientes/" + o.id),
                 columns: [
                     z("name", "Raz\xE3o social", (o: any) => (0, b.jsxs)("div", {
                         className: "space-y-1",
                         children: [
                             (0, b.jsx)("a", {
                                 className: "font-medium ds-link",
-                                href: "#/clientes/" + o.id,
+                                href: o.isGroup ? "#/clientes/agrupamentos/" + o.groupId : "#/clientes/" + o.id,
                                 children: o.name,
                             }),
                             (0, b.jsxs)(Xt, { children: [o.fantasy, " \xB7 ", o.code] }),
@@ -1787,6 +1787,8 @@ function k5(e: any, t: any, a: any, o: any = undefined): any {
 function ERPDetail({ resource, id, component: Component }: any): any {
     const context = qa();
     const result = useERPRecord(context.online, resource, id);
+    const [groups, setGroups] = React.useState<any[]>([]);
+    useEffect(()=>{let active=true;if(resource==='customers'&&context.online)context.online.customerGroups().then((r:any)=>{if(active)setGroups(r.groups);}).catch((e:Error)=>go(e.message));return()=>{active=false;};},[context.online,resource,id]);
     useEffect(() => { if (result.error) go(result.error); }, [result.error]);
     if (!result.enabled) return b.jsx(Component, { id });
     if (result.record === undefined && !result.error) return null;
@@ -1799,7 +1801,7 @@ function ERPDetail({ resource, id, component: Component }: any): any {
     const db = { ...context.db, [resource]: [result.record] };
     // Histórico e financeiro ainda não homologados; nenhum pedido local vira histórico ERP.
     if (resource === "customers") Object.assign(db, { orders: [], titles: [], invoices: [] });
-    return b.jsx(I5.Provider, { value: { ...context, db, update: rejectUpdate }, children: b.jsx(Component, { id }) });
+    return b.jsx(I5.Provider, { value: { ...context, db, update: rejectUpdate }, children: b.jsxs(React.Fragment, {children:[groupForCustomer(groups,id)&&b.jsx(Gu,{title:"Integrante do agrupamento "+groupLabel(groupForCustomer(groups,id)!)}),b.jsx(Component, { id })]}) });
 }
 function ERPDocumentDetail({ id, component: Component }: any): any {
     const context = qa(), result = useERPDocument(context.online, id);
@@ -5157,6 +5159,8 @@ export default function SulApp({ initialState, persist, onSignOut, online, submi
                                 ? (C = (0, b.jsx)(ERPDocumentDetail, { id: x[1], component: iz }, x[1]))
                                 : a === "/clientes"
                                     ? (C = (0, b.jsx)(uz, {}))
+                                    : a === "/clientes/agrupamentos" || a.startsWith("/clientes/agrupamentos/")
+                                        ? (C = b.jsx(CustomerGroups, {client: online, role: o.company.role, id: x[2], confirm: y.confirm}))
                                     : a === "/clientes/vinculos"
                                         ? (C = (0, b.jsx)(fz, {}))
                                         : x[0] === "clientes"

@@ -1,3 +1,5 @@
+import { validateCustomerGroup, type CustomerGroup } from './customer-groups';
+import { isSalesOperation } from './sales-operations';
 import {decodeIndicatorSeries,validIndicatorQuery,type ERPIndicatorQuery,type ERPIndicatorWindow} from './erp-indicator-series';
 import {decodeRanking,validRankingQuery,type ERPRankingQuery,type ERPRankingWindow} from './erp-ranking';
 import {decodeReceivables,validReceivablesQuery,type ERPReceivablesQuery,type ERPReceivablesWindow} from './erp-receivables';
@@ -34,8 +36,9 @@ export type ERPDocument = ERPObservation & { record: ERPRow | null; items: ERPRo
 export type ERPPriceQuery = { resource?: never; customerId: string; productId: string; paymentCode: number; type: 'Venda'; sellerCode?: number; quantity?: number; unit?: string; date?: string };
 export type ERPPaymentQuery = { resource?: never; customerId: string; offset: number; limit: number; search?: string; date?: string };
 export type ERPPrice = ERPObservation & { customer: ERPRow; product: ERPRow; seller: ERPRow; companyCode: 1 | 4; operationCode: 1001; operationVersion: string; quantity: number; payment: { code: number; label: string; version: string }; price: { amount: number; unit: string; localCode: number | null; control: string | null; tableVersion: number | null; provider: 'native-context-api' } };
-export type ERPOperation = 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'billing-report' | 'billed-orders-report' | 'order-items-report' | 'nonbuyers-report' | 'wallet-report' | 'stock-report' | 'receivables-report' | 'ranking-report' | 'indicator-series' | 'commission-report' | 'document' | 'price-query' | 'payment-options';
-type ERPQuery = ERPIndicatorQuery | ERPRankingQuery | ERPReceivablesQuery | ERPCommissionQuery | ERPStockQuery | ERPWalletQuery | ERPPageQuery | ERPWindowQuery | ERPRecordQuery | ERPFacetQuery | ERPHistoryQuery | ERPSalesQuery | ERPBillingQuery | ERPOrderItemsQuery | ERPNonBuyersQuery | ERPDocumentQuery | ERPPriceQuery | ERPPaymentQuery;
+export type ERPOperation = 'customer-groups' | 'customer-group-save' | 'grouped-window' | 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'billing-report' | 'billed-orders-report' | 'order-items-report' | 'nonbuyers-report' | 'wallet-report' | 'stock-report' | 'receivables-report' | 'ranking-report' | 'indicator-series' | 'commission-report' | 'document' | 'price-query' | 'payment-options';
+type ERPGroupedQuery = {operation:'window'|'wallet-report'|'nonbuyers-report'|'sales-report'|'billing-report';query:Record<string,unknown>};
+type ERPQuery = Record<string,unknown> | ERPIndicatorQuery | ERPRankingQuery | ERPReceivablesQuery | ERPCommissionQuery | ERPStockQuery | ERPWalletQuery | ERPPageQuery | ERPWindowQuery | ERPRecordQuery | ERPFacetQuery | ERPHistoryQuery | ERPSalesQuery | ERPBillingQuery | ERPOrderItemsQuery | ERPNonBuyersQuery | ERPDocumentQuery | ERPPriceQuery | ERPPaymentQuery;
 export type ERPTransport = (body: { operation: ERPOperation; query: ERPQuery }, signal: AbortSignal) => Promise<{ data: unknown; error: unknown }>;
 const messages = {
   AUTH_REQUIRED: 'Sessão não autorizada. Entre novamente.',
@@ -74,6 +77,23 @@ function observation(data: unknown): asserts data is ERPRow & ERPObservation {
 }
 function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow {
   observation(data);
+  if (operation === 'customer-groups') {
+    if(!Array.isArray(data['groups']))invalid();
+    const seen=new Set<string>(),members=new Set<string>();
+    for(const g of data['groups']){
+      if(!object(g)||typeof g['id']!=='string'||seen.has(g['id'])||typeof g['name']!=='string'||!g['name'].trim()||!natural(g['version'])||typeof g['editable']!=='boolean'||!Array.isArray(g['memberIds'])||!g['memberIds'].length||!Array.isArray(g['members'])||g['members'].length!==g['memberIds'].length)invalid();
+      seen.add(g['id']);
+      for(const [i,id]of g['memberIds'].entries()){if(typeof id!=='string'||!/^sankhya:customer:[1-9]\d*$/.test(id)||members.has(id)||!object(g['members'][i])||g['members'][i]['id']!==id)invalid();members.add(id);}
+    }
+    return data;
+  }
+  if(operation==='customer-group-save'){const r=data['result'];if(!object(r)||r['saved']!==true||r['id']!==(query as ERPRow)['id']||r['version']!==Number((query as ERPRow)['version'])+1)invalid();return data;}
+  if(operation==='grouped-window'){
+    const q=(query as ERPGroupedQuery).query,items=data['items'],total=data['total'],unfiltered=data['totalWithoutSearch'],grouping=data['grouping'];
+    if(!Array.isArray(items)||!natural(total)||!natural(unfiltered)||total>unfiltered||data['offset']!==q['offset']||items.length!==Math.min(Number(q['limit']),Math.max(0,total-Number(q['offset'])))||!object(grouping)||grouping['source']!=='manual'||grouping['composition']!=='current'||grouping['identified']!==true)invalid();
+    const ids=new Set<string>();for(const r of items){if(!object(r)||typeof r['id']!=='string'||ids.has(r['id']))invalid();ids.add(r['id']);if(r['isGroup']===true&&(r['id']!==`customer-group:${r['groupId']}`||typeof r['name']!=='string'||!r['name'].includes(' · Agrupamento · ')||!natural(r['memberCount'])||!Array.isArray(r['memberIds'])||!r['memberIds'].length||r['memberIds'].length>Number(r['memberCount'])))invalid();}
+    return data;
+  }
   if (operation === 'price-query') {
     const q = query as ERPPriceQuery, price = data['price'], payment = data['payment'];
     if (!object(price) || !object(payment) || !object(data['customer']) || !object(data['product']) || !object(data['seller'])) invalid();
@@ -142,7 +162,7 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
         continue;
       }
       const e=row['erp'];
-      if(!object(e)||!natural(e['documentCode'])||e['documentCode']<1||e['documentCode']>2147483647||typeof e['sequence']!=='number'||!Number.isInteger(e['sequence'])||e['sequence']< -2147483648||e['sequence']>2147483647||!companies.includes(e['companyCode'])||e['itemCompanyCode']!==e['companyCode']||e['movement']!=='P'||e['operationCode']!==1001||e['natureCode']!==10100000||e['statusCode']!=='L'||e['dateField']!=='DTNEG'||row['id']!==`sankhya:order:${e['documentCode']}:item:${e['sequence']}`||row['source']!=='observado'||row['readOnly']!==true)invalid();
+      if(!object(e)||!natural(e['documentCode'])||e['documentCode']<1||e['documentCode']>2147483647||typeof e['sequence']!=='number'||!Number.isInteger(e['sequence'])||e['sequence']< -2147483648||e['sequence']>2147483647||!companies.includes(e['companyCode'])||e['itemCompanyCode']!==e['companyCode']||e['movement']!=='P'||!isSalesOperation(e['operationCode'])||e['natureCode']!==10100000||e['statusCode']!=='L'||e['dateField']!=='DTNEG'||row['id']!==`sankhya:order:${e['documentCode']}:item:${e['sequence']}`||row['source']!=='observado'||row['readOnly']!==true)invalid();
       for(const key of ['price','qty','total'])if(row[key]!==null&&(typeof row[key]!=='string'||erpDecimal(row[key])!==row[key]))invalid();
       for(const key of ['name','number','customer','unit'])if(row[key]!==null&&typeof row[key]!=='string')invalid();
       if(typeof row['productId']!=='string'||!/^sankhya:product:[1-9]\d{0,9}$/.test(row['productId'])||typeof row['customerId']!=='string'||!/^sankhya:customer:[1-9]\d{0,9}$/.test(row['customerId']))invalid();
@@ -174,7 +194,7 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
       } else {
         if(billed){const f=row['billingFacts'];if(!object(f)||!natural(f['invoiceCount'])||f['invoiceCount']<1||!natural(f['sharedInvoiceCount'])||f['sharedInvoiceCount']>f['invoiceCount']||!natural(f['missingAmountCount'])||f['missingAmountCount']>f['invoiceCount']||!natural(f['unqualifiedInvoiceCount'])||!natural(f['missingNumberCount'])||f['missingNumberCount']>f['invoiceCount']||(f['sharedInvoiceCount']>0||f['missingAmountCount']>0||f['unqualifiedInvoiceCount']>0?row['invoiced']!==null:typeof row['invoiced']!=='string'||erpDecimal(row['invoiced'])!==row['invoiced'])||(f['missingNumberCount']>0?row['nf']!==null:typeof row['nf']!=='string'||!/^\d+(?:, \d+)*$/.test(row['nf'])))invalid();}
         const erp = row['erp'];
-        if (!object(erp) || erp['movement'] !== (billing ? 'V' : 'P') || (billing ? !natural(erp['operationCode']) || erp['operationCode'] < 1 || erp['dateField'] !== 'DTFATUR' || erp['fiscalStatusCode'] !== 'A' : erp['operationCode'] !== 1001) || erp['statusCode'] !== 'L' || !companies.includes(erp['companyCode']) || row['id'] !== `sankhya:${billing ? 'invoice' : 'order'}:${erp['documentCode']}` || q.customerId && row['customerId'] !== q.customerId || q.sellerCode !== undefined && row['sellerCode'] !== q.sellerCode) invalid();
+        if (!object(erp) || erp['movement'] !== (billing ? 'V' : 'P') || (billing ? !natural(erp['operationCode']) || erp['operationCode'] < 1 || erp['dateField'] !== 'DTFATUR' || erp['fiscalStatusCode'] !== 'A' : !isSalesOperation(erp['operationCode'])) || erp['statusCode'] !== 'L' || !companies.includes(erp['companyCode']) || row['id'] !== `sankhya:${billing ? 'invoice' : 'order'}:${erp['documentCode']}` || q.customerId && row['customerId'] !== q.customerId || q.sellerCode !== undefined && row['sellerCode'] !== q.sellerCode) invalid();
       }
     }
     if(billed&&!q.groupBy&&offset===0&&items.length===total){const c=data['billedOrdersSummary'] as {invoiceLinks:number;unattributedOrders:number;assignedInvoiceAmount:string|null};const known=items.filter(r=>r['invoiced']!==null);const links=items.reduce((n,r)=>n+Number((r['billingFacts'] as Record<string,unknown>)['invoiceCount']),0);if(!natural(links)||links!==c.invoiceLinks||items.length-known.length!==c.unattributedOrders||known.length>0&&sumERPDecimals(known.map(r=>String(r['invoiced'])))!==c.assignedInvoiceAmount)invalid();}
@@ -208,6 +228,8 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
   }
   async function request<T>(operation: ERPOperation, query: ERPQuery): Promise<T> {
     if (!query) throw new ERPOnlineError('INVALID_REQUEST');
+    if(operation==='customer-group-save'){try{validateCustomerGroup(query);}catch{throw new ERPOnlineError('INVALID_REQUEST');}}
+
     if('month' in query&&operation!=='indicator-series'&&operation!=='ranking-report'&&operation!=='nonbuyers-report'&&operation!=='wallet-report')throw new ERPOnlineError('INVALID_REQUEST');
     if(operation==='commission-report'&&!validCommissionQuery(query as ERPCommissionQuery))throw new ERPOnlineError('INVALID_REQUEST');
     if(operation==='stock-report'&&!validStockQuery(query as ERPStockQuery))throw new ERPOnlineError('INVALID_REQUEST');
@@ -217,7 +239,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     if(operation==='wallet-report'&&!validWalletQuery(query as ERPWalletQuery))throw new ERPOnlineError('INVALID_REQUEST');
     if(operation==='nonbuyers-report'){
       const q=query as ERPNonBuyersQuery;
-      if(Object.keys(q).some(k=>!['resource','month','offset','limit','search','sort','direction','customerId','sellerCode','status'].includes(k))||q.resource!=='customers'||typeof q.month!=='string'||!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(q.month)||Number(q.month.slice(0,4))<1||Number(q.month.slice(0,4))>9998||q.customerId!==undefined&&(!/^sankhya:customer:[1-9]\d{0,9}$/.test(q.customerId)||Number(q.customerId.slice(17))>2147483647)||q.sellerCode!==undefined&&(!natural(q.sellerCode)||q.sellerCode<1||q.sellerCode>2147483647)||q.status!==undefined&&q.status!=='confirmado'||q.sort!==undefined&&!['code','name','seller','localStatus'].includes(q.sort)||q.direction!==undefined&&!['asc','desc'].includes(q.direction)||q.search!==undefined&&(typeof q.search!=='string'||q.search.length>120||/[\x00-\x1f;]|--|\/\*|\*\//.test(q.search)))throw new ERPOnlineError('INVALID_REQUEST');
+      if(Object.keys(q).some(k=>!['resource','month','offset','limit','search','sort','direction','customerId','sellerCode','status'].includes(k))||q.resource!=='customers'||typeof q.month!=='string'||!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(q.month)||Number(q.month.slice(0,4))<1||Number(q.month.slice(0,4))>9998||q.customerId!==undefined&&(!/^sankhya:customer:[1-9]\d{0,9}$/.test(String(q.customerId))||Number(q.customerId.slice(17))>2147483647)||q.sellerCode!==undefined&&(!natural(q.sellerCode)||q.sellerCode<1||q.sellerCode>2147483647)||q.status!==undefined&&q.status!=='confirmado'||q.sort!==undefined&&!['code','name','seller','localStatus'].includes(q.sort)||q.direction!==undefined&&!['asc','desc'].includes(q.direction)||q.search!==undefined&&(typeof q.search!=='string'||q.search.length>120||/[\x00-\x1f;]|--|\/\*|\*\//.test(q.search)))throw new ERPOnlineError('INVALID_REQUEST');
     }
     const productReport=(query as {productReport?:unknown}).productReport;
     if(productReport!==undefined&&(operation!=='order-items-report'||productReport!==true))throw new ERPOnlineError('INVALID_REQUEST');
@@ -233,7 +255,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
         const p = q as ERPPriceQuery;
         if (!/^sankhya:product:[1-9]\d*$/.test(p.productId) || !natural(p.paymentCode) || p.paymentCode < 1 || p.type !== 'Venda') throw new ERPOnlineError('INVALID_REQUEST');
       }
-    } else if (!(operation === 'billing-report' ? ['invoices'] : operation === 'sales-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'commission-report' || operation === 'indicator-series' || operation === 'ranking-report' || operation === 'receivables-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(query.resource!)) throw new ERPOnlineError('INVALID_REQUEST');
+    } else if (!['customer-groups','customer-group-save','grouped-window'].includes(operation) && !(operation === 'billing-report' ? ['invoices'] : operation === 'sales-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'commission-report' || operation === 'indicator-series' || operation === 'ranking-report' || operation === 'receivables-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(String(query.resource))) throw new ERPOnlineError('INVALID_REQUEST');
     if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'nonbuyers-report' || operation === 'wallet-report' || operation === 'stock-report' || operation === 'commission-report' || operation === 'indicator-series' || operation === 'ranking-report' || operation === 'receivables-report' || operation === 'payment-options') {
       const q = query as ERPWindowQuery | ERPHistoryQuery | ERPPaymentQuery;
       if (!natural(q.offset) || !natural(q.limit) || q.limit < 1 || q.limit > 50) throw new ERPOnlineError('INVALID_REQUEST');
@@ -258,6 +280,10 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
   }
   return {
     setIdentity,
+    customerGroupingEnabled: false,
+    customerGroups:()=>request<{groups:CustomerGroup[]}>('customer-groups',{}),
+    saveCustomerGroup:(query:ReturnType<typeof validateCustomerGroup>)=>request<{result:{saved:true;id:string;version:number}}>('customer-group-save',query),
+    groupedWindow:(query:ERPGroupedQuery)=>request<ERPWindow & {summary?:any;companyCodes?:any}>('grouped-window',query),
     page: <T = ERPRow>(query: ERPPageQuery) => request<ERPPage<T>>('page', query),
     window: <T = ERPRow>(query: ERPWindowQuery) => request<ERPWindow<T>>('window', query),
     record: <T = ERPRow>(query: ERPRecordQuery) => request<ERPRecord<T>>('record', query),
@@ -279,4 +305,4 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     paymentOptions: <T = ERPRow>(query: ERPPaymentQuery) => request<ERPWindow<T>>('payment-options', query),
   };
 }
-export const erpClient = createERPClient();
+export const erpClient = Object.assign(createERPClient(), { customerGroupingEnabled: true });

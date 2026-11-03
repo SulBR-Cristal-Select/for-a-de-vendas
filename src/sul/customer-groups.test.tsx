@@ -1,0 +1,14 @@
+import {afterEach,describe,it,expect,vi} from 'vitest';
+import {render,screen,fireEvent,waitFor,cleanup} from '@testing-library/react';
+import CustomerGroups from './CustomerGroups';
+import type {ERPClient} from './erp-hooks';
+window.PointerEvent=MouseEvent as typeof PointerEvent;
+afterEach(cleanup);
+const id='00000000-0000-4000-8000-000000000002';
+const members=[{id:'sankhya:customer:1',name:'Guerro',code:'1',cnpj:'111'},{id:'sankhya:customer:2',name:'Pagnussat',code:'2',cnpj:'222'}];
+function fixture(){let groups:any[]=[];const save=vi.fn(async(q:any)=>{groups=[{...q,members,editable:true,version:1}];return {result:{saved:true,id:q.id,version:1}};});const client={customerGroups:vi.fn(async()=>({groups})),page:vi.fn(async()=>({items:members})),saveCustomerGroup:save} as unknown as ERPClient;return{client,save,setGroups:(g:any[])=>groups=g};}
+describe('Aba de agrupamentos',()=>{
+ it('cria nome digitado e dois integrantes, confirma persistência e identifica composição',async()=>{const f=fixture();render(<CustomerGroups client={f.client} role="Gestor" confirm={vi.fn()}/>);fireEvent.click(screen.getByRole('button',{name:'Criar agrupamento'}));fireEvent.change(screen.getByLabelText('Nome do agrupamento'),{target:{value:'Guerro & Pagnussat'}});fireEvent.click(await screen.findByRole('checkbox',{name:'Guerro · 1 · 111'}));fireEvent.click(screen.getByRole('checkbox',{name:'Pagnussat · 2 · 222'}));fireEvent.click(screen.getByRole('button',{name:'Salvar agrupamento'}));await waitFor(()=>expect(f.save).toHaveBeenCalledWith(expect.objectContaining({name:'Guerro & Pagnussat',memberIds:members.map(m=>m.id),active:true,version:0})));expect(await screen.findByRole('link',{name:'Guerro & Pagnussat · Agrupamento · 2 clientes'})).toBeTruthy();});
+ it('vendedor consulta e não recebe edição',async()=>{const f=fixture();f.setGroups([{id,name:'Grupo',memberIds:members.map(m=>m.id),members,editable:false,version:1}]);render(<CustomerGroups client={f.client} role="Vendedor" confirm={vi.fn()}/>);await screen.findByRole('link',{name:'Grupo · Agrupamento · 2 clientes'});expect(screen.queryByRole('button',{name:'Criar agrupamento'})).toBeNull();expect(screen.queryByRole('button',{name:'Editar agrupamento'})).toBeNull();});
+ it('desfazer pede confirmação e não apaga cliente',async()=>{const f=fixture(),confirm=vi.fn();f.setGroups([{id,name:'Grupo',memberIds:members.map(m=>m.id),members,editable:true,version:1}]);render(<CustomerGroups client={f.client} role="Administrador" confirm={confirm}/>);fireEvent.click(await screen.findByRole('button',{name:'Editar agrupamento'}));fireEvent.click(screen.getByRole('button',{name:'Desfazer agrupamento'}));expect(confirm).toHaveBeenCalledWith('Desfazer agrupamento',expect.any(Function),expect.stringContaining('não serão apagados'));expect(f.save).not.toHaveBeenCalled();});
+});

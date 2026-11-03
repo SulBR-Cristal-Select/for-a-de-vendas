@@ -129,7 +129,7 @@ describe('Diagnóstico comercial fixo e somente leitura', () => {
     const g={select:vi.fn().mockResolvedValueOnce(columns).mockResolvedValueOnce([{MISSING_CONTEXT_COUNT:0}]).mockResolvedValueOnce([])};
     expect(await readCommercialDictionary(g,{...operations,standardSales:true},admin)).toMatchObject({salesPolicy:{movement:'P',operationCode:1001,natureCode:10100000,statusCode:'L'},rows:[],rulesInferred:false});
     const sql=g.select.mock.calls[2]?.[0];
-    for(const clause of ["H.TIPMOV='P'",'H.CODTIPOPER=1001','H.CODNAT=10100000',"H.STATUSNOTA='L'","T.BONIFICACAO='N'",'T.GOLDEV=1','T.DHALTER=H.DHTIPOPER']) expect(sql).toContain(clause);
+    for(const clause of ["H.TIPMOV='P'",'H.CODTIPOPER IN (1001,1107,1108,1162,1102,1101,1134,1130,1125,1171,1122)','H.CODNAT=10100000',"H.STATUSNOTA='L'","T.BONIFICACAO='N'",'T.GOLDEV=1','T.DHALTER=H.DHTIPOPER']) expect(sql).toContain(clause);
     expect(sql).not.toMatch(/T\.GOLSINAL\s*=/);expect(g.select.mock.calls.every(([,limit])=>limit<=50)).toBe(true);
     expect(g.select.mock.calls[1]?.[0]).toContain("T.BONIFICACAO NOT IN ('N','S')");
     expect(g.select.mock.calls[1]?.[0]).toContain('T.GOLDEV NOT IN (-1,1)');

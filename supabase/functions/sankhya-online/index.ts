@@ -1,3 +1,6 @@
+import {readCustomerMetrics} from './customer-metrics.ts';
+import { readCustomerGroups, saveCustomerGroup, GROUP_KIND } from './customer-groups.ts';
+import { groupedWindow } from './group-window.ts';
 import {readIndicatorSeries} from './indicator-series.ts';
 import {readOrderRegistry} from './order-registry.ts';
 import {prepareSellerAccess} from './prepare-seller-access.ts';
@@ -15,7 +18,7 @@ import { readPrice } from './price-context.ts';
 import { readCommercialDictionary } from './dictionary.ts';
 import { readPaymentOptions } from './payments.ts';
 import { revalidateOrderRequest } from './transactions.ts';
-import { readHistory, readDocument, readSalesReport, readBillingReport, readOrderItemsReport } from './history.ts';
+import { readHistory, readDocument, readSalesReport, readBillingReport, readOrderItemsReport, readGroupedMix } from './history.ts';
 import { readWindow, readPage, readRecord, readFacets } from './read-model.ts';
 import { readNonBuyers, readWallet } from './nonbuyers.ts';
 import { actorScope } from './identity.ts';
@@ -126,6 +129,41 @@ Deno.serve(async (request: Request) => {
     // Mesmo usuário Auth e vínculo privado em catálogo, cotação e preparação.
     // Nenhum vendedor/filial do corpo HTTP se transforma em autoridade.
     const scope = actorScope(profile);
+    const groupStore = () => {
+      const url=Deno.env.get('SUPABASE_URL'),key=jsonKeys('SUPABASE_SECRET_KEYS')['default']||Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      if(url!=='https://cxurczhmrvxcuvklyiht.supabase.co'||!key)throw new SankhyaError('ERP_CONTEXT_REQUIRED','Cadastro de agrupamentos indisponível.',503);
+      const admin=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+      return {
+        list:async()=>{const r=await admin.from('workspace_records').select('id,data',{count:'exact'}).eq('company_id',profile.company_id).eq('kind',GROUP_KIND).limit(1001);if(r.error||!r.data||r.count===null||r.count>1000||r.data.length!==r.count)throw new SankhyaError('ERP_CONTEXT_REQUIRED','Não foi possível ler integralmente os agrupamentos.',502);return r.data;},
+        save:async(value:Record<string,unknown>)=>{const r=await admin.rpc('customer_group_write',{p_actor_id:profile.id,p_group:value});if(r.error)throw new SankhyaError(r.error.code==='PT409'?'REVISION_CONFLICT':'INVALID_REQUEST',r.error.code==='PT409'?'Agrupamento alterado; recarregue antes de salvar.':r.error.message, r.error.code==='PT409'?409:400);return r.data;}
+      };
+    };
+    const observation=()=>({source:'sankhya',readOnly:true,readAt:new Date().toISOString()});
+    let groupsPromise:ReturnType<typeof readCustomerGroups>|undefined;
+    const currentGroups=()=>groupsPromise??=readCustomerGroups(commercialGateway,scope,groupStore());
+    const identifyMembers=async(result:any)=>{
+      const groups=await currentGroups();
+      const mark=(row:any)=>{if(!row||typeof row!=='object')return row;const customerId=String(row.customerId??(String(row.id).startsWith('sankhya:customer:')?row.id:''));const group=groups.find(g=>g.memberIds.includes(customerId));if(!group)return row;const label='Integrante do agrupamento '+group.name;return {...row,customerGroup:{id:group.id,name:group.name,label},...(String(row.id).startsWith('sankhya:customer:')?{name:row.name+' · '+label}:{}),...(row.customerName?{customerName:row.customerName+' · '+label}:{}),...(row.customer?{customer:row.customer+' · '+label}:{})};};
+      return {...result,...('record'in result?{record:mark(result.record)}:{}),...(Array.isArray(result.items)?{items:result.items.map(mark)}:{})};
+    };
+
+    if(input.operation==='customer-groups') {
+      if(!input.query||Object.keys(input.query).length)throw new SankhyaError('INVALID_REQUEST','Consulta inválida.',400);
+      return reply({...observation(),groups:await readCustomerGroups(commercialGateway,scope,groupStore())});
+    }
+    if(input.operation==='customer-group-save') return reply({...observation(),result:await saveCustomerGroup(commercialGateway,scope,input.query,groupStore())});
+    if(input.operation==='grouped-window') {
+      const groups=await readCustomerGroups(commercialGateway,scope,groupStore());
+      return reply(await groupedWindow(input.query,groups,async(operation,query)=>{
+        if(operation==='window')return readWindow(commercialGateway,query as any,scope);
+        if(operation==='wallet-report')return readWallet(commercialGateway,query,scope);
+        if(operation==='nonbuyers-report')return readNonBuyers(commercialGateway,query,scope);
+        if(operation==='group-mix'){const {memberIds,...input}=query;return readGroupedMix(commercialGateway,input as any,scope,memberIds);}
+        if(operation==='sales-report')return readSalesReport(commercialGateway,query,scope);
+        if(operation==='billing-report')return readBillingReport(commercialGateway,query,scope);
+        throw new SankhyaError('INVALID_REQUEST','Consulta inválida.',400);
+      }));
+    }
     if(input.operation==='seller-access-provision'){
       if(profile.id!=='a46afcc5-14fd-4dd9-bd00-759e91b946ca'||profile.role!=='administrador')throw new SankhyaError('FORBIDDEN','Provisionamento reservado ao administrador autorizado.',403);
       const url=Deno.env.get('SUPABASE_URL'),key=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||jsonKeys('SUPABASE_SECRET_KEYS')['default'];
@@ -148,26 +186,26 @@ Deno.serve(async (request: Request) => {
     }
     if (input.operation === 'prepare-order-save') return reply(await revalidateOrderRequest({ ...commercialGateway, contextPrices: q => gateway.contextPrices(q) }, input.query, profile, async (name, args) => await profile.client.rpc(name, args), attestOrder));
     if (input.operation === 'payment-options') return reply(await readPaymentOptions(commercialGateway, input.query, scope));
-    if (input.operation === 'history') return reply(await readHistory(commercialGateway, input.query, scope));
-    if(input.operation==='indicator-series')return reply(await readIndicatorSeries(commercialGateway,input.query,scope));
+    if (input.operation === 'history') return reply(await identifyMembers(await readHistory(commercialGateway, input.query, scope)));
+    if(input.operation==='indicator-series')return reply(await readIndicatorSeries(commercialGateway,input.query,scope,await currentGroups()));
     if(input.operation==='ranking-report')return reply(await readRanking(commercialGateway,input.query,scope,async(month,companies)=>{const r=await profile.client.rpc('erp_sales_targets_read',{p_month:month,p_company_codes:companies});if(r.error)throw new SankhyaError('ERP_CONTEXT_REQUIRED','Metas locais indisponíveis para conferência.',502);return r.data;}));
-    if (input.operation === 'sales-report') return reply(await readSalesReport(commercialGateway, input.query, scope));
-    if (input.operation === 'receivables-report') return reply(await readReceivables(commercialGateway,input.query,scope));
-    if (input.operation === 'commission-report') return reply(await readCommissions(commercialGateway, input.query, scope));
+    if (input.operation === 'sales-report') return reply(await identifyMembers(await readSalesReport(commercialGateway, input.query, scope)));
+    if (input.operation === 'receivables-report') return reply(await identifyMembers(await readReceivables(commercialGateway,input.query,scope)));
+    if (input.operation === 'commission-report') return reply(await identifyMembers(await readCommissions(commercialGateway, input.query, scope)));
     if (input.operation === 'stock-report') return reply(await readStock(commercialGateway, input.query, scope));
     if (input.operation === 'wallet-report') return reply(await readWallet(commercialGateway, input.query, scope));
     if (input.operation === 'nonbuyers-report') return reply(await readNonBuyers(commercialGateway, input.query, scope));
-    if (input.operation === 'order-items-report') return reply(await readOrderItemsReport(commercialGateway, input.query, scope));
-    if (input.operation === 'billed-orders-report') return reply(await readBilledOrdersReport(commercialGateway, input.query, scope));
-    if (input.operation === 'billing-report') return reply(await readBillingReport(commercialGateway, input.query, scope));
-    if (input.operation === 'document') return reply(await readDocument(commercialGateway, input.query, scope));
+    if (input.operation === 'order-items-report') return reply(await identifyMembers(await readOrderItemsReport(commercialGateway, input.query, scope)));
+    if (input.operation === 'billed-orders-report') return reply(await identifyMembers(await readBilledOrdersReport(commercialGateway, input.query, scope)));
+    if (input.operation === 'billing-report') return reply(await identifyMembers(await readBillingReport(commercialGateway, input.query, scope)));
+    if (input.operation === 'document') return reply(await identifyMembers(await readDocument(commercialGateway, input.query, scope)));
     if (input.operation === 'commercial-options') return reply(await readOperationOptions(commercialGateway, input.query, scope));
     if (input.operation === 'order-registry') return reply(await readOrderRegistry(commercialGateway,input.query,scope));
-    if (input.operation === 'commercial-dictionary') return reply(await readCommercialDictionary(commercialGateway, input.query, scope));
+    if (input.operation === 'commercial-dictionary') return reply(input.query?.kind==='analytics'&&input.query?.section==='customers'?await readCustomerMetrics(commercialGateway,input.query,scope,false,await currentGroups()):await readCommercialDictionary(commercialGateway, input.query, scope));
     if (input.operation === 'price-query') return reply(await readPrice({ ...commercialGateway, contextPrices: q => gateway.contextPrices(q) }, input.query, scope));
-    if (input.operation === 'window') return reply(await readWindow(commercialGateway, input.query, scope));
-    if (input.operation === 'page') return reply(await readPage(commercialGateway, input.query, scope));
-    if (input.operation === 'record') return reply(await readRecord(commercialGateway, input.query, scope));
+    if (input.operation === 'window') return reply(await (input.query.resource==='customers'?identifyMembers(await readWindow(commercialGateway, input.query, scope)):readWindow(commercialGateway, input.query, scope)));
+    if (input.operation === 'page') return reply(await (input.query.resource==='customers'?identifyMembers(await readPage(commercialGateway,input.query,scope)):readPage(commercialGateway,input.query,scope)));
+    if (input.operation === 'record') return reply(await (input.query.resource==='customers'?identifyMembers(await readRecord(commercialGateway,input.query,scope)):readRecord(commercialGateway,input.query,scope)));
     if (input.operation === 'facets') return reply(await readFacets(commercialGateway, input.query, scope));
     return reply({ code: 'OPERATION_NOT_AVAILABLE', message: 'Operação de consulta ainda não disponível.' }, 400);
   } catch (error) {

@@ -34,7 +34,8 @@ async function abcCurves(descriptor: ERPDescriptor, base: ERPTableQuery): Promis
   const job = (async () => {
     const items: ERPRow[] = [];
     for (let offset = 0; offset < 5000; offset += 50) {
-      const page = await descriptor.client.salesReport({ ...(rest as object), sort: 'total', direction: 'desc', resource: 'orders', offset, limit: 50 } as ERPSalesQuery & { offset: number; limit: number });
+      const query={...(rest as object),sort:'total',direction:'desc',resource:'orders',offset,limit:50} as ERPSalesQuery;
+      const page=descriptor.client.customerGroupingEnabled&&descriptor.salesReport?.groupBy==='customer'?await descriptor.client.groupedWindow({operation:'sales-report',query}):await descriptor.client.salesReport(query);
       items.push(...page.items);
       if (page.items.length < 50 || items.length >= page.total) break;
     }
@@ -54,6 +55,11 @@ async function abcCurves(descriptor: ERPDescriptor, base: ERPTableQuery): Promis
   return job;
 }
 async function tableWindow(descriptor: ERPDescriptor, query: ERPTableQuery, offset: number, limit: number) {
+  if(descriptor.client.customerGroupingEnabled===true && !descriptor.customerId && !descriptor.orderItemsReport) {
+    const operation = descriptor.nonBuyersReport ? 'nonbuyers-report' : descriptor.walletReport ? 'wallet-report' : descriptor.salesReport?.groupBy==='customer' ? 'sales-report' : descriptor.billingReport?.groupBy==='customer' ? 'billing-report' : descriptor.resource==='customers'&&!descriptor.walletReport&&!descriptor.stockReport ? 'window' : null;
+    if(operation){const result=await descriptor.client.groupedWindow({operation,query:{...query,offset,limit}});if(descriptor.salesParticipation)return {...result,items:result.items.map((r):ERPRow=>({...r,share:formatERPShare(r['total'],result.summary?.documentAmount)}))};return result;}
+  }
+
   if(descriptor.rankingReport)return descriptor.client.rankingReport({...descriptor.rankingReport,...query,resource:'orders',offset,limit} as ERPRankingQuery);
   if(descriptor.receivablesReport)return descriptor.client.receivablesReport({...descriptor.receivablesReport,...query,resource:'orders',offset,limit});
   if(descriptor.commissionReport)return descriptor.client.commissionReport({...descriptor.commissionReport,...query,resource:'orders',offset,limit} as ERPCommissionQuery);

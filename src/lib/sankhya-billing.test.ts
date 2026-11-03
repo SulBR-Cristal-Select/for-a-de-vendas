@@ -23,7 +23,7 @@ describe('faturamento aprovado e vinculado à venda padrão, sem somar P/V',()=>
   const g=transport(),result=await readCommercialDictionary(g,query,admin);
   expect(result).toMatchObject({source:'sankhya',readOnly:true,supported:true,dateField:'DTFATUR',headerCountedOnce:true,ordersAdded:false,qualificationComplete:true,totals:{documentCount:2,documentAmount:'9007199254740993.01',amountField:'TGFCAB.VLRNOTA'}});
   const sql=g.select.mock.calls[3]![0];
-  for(const clause of ["H.TIPMOV='V'","H.STATUSNOTA='L'","H.STATUSNFE='A'","H.DTFATUR>=TO_DATE('2026-10-01'","H.DTFATUR<TO_DATE('2026-10-25'","T.GOLSINAL=-1","T.GOLDEV=1","T.BONIFICACAO='N'","P.TIPMOV='P'",'P.CODTIPOPER=1001','P.CODNAT=10100000',"P.STATUSNOTA='L'",'R.NUNOTAORIG','R.SEQUENCIAORIG','O.DHALTER=P.DHTIPOPER','T.DHALTER=H.DHTIPOPER'])expect(sql).toContain(clause);
+  for(const clause of ["H.TIPMOV='V'","H.STATUSNOTA='L'","H.STATUSNFE='A'","H.DTFATUR>=TO_DATE('2026-10-01'","H.DTFATUR<TO_DATE('2026-10-25'","T.GOLSINAL=-1","T.GOLDEV=1","T.BONIFICACAO='N'","P.TIPMOV='P'",'P.CODTIPOPER IN (1001,1107,1108,1162,1102,1101,1134,1130,1125,1171,1122)','P.CODNAT=10100000',"P.STATUSNOTA='L'",'R.NUNOTAORIG','R.SEQUENCIAORIG','O.DHALTER=P.DHTIPOPER','T.DHALTER=H.DHTIPOPER'])expect(sql).toContain(clause);
   expect(sql).not.toMatch(/H\.DTNEG|P\.DTNEG|SUM\(DISTINCT|SUM\(P\.|VLRDESC|PRECO|QTDATENDIDA|T\.ATIVO=/);
   expect(sql).toContain('TO_CHAR(SUM(VLRNOTA)');expect(sql).toContain('OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY');
   expect(g.select.mock.calls.every(([,limit])=>limit<=50)).toBe(true);

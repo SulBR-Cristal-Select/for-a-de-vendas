@@ -1,3 +1,5 @@
+import type {CustomerGroup} from '../../../src/lib/customer-groups.ts';
+import { salesOperationSQL } from '../../../src/lib/sales-operations.ts';
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
 import { currentCustomerWhere, scopeOf, sellerAllowed, type ReadScope } from './read-model.ts';
 import { CUSTOMER_INDICATOR_POLICY } from './policy.ts';
@@ -19,7 +21,7 @@ function counts(row: Row) {
  return{customerCount,activeKnown,activeUnknown,newKnown,newUnknown,activeCustomerCount:activeUnknown===0?activeKnown:null,newCustomerCount:newUnknown===0?newKnown:null};
 }
 /** Agregados fixos; o escopo vem do Auth servidor, nunca do corpo do navegador. */
-export async function readCustomerMetrics(gateway:Transport,value:unknown,trustedScope:ReadScope,combined=false){
+export async function readCustomerMetrics(gateway:Transport,value:unknown,trustedScope:ReadScope,combined=false,groups:readonly CustomerGroup[]=[]){
  if(!value||typeof value!=='object'||Array.isArray(value))return invalid();const input=value as Row;
  if(Object.keys(input).some(k=>!['kind','section','companyCode','from','to','offset',...(combined?['sellerCode']:[])].includes(k))||input['kind']!=='analytics'||input['section']!=='customers')return invalid();
  const companyCode=input['companyCode'];if(!(combined&&companyCode===undefined)&&companyCode!==1&&companyCode!==4)throw new SankhyaError('ERP_SCOPE_FORBIDDEN','Filial fora do escopo autorizado.',403);
@@ -40,7 +42,9 @@ export async function readCustomerMetrics(gateway:Transport,value:unknown,truste
  const valid=`T.TIPMOV='P' AND T.BONIFICACAO='${p.bonification}' AND T.GOLDEV=${p.devolution}`;
  const unknown="H.NUNOTA IS NOT NULL AND (T.CODTIPOPER IS NULL OR T.TIPMOV IS NULL OR T.TIPMOV<>'P' OR T.BONIFICACAO IS NULL OR T.BONIFICACAO NOT IN ('N','S') OR T.GOLDEV IS NULL OR T.GOLDEV NOT IN (-1,1))";
  // O filtro do período NÃO antecede MIN: uma recompra não pode virar primeira compra.
- const history=`SELECT P.CODPARC,P.CODVEND,P.ATIVO,MIN(CASE WHEN ${valid} THEN H.DTNEG END) AS FIRST_STANDARD_DATE,MIN(CASE WHEN ${unknown} THEN H.DTNEG END) AS FIRST_UNKNOWN_DATE,COUNT(CASE WHEN H.NUNOTA IS NOT NULL AND H.DTNEG IS NULL AND ((${valid}) OR (${unknown})) THEN 1 END) AS UNDATED_COUNT,COUNT(CASE WHEN (${unknown}) AND H.DTNEG>=${start} AND H.DTNEG<${end} THEN 1 END) AS UNKNOWN_PERIOD_COUNT FROM TGFPAR P LEFT JOIN TGFCAB H ON H.CODPARC=P.CODPARC AND H.CODEMP IN (${scope.companies.join(',')}) AND H.TIPMOV='${p.movement}' AND H.CODTIPOPER=${p.operationCode} AND H.CODNAT=${p.natureCode} AND H.STATUSNOTA='${p.statusCode}' LEFT JOIN TGFTOP T ON T.CODTIPOPER=H.CODTIPOPER AND T.DHALTER=H.DHTIPOPER WHERE ${where.join(' AND ')} GROUP BY P.CODPARC,P.CODVEND,P.ATIVO`;
+ const key=groups.length?`CASE ${groups.map((g,i)=>`WHEN P.CODPARC IN (${g.memberIds.map(id=>Number(id.slice(17))).join(',')}) THEN 'group:${i}'`).join(' ')} ELSE 'customer:'||TO_CHAR(P.CODPARC) END`:'P.CODPARC';
+ const identity=groups.length?`${key} AS CODPARC,CASE WHEN COUNT(DISTINCT P.CODVEND)=1 AND COUNT(P.CODVEND)=COUNT(*) THEN MIN(P.CODVEND) END AS CODVEND,CASE WHEN COUNT(CASE WHEN P.ATIVO='S' THEN 1 END)>0 THEN 'S' WHEN COUNT(CASE WHEN P.ATIVO='N' THEN 1 END)=COUNT(*) THEN 'N' END AS ATIVO`:'P.CODPARC,P.CODVEND,P.ATIVO';
+ const history=`SELECT ${identity},MIN(CASE WHEN ${valid} THEN H.DTNEG END) AS FIRST_STANDARD_DATE,MIN(CASE WHEN ${unknown} THEN H.DTNEG END) AS FIRST_UNKNOWN_DATE,COUNT(CASE WHEN H.NUNOTA IS NOT NULL AND H.DTNEG IS NULL AND ((${valid}) OR (${unknown})) THEN 1 END) AS UNDATED_COUNT,COUNT(CASE WHEN (${unknown}) AND H.DTNEG>=${start} AND H.DTNEG<${end} THEN 1 END) AS UNKNOWN_PERIOD_COUNT FROM TGFPAR P LEFT JOIN TGFCAB H ON H.CODPARC=P.CODPARC AND H.CODEMP IN (${scope.companies.join(',')}) AND H.TIPMOV='${p.movement}' AND ${salesOperationSQL('H.CODTIPOPER')} AND H.CODNAT=${p.natureCode} AND H.STATUSNOTA='${p.statusCode}' LEFT JOIN TGFTOP T ON T.CODTIPOPER=H.CODTIPOPER AND T.DHALTER=H.DHTIPOPER WHERE ${where.join(' AND ')} GROUP BY ${groups.length?key:'P.CODPARC,P.CODVEND,P.ATIVO'}`;
  const inPeriod=`C.FIRST_STANDARD_DATE>=${start} AND C.FIRST_STANDARD_DATE<${end}`;
  // Compra válida anterior ao período já prova que o cliente não é novo. Nos demais casos,
  // contexto/datas históricos incompletos não autorizam declarar primeira compra ou zero.

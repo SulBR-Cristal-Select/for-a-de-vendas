@@ -1,3 +1,4 @@
+import {scopeOf,sellerAllowed} from './read-model.ts';
 import {SankhyaError,type SankhyaGateway} from './gateway.ts';
 import {readRankingSales,type SalesReportInput} from './history.ts';
 import type {ReadScope} from './read-model.ts';
@@ -23,6 +24,17 @@ export async function readRanking(g:Pick<SankhyaGateway,'select'>,value:unknown,
  const data=await targets(q.month,first.companyCodes);
  if(!obj(data)||data['source']!=='local-canonical-targets'||data['identity']!=='private-Auth-UUID-to-CODVEND'||data['readOnly']!==true||data['month']!==q.month||!Array.isArray(data['companyCodes'])||JSON.stringify([...data['companyCodes']].sort())!==JSON.stringify([...first.companyCodes].sort())||!Array.isArray(data['targets']))return incompatible();
  const mapped=new Map<number,Row>();for(const t of data['targets']){if(!obj(t)||Object.keys(t).some(k=>!['sellerCode','amount','reason'].includes(k))||typeof t['sellerCode']!=='number'||!Number.isSafeInteger(t['sellerCode'])||t['sellerCode']<1||t['sellerCode']>2147483647||mapped.has(t['sellerCode'])||(t['amount']===null?!(TARGET_REASONS as readonly unknown[]).includes(t['reason']):typeof t['amount']!=='string'||erpDecimal(t['amount'])!==t['amount']||decimalUnits(t['amount'])<0n||t['reason']!==null))return incompatible();mapped.set(t['sellerCode'],t);}
+ if(period.targetsComparable){
+  const authorized=scopeOf(scope);
+  for(const [seller,t] of mapped){
+   if(t['amount']===null||q.sellerCode!==undefined&&q.sellerCode!==seller||!sellerAllowed(authorized,seller)||rows.some(r=>r['groupCode']===seller))continue;
+   const names=await g.select(`SELECT V.CODVEND,V.APELIDO FROM TGFVEN V WHERE V.CODVEND=${seller} FETCH FIRST 1 ROWS ONLY`,1);
+   if(names.length!==1||Number(names[0]!['CODVEND'])!==seller)continue;
+   rows.push({id:`sankhya:sales:seller:${seller}`,groupCode:seller,name:names[0]!['APELIDO'],count:0,clients:0,total:'0',rank:rows.length+1});
+  }
+  rows.sort((a,b)=>{if(a['total']===null||b['total']===null)return a['total']===null?1:-1;const d=decimalUnits(String(b['total']))-decimalUnits(String(a['total']));return(d<0n?-1:d>0n?1:0)||Number(a['groupCode'])-Number(b['groupCode']);});
+  rows.forEach((r,i)=>r['rank']=i+1);
+ }
  const all=rows.map(r=>{const link=mapped.get(Number(r['groupCode'])),target=period.targetsComparable?link?.['amount']??null:null,reason=period.targetsComparable?link?.['reason']??(link?null:'ERP_BINDING_UNAVAILABLE'):q.customerId?'TARGET_CUSTOMER_SCOPE_MISMATCH':'TARGET_PERIOD_MISMATCH';return{id:`sankhya:ranking:seller:${r['groupCode']??'unknown'}`,source:'observado',readOnly:true,name:r['name'],sellerCode:r['groupCode'],count:r['count'],clients:r['clients'],total:r['total'],rank:first.summary.missingAmountCount?null:r['rank'],target,targetReason:reason,hit:target!==null&&decimalUnits(String(target))>0n?formatERPShare(r['total'],target):null,progress:rankingProgress(r['total'],target)};});
  const missing=all.filter(r=>r.target===null).length,summary={...first.summary,sellerCount:all.length,targetMissingCount:missing,targetAmount:all.length&&!missing?sumERPDecimals(all.map(r=>String(r.target))):null};
  const search=foldERPText(q.search??''),filtered=all.filter(r=>!search||foldERPText(String(r.name??'')).includes(search)||String(r.sellerCode??'').includes(search)),sort=q.sort??'rank',direction=q.direction??'asc';

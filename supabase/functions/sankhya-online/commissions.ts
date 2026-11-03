@@ -1,3 +1,4 @@
+import { salesOperationSQL } from '../../../src/lib/sales-operations.ts';
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
 import { scopeOf, sellerAllowed, type ReadScope } from './read-model.ts';
 import { billingOriginFlags } from './billing-source.ts';
@@ -39,7 +40,7 @@ export async function readCommissions(gateway:Pick<SankhyaGateway,'select'>,valu
  const period=[...(q.from?[`C.DTNEG>=TO_DATE('${q.from}','YYYY-MM-DD')`]:[]),...(q.to?[`C.DTNEG<TO_DATE('${q.to}','YYYY-MM-DD')+1`]:[])];
  if(period.length)filters.push(`(C.DTNEG IS NULL OR (${period.join(' AND ')}))`);
  const flags=billingOriginFlags('C');
- const standard="C.TIPMOV='P' AND C.CODTIPOPER=1001 AND C.CODNAT=10100000 AND C.STATUSNOTA='L' AND T.TIPMOV='P' AND T.BONIFICACAO='N' AND T.GOLDEV=1";
+ const standard=`C.TIPMOV='P' AND ${salesOperationSQL('C.CODTIPOPER')} AND C.CODNAT=10100000 AND C.STATUSNOTA='L' AND T.TIPMOV='P' AND T.BONIFICACAO='N' AND T.GOLDEV=1`;
  const invoice=`C.TIPMOV='V' AND C.STATUSNOTA='L' AND C.STATUSNFE='A' AND T.TIPMOV='V' AND T.BONIFICACAO='N' AND T.GOLDEV=1 AND T.GOLSINAL=-1 AND ${flags.HAS_STANDARD_ORIGIN} AND NOT ${flags.HAS_OTHER_ORIGIN} AND NOT ${flags.HAS_UNRESOLVED_ORIGIN} AND NOT ${flags.HAS_UNLINKED_ITEM} AND ${flags.HAS_ITEMS} AND NOT ${flags.HAS_CROSS_COMPANY_ORIGIN}`;
  const uniqueRoot='(SELECT COUNT(DISTINCT R.NUNOTAORIG) FROM TGFVAR R WHERE R.NUNOTA=C.NUNOTA)=1';
  const root=`CASE WHEN ${standard} THEN C.NUNOTA WHEN ${invoice} AND ${uniqueRoot} THEN (SELECT MIN(R.NUNOTAORIG) FROM TGFVAR R WHERE R.NUNOTA=C.NUNOTA) END`;
