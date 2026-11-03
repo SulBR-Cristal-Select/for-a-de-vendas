@@ -32,6 +32,10 @@ import './sul.css';
 const He: any = React;
 const b: any = runtime;
 export function businessDate(now = new Date()): string { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now); }
+/** Dias úteis (seg–sex) do mês, no fuso de São Paulo. */
+export function monthBusinessDays(month: string): number { if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month)) return 0; const [y, m] = month.split('-').map(Number); const last = new Date(Date.UTC(y, m, 0)).getUTCDate(); let n = 0; for (let d = 1; d <= last; d++) { const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); if (day !== 0 && day !== 6) n++; } return n; }
+/** Dias úteis restantes do mês (seg–sex) contando hoje, no fuso de São Paulo; null fora do mês corrente. */
+export function remainingBusinessDays(month: string, now = new Date()): number | null { if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month)) return null; const today = businessDate(now); if (today.slice(0, 7) !== month) return null; const [y, m] = month.split('-').map(Number); const last = new Date(Date.UTC(y, m, 0)).getUTCDate(); let rest = 0; for (let d = Number(today.slice(8)); d <= last; d++) { const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); if (day !== 0 && day !== 6) rest++; } return rest; }
 export function percentageChange(previous: number, current: number): number | null { return previous > 0 ? ((current - previous) / previous) * 100 : null; }
 export function invoicedOrders(orders: any[], invoices: any[]): any[] { const ids = new Set(invoices.map((invoice: any) => invoice.orderId).filter(Boolean)); return orders.filter((order: any) => ids.has(order.id)); }
 export function csvRows(rows: any[], columns: any[]): any[] {
@@ -551,7 +555,9 @@ function nz(): any {
         .filter((p: any) => p.atual > 0 || p.ant > 0)
         .sort((p: any, y: any) => y.atual - p.atual);
     let nativeNewCount:any=null,nativeAbsent:any=null;
-    if(online){f=native?.ranking?.summary.documentAmount??null;meta=null;ating=null;base=native?.series['wallet-seller']?.summary.recordCount??null;atendidos=native?.series['wallet-seller']?.summary.buyerCount??null;nativeAbsent=base!==null&&atendidos!==null?base-atendidos:null;comissaoMes=native?.series['commissions-seller']?.summary.value??null;temComissao=comissaoMes!==null;nativeNewCount=native?.series['customers-seller-year']?.summary.newCount??null;novosFat=null;novos=[];naoCompraram=[];acumCliente=[];clientesPerf=[];}
+    if(online){f=native?.ranking?.summary.documentAmount??null;meta=native?.ranking?.summary.targetAmount!=null?Number(native!.ranking!.summary.targetAmount):null;ating=null;base=native?.series['wallet-seller']?.summary.recordCount??null;atendidos=native?.series['wallet-seller']?.summary.buyerCount??null;nativeAbsent=base!==null&&atendidos!==null?base-atendidos:null;comissaoMes=native?.series['commissions-seller']?.summary.value??null;temComissao=comissaoMes!==null;nativeNewCount=native?.series['customers-seller-year']?.summary.newCount??null;novosFat=null;novos=[];naoCompraram=[];acumCliente=[];clientesPerf=[];}
+    const businessTotal = monthBusinessDays(o), businessGone = businessTotal - (remainingBusinessDays(o) ?? 0);
+    if (meta > 0 && f != null) ating = businessGone > 0 && businessGone < businessTotal ? (f / Math.ceil((meta * businessGone) / businessTotal)) * 100 : (f / meta) * 100;
     const MESES: any = {
         "01": "janeiro",
         "02": "fevereiro",
@@ -645,7 +651,7 @@ function nz(): any {
                     (0, b.jsx)(Ha, {
                         label: "Meta do m\u00EAs",
                         value: meta > 0 ? rt(meta) : "\u2014",
-                        hint: online ? "Meta global sem população completa comprovada; consulte metas por vendedor." : "Soma das metas dos vendedores",
+                        hint: online ? "Metas canônicas por vendedor (RPC); proporção de dias úteis quando parcial." : "Soma das metas dos vendedores",
                     }),
                     (0, b.jsx)(Ha, {
                         label: "Vendido",
@@ -655,7 +661,7 @@ function nz(): any {
                     (0, b.jsx)(Ha, {
                         label: "Atingimento",
                         value: ating != null ? na(ating) + "%" : "\u2014",
-                        hint: online ? "Sem meta global comparável; não calcular por nome ou soma parcial." : meta > 0
+                        hint: online ? "Comparado à meta proporcional aos dias úteis decorridos." : meta > 0
                             ? rt(Math.max(0, meta - f)) + " restantes"
                             : "Defina metas por vendedor",
                     }),
@@ -684,7 +690,7 @@ function nz(): any {
                 ],
             }),
             online && (0,b.jsx)(SelectedIndicators,{names:e.extraIndicators,data:native,db:e,month:o,seller:r,client:online}),
-            meta > 0 &&
+            (meta > 0 || ating != null) &&
                 (0, b.jsx)(cs, {
                     title: "Acompanhamento da meta",
                     description: na(ating) +
