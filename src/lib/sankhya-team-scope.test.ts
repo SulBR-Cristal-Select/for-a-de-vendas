@@ -107,9 +107,9 @@ describe('mesmo escopo em páginas, ficha, facetas, histórico e condições', (
     expect(sql).toContain('P.CODVEND IN (34,6,7)'); expect(sql).toContain('C.CODVEND IN (34,6,7)');
     expect(sql).toContain('C.CODEMP=1 OR C.CODEMP IS NULL');
   });
-  it('cotação recusa usar o CODVEND de integrante, antes de consultar o ERP', async () => {
+  it('cotação recusa vendedor fora da equipe explícita, antes de consultar o ERP', async () => {
     const g = { ...transport(), contextPrices: vi.fn() };
-    await expect(readPrice(g, { customerId: 'sankhya:customer:141', productId: 'sankhya:product:11240', paymentCode: 29, type: 'Venda', sellerCode: 6 }, manager)).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
+    await expect(readPrice(g, { customerId: 'sankhya:customer:141', productId: 'sankhya:product:11240', paymentCode: 29, type: 'Venda', sellerCode: 99 }, manager)).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
     expect(g.select).not.toHaveBeenCalled(); expect(g.contextPrices).not.toHaveBeenCalled();
   });
   it('não transforma acesso comercial em acesso à configuração administrativa de TOPs', async () => {

@@ -1,5 +1,5 @@
 import { SankhyaError, type SankhyaGateway } from './gateway.ts';
-import { actorScope, loggedSeller, type CommercialActor } from './identity.ts';
+import { actorScope, operationSeller, loggedSeller, type CommercialActor } from './identity.ts';
 import { readPrice } from './price-context.ts';
 import { readRecord } from './read-model.ts';
 import type { RPC } from './transactions.ts';
@@ -28,7 +28,7 @@ async function load(d:SubmissionDeps,id:string) {
   if(response.error){const e=record(response.error);if(e['code']==='42501')return fail('FORBIDDEN','Pedido fora do vínculo comercial do titular.',403);if(e['code']==='PT409')return fail('REVISION_CONFLICT','Pedido alterado; confira novamente.');return fail('ERP_SUBMISSION_UNAVAILABLE','Não foi possível recuperar o pedido para envio.',503);}
   const result=record(response.data),order=record(result['order']),erp=record(order['erp']);
   if(order['id']!==id||order['sellerId']!==d.actor.id||!digest(result['fingerprint']))return fail('ERP_INVALID_RESPONSE','Pedido do servidor incompatível.',502);
-  loggedSeller(scope,erp['sellerCode']);
+  operationSeller(scope,erp['sellerCode']);
   if(!scope.companyCodes?.includes(erp['companyCode'] as 1|4))return fail('ERP_SCOPE_FORBIDDEN','Filial fora do acesso do titular.',403);
   return {order,fingerprint:result['fingerprint'],receipt:(order['receipt']??null) as SubmissionReceipt|null};
 }
@@ -48,7 +48,7 @@ async function prepare(d:SubmissionDeps,order:Row,freight:FreightType,reprice:bo
   if(reprice){
     for(const raw of items){
       const item=record(raw),snapshot=record(item['erp']);
-      const quote=await readPrice(d.gateway,{customerId:requiredText(order['customerId']),productId:requiredText(item['productId']),type:'Venda',paymentCode:positiveCode(record(erp['payment'])['code']),date:requiredText(order['date']),quantity:Number(item['qty']),unit:requiredText(item['unit']),sellerCode:loggedSeller(scope)},scope);
+      const quote=await readPrice(d.gateway,{customerId:requiredText(order['customerId']),productId:requiredText(item['productId']),type:'Venda',paymentCode:positiveCode(record(erp['payment'])['code']),date:requiredText(order['date']),quantity:Number(item['qty']),unit:requiredText(item['unit']),sellerCode:operationSeller(scope,erp['sellerCode'])},scope);
       if(quote.companyCode!==erp['companyCode']||quote.operationCode!==erp['operationCode']||quote.operationVersion!==erp['operationVersion']||quote.payment.version!==record(erp['payment'])['version']||quote.price.localCode!==snapshot['localCode']||quote.price.control!==snapshot['control']||erpDecimal(String(quote.price.amount))===null||decimalUnits(String(quote.price.amount))!==decimalUnits(String(item['price'])))return fail('ERP_PRICE_CHANGED','Contexto ou preço mudou desde o salvamento. Atualize o pedido antes de aprovar.');
       buyer??=record(quote.customer);
     }

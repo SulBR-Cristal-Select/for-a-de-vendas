@@ -17,6 +17,10 @@ beforeEach(() => {
   vi.mocked(readRecord).mockImplementation(async (_g, q) => ({ source: 'sankhya', readOnly: true, readAt: '2026-10-23T22:00:00Z', record: q.resource === 'customers' ? customer : q.resource === 'products' ? product : { active: true, id: `sankhya:seller:${q.id}`, erp: { source: 'sankhya', sellerCode: q.id } } } as any));
 });
 describe('Preço nativo contextual, nunca preço-base ou catálogo aproximado', () => {
+  it('gestor cota para integrante explicitamente autorizado, não por nome ou carteira',async()=>{
+    const g=gateway();const result=await readPrice(g,{...query,sellerCode:12},{role:'gestor',sellerCode:14,companyCodes:[1],teamSellerCodes:[12]});
+    expect(result.seller.id).toBe('sankhya:seller:12');expect(g.contextPrices).toHaveBeenCalledWith(expect.objectContaining({codigoVendedor:12}));
+  });
   it('usa filial1 só no contexto compartilhado, TOP1001 e vendedor real, preservando controle espaço', async () => {
     const g = gateway(), result = await readPrice(g, query, { role: 'administrador', sellerCode: 14, companyCodes: [1, 4] });
     expect(result).toMatchObject({ companyCode: 1, operationCode: 1001, price: { amount: 10.56, unit: 'PC', localCode: 0, control: ' ', tableVersion: null } });

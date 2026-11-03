@@ -1,3 +1,4 @@
+import {useCustomerPerformance} from './customer-performance';
 import CustomerGroups from './CustomerGroups';
 import { groupForCustomer, groupLabel } from '../lib/customer-groups';
 import { businessDate, proratedMonthlyTarget } from '../lib/business-month';
@@ -498,6 +499,7 @@ function Ui({ area: e, items: t }: any): any {
 function nz(): any {
     let { db: e, update: t, editor: a, online } = qa(), [o, n] = (0, He.useState)(businessDate().slice(0, 7)), [r, l] = (0, He.useState)(""), [s, i] = (0, He.useState)(e.activePanel || "Painel Sul");
     const native=useOnlineIndicators(online,o,r,e.extraIndicators,String(e.company.userId));
+    const customerNative=useCustomerPerformance(online,o,r,String(e.company.userId));
     const nativeVendors=new Map<number,string>();
     for(const row of native?.ranking?.items??[]){const c=row['sellerCode'];if(typeof c==='number'&&c>0)nativeVendors.set(c,String(row['name']??('Vendedor ERP '+c)));}
     for(const row of native?.series['wallet-seller']?.items??[]){if(row.groupCode!==null&&row.groupCode>0)nativeVendors.set(row.groupCode,row.label??('Vendedor ERP '+row.groupCode));}
@@ -554,7 +556,7 @@ function nz(): any {
         .filter((p: any) => p.atual > 0 || p.ant > 0)
         .sort((p: any, y: any) => y.atual - p.atual);
     let nativeNewCount:any=null,nativeAbsent:any=null;
-    if(online){f=native?.ranking?.summary.documentAmount??null;meta=native?.ranking?.summary.targetAmount!=null?Number(native!.ranking!.summary.targetAmount):null;ating=null;base=native?.series['wallet-seller']?.summary.recordCount??null;atendidos=native?.series['wallet-seller']?.summary.buyerCount??null;nativeAbsent=base!==null&&atendidos!==null?base-atendidos:null;comissaoMes=native?.series['commissions-seller']?.summary.value??null;temComissao=comissaoMes!==null;nativeNewCount=native?.series['customers-seller-year']?.summary.newCount??null;novosFat=null;novos=[];naoCompraram=[];acumCliente=[];clientesPerf=[];}
+    if(online){f=native?.ranking?.summary.documentAmount??null;meta=native?.ranking?.summary.targetAmount!=null?Number(native!.ranking!.summary.targetAmount):null;ating=null;base=native?.series['wallet-seller']?.summary.recordCount??null;atendidos=native?.series['wallet-seller']?.summary.buyerCount??null;nativeAbsent=base!==null&&atendidos!==null?base-atendidos:null;comissaoMes=native?.series['commissions-seller']?.summary.value??null;temComissao=comissaoMes!==null;nativeNewCount=native?.series['customers-seller-year']?.summary.newCount??null;novosFat=null;novos=[];naoCompraram=[];acumCliente=(customerNative?.accumulated??[]).filter(row=>row['total']!==null).map(row=>({id:row['id'],label:row['name'],value:Number(row['total'])}));clientesPerf=customerNative?.performance??[];}
     meta = proratedMonthlyTarget(meta ?? null, o);
     if (meta > 0 && f != null) ating = (f / meta) * 100;
     const MESES: any = {
@@ -722,15 +724,15 @@ function nz(): any {
                     (MESES[mesAnt.slice(5, 7)] || mesAnt) +
                     " de " +
                     mesAnt.slice(0, 4) +
-                    " \xB7 seta verde = cresceu, vermelha = caiu",
+                    " \xB7 seta verde = cresceu, vermelha = caiu" + (online ? " · meses completos · histórico disponível no ERP" : ""),
                 children: clientesPerf.length
                     ? (0, b.jsx)(ya, {
                         toolbar: !1,
                         rows: clientesPerf,
                         columns: [
                             z("name", "Cliente", void 0, { primary: !0, wide: !0 }),
-                            z("ant", MESES[mesAnt.slice(5, 7)] + " de " + mesAnt.slice(0, 4), (p: any) => (p.ant > 0 ? rt(p.ant) : "\u2014"), { align: "right" }),
-                            z("atual", nomeMes, (p: any) => (p.atual > 0 ? rt(p.atual) : "\u2014"), { align: "right" }),
+                            z("ant", MESES[mesAnt.slice(5, 7)] + " de " + mesAnt.slice(0, 4), (p: any) => rt(p.ant), { align: "right" }),
+                            z("atual", nomeMes, (p: any) => rt(p.atual), { align: "right" }),
                             z("pct", "Varia\xE7\xE3o", (p: any) => {
                                 if (p.pct == null)
                                     return "\u2014";
@@ -749,7 +751,7 @@ function nz(): any {
                         ],
                     })
                     : (0, b.jsx)(hn, {
-                        title: online ? "Detalhamento comparativo nativo ainda não conectado" : "Nenhum cliente comprou neste m\u00EAs",
+                        title: online ? customerNative?.errors['performance'] ?? (customerNative?.performance ? "Nenhuma venda registrada nos dois períodos" : "Carregando comparativo de clientes") : "Nenhum cliente comprou neste m\u00EAs",
                         framed: !1,
                     }),
             }),
@@ -758,7 +760,7 @@ function nz(): any {
                 children: [
                     (0, b.jsx)(cs, {
                         title: "Acumulado por cliente",
-                        description: "Total hist\xF3rico de vendas conclu\xEDdas por cliente",
+                        description: online ? "Vendas padrão de janeiro até o fim do mês selecionado · histórico disponível no ERP" : "Total hist\xF3rico de vendas conclu\xEDdas por cliente",
                         action: (0, b.jsx)(xt, {
                             href: "#/relatorios/gerencial",
                             children: "Detalhar",
@@ -766,7 +768,7 @@ function nz(): any {
                         children: acumCliente.length
                             ? (0, b.jsx)(Zy, { items: acumCliente, format: Vd })
                             : (0, b.jsx)(hn, {
-                                title: online ? "Acumulado histórico nativo ainda não conectado" : "Sem vendas neste recorte",
+                                title: online ? customerNative?.errors['accumulated'] ?? (customerNative?.accumulated ? "Nenhuma venda registrada no ano selecionado" : "Carregando acumulado por cliente") : "Sem vendas neste recorte",
                                 framed: !1,
                             }),
                     }),
@@ -973,7 +975,11 @@ function sz(): any {
     const [orderId] = React.useState(() => crypto.randomUUID());
     let { db: base, update: t, path: a, online } = qa(), o: any = new URLSearchParams(location.hash.split("?")[1] || ""), [n, r] = (0, He.useState)(o.get("cliente") || ""), [l, s] = (0, He.useState)(base.company.user), [i, u] = (0, He.useState)(""), [c, f] = (0, He.useState)("Venda"), [d, m] = (0, He.useState)(bo), [p, y] = (0, He.useState)("1 - IMEDIATO"), [C, x] = (0, He.useState)("Conclu\xEDdo"), [v, g] = (0, He.useState)(""), [h, S] = (0, He.useState)([]), [L, I] = (0, He.useState)(0), [R, E] = (0, He.useState)(""), [OBS, OBSs] = (0, He.useState)(""), [k, M] = (0, He.useState)(""), [A, N] = (0, He.useState)("");
     const actorSeller = workspaceERPSeller(base.company);
-    const lookups = useERPOrderLookups(online, n, [...h.map((item: any) => item.productId), v], actorSeller?.sellerId);
+    const managerOrder = base.company.role === 'Gestor';
+    const [delegatedSeller,setDelegatedSeller]=He.useState('');
+    const permittedSellers = actorSeller ? [actorSeller.sellerCode,...(managerOrder ? actorSeller.teamSellerCodes ?? [] : [])] : [];
+    const operatingSeller = managerOrder && permittedSellers.includes(Number(delegatedSeller.split(':')[2])) ? delegatedSeller : actorSeller?.sellerId ?? '';
+    const lookups = useERPOrderLookups(online, n, [...h.map((item: any) => item.productId), v], operatingSeller);
     // Visão transitória só no formulário: os arrays canônicos permanecem intactos.
     const e = React.useMemo(() => online ? { ...base, customers: [...manualRows(base.customers), ...lookups.customers], products: [...manualRows(base.products), ...lookups.products] } : base,
         [base, online, lookups.customers, lookups.products]);
@@ -988,7 +994,7 @@ function sz(): any {
         if (i === String(only['id']) && paymentChoice?.customerId === n && paymentChoice?.row['id'] === only['id']) return;
         u(String(only['id'])); setPaymentChoice({ customerId: n, row: only });
     }, [onlineOrder, n, paymentMenu.rows, i]);
-    const context: OnlineOrderContext = { customerId: n, paymentCode: Number(selectedPayment?.['code']), sellerId: onlineOrder ? actorSeller?.sellerId ?? '' : l, type: c, date: businessDate() };
+    const context: OnlineOrderContext = { customerId: n, paymentCode: Number(selectedPayment?.['code']), sellerId: onlineOrder ? operatingSeller : l, type: c, date: businessDate() };
     const prices = useERPOrderPrices(onlineOrder ? online : undefined, context, h, e.products);
     const contextKey = JSON.stringify([context, v]);
     const activeContext = useRef(contextKey); activeContext.current = contextKey;
@@ -1099,8 +1105,8 @@ function sz(): any {
                                                 label: "Vendedor",
                                                 remote: online ? lookups.matches.sellers : undefined,
                                                 value: onlineOrder ? context.sellerId : l,
-                                                onValueChange: (D: any) => { if (!onlineOrder) s(String(D)); },
-                                                options: onlineOrder ? lookups.sellers.filter((seller: any) => seller.id === context.sellerId).map((seller: any) => ({ value: seller.id, label: seller.name })) : [...La(sellerNames(e)), ...(online ? lookups.sellers.map((seller: any) => ({ value: seller.id, label: seller.name })) : [])],
+                                                onValueChange: (D: any) => { if (!onlineOrder) s(String(D)); else if(managerOrder && permittedSellers.includes(Number(String(D).split(':')[2])))setDelegatedSeller(String(D)); },
+                                                options: onlineOrder ? lookups.sellers.filter((seller: any) => permittedSellers.includes(Number(String(seller.id).split(':')[2]))).map((seller: any) => ({ value: seller.id, label: seller.name })) : [...La(sellerNames(e)), ...(online ? lookups.sellers.map((seller: any) => ({ value: seller.id, label: seller.name })) : [])],
                                             }),
                                             (0, b.jsx)(ho, {
                                                 label: "Tipo de pedido",

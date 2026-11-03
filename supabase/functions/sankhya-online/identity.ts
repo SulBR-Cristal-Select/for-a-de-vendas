@@ -26,3 +26,11 @@ export function loggedSeller(scope: ReadScope, requested?: unknown): number {
     throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Vendedor fora do escopo autorizado.', 403);
   return code;
 }
+
+/** Operação delegada somente para a equipe explícita do gestor; autoria Auth preservada. */
+export function operationSeller(scope: ReadScope, requested?: unknown): number {
+ const own=loggedSeller(scope);
+ if(requested===undefined||requested===own)return own;
+ if(scope.role==='gestor'&&typeof requested==='number'&&Number.isSafeInteger(requested)&&requested>0&&requested<=2147483647&&scope.teamSellerCodes?.includes(requested))return requested;
+ throw new SankhyaError('ERP_SCOPE_FORBIDDEN','Vendedor fora do escopo autorizado.',403);
+}

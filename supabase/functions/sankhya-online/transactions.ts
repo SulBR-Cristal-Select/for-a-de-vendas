@@ -2,7 +2,7 @@ import { SankhyaError, type SankhyaGateway } from './gateway.ts';
 import { readPrice } from './price-context.ts';
 import { readPaymentRules } from './payments.ts';
 import { commercialTotal, quantityRules } from '../../../src/lib/erp-commercial.ts';
-import { actorScope, loggedSeller, type CommercialActor } from './identity.ts';
+import { actorScope, operationSeller, loggedSeller, type CommercialActor } from './identity.ts';
 type Row = Record<string, unknown>;
 type Transport = Pick<SankhyaGateway, 'select' | 'contextPrices'>;
 type Actor = CommercialActor;
@@ -35,7 +35,7 @@ export async function revalidateOrderRequest(gateway: Transport, input: unknown,
   if (typeof context['replay'] !== 'boolean' || typeof context['proofReady'] !== 'boolean' || !Array.isArray(required) || !required.every(id => typeof id === 'string') || new Set(required).size !== required.length) return fail('ERP_INVALID_RESPONSE', 'Pré-validação transacional incompleta.', 502);
   // Mesmo UUID, revisão e estado: ledger antes de prazo/consumo; não repetir preço em reenvio.
   if (context['replay'] || context['proofReady'] || required.length === 0) return { ready: true, replay: context['replay'], proofReady: context['proofReady'] };
-  const actorSeller = loggedSeller(scope);
+  loggedSeller(scope);
   if (!Array.isArray(state['orders'])) return fail('INVALID_REQUEST', 'Pedidos inválidos.');
   const orders = state['orders'].map(object);
   const selected = required.map(id => {
@@ -48,7 +48,7 @@ export async function revalidateOrderRequest(gateway: Transport, input: unknown,
   for (const order of selected) {
     const erp = object(order['erp']), customerId = text(order['customerId']), date = text(order['date']);
     if (!/^sankhya:customer:[1-9]\d*$/.test(customerId) || erp['source'] !== 'sankhya' || erp['mode'] !== 'online' || order['type'] !== 'Venda' || !Array.isArray(order['items']) || !order['items'].length) return fail('ERP_CONTEXT_REQUIRED', 'Pedido ERP exige cliente e itens ERP compatíveis.');
-    loggedSeller(scope, erp['sellerCode']);
+    const actorSeller = operationSeller(scope, erp['sellerCode']);
     const paymentCode = code(object(erp['payment'])['code']);
     const items: Row[] = [], seen = new Set<string>();
     let commercial: Row | undefined, sellerCode: number | undefined, companyCode: 1 | 4 | undefined, paymentVersion: string | undefined;

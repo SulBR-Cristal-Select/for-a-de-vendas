@@ -79,6 +79,13 @@ describe('Mesma identidade em preparação, cotação e prova', () => {
     expect(readPrice).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ sellerCode: 14 }), { role, sellerCode: 14, companyCodes: [1, 4] });
     expect(f.attest.mock.calls[0]![0].p_actor_id).toBe(actor.id);
   });
+  it('gestor recota integrante autorizado e mantém a autoria Auth da prova', async () => {
+    const f=fixture();f.state.company.role='Gestor';f.state.orders[0]!.erp.sellerCode=5;
+    vi.mocked(readPrice).mockResolvedValueOnce({...quote(),seller:{name:'INTEGRANTE',erp:{sellerCode:5}}} as any);
+    await revalidateOrderRequest(f.gateway,f.request,{...actor,role:'gestor',binding:{...actor.binding,teamSellerCodes:[5]}},f.rpc,f.attest);
+    expect(readPrice).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({sellerCode:5}),expect.objectContaining({role:'gestor',teamSellerCodes:[5]}));
+    expect(f.attest.mock.calls[0]![0].p_actor_id).toBe(actor.id);
+  });
   it('recusa vendedor adulterado no snapshot antes de recotar', async () => {
     const f=fixture(); f.state.orders[0]!.erp.sellerCode=5;
     await expect(revalidateOrderRequest(f.gateway, f.request, actor, f.rpc, f.attest)).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
