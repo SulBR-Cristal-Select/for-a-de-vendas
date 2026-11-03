@@ -4567,61 +4567,41 @@ function Iz(): any {
         ],
     });
 }
-function Lz(e: any, t: any): any {
-    let a: any = ol(t), o: any = e.orders.filter((r: any) => r.type === "Venda" && r.status === "Conclu\xEDdo"), n: any = Zo(o, "total");
-    return a.includes("ticket")
-        ? `O ticket m\xE9dio dos ${o.length} pedidos de venda neste arquivo \xE9 ${o.length ? rt(n / o.length) : "indispon\xEDvel"}. Este recorte n\xE3o representa o total da conta.`
-        : a.includes("produto") || a.includes("reposi")
-            ? `Nos itens recuperados:
-` +
-                dv(e, o)
-                    .sort((l: any, s: any) => s.qty - l.qty)
-                    .map((l: any) => `${l.name}: ${na(l.qty)} unidades, ${rt(l.total)}.`)
-                    .join(`
-`) +
-                `
-Os pedidos sem itens extra\xEDdos n\xE3o entram neste c\xE1lculo.`
-            : a.includes("cliente") || a.includes("reativa")
-                ? `O arquivo cont\xE9m ${e.customers.length} clientes e ${e.orders.length} pedidos. Os limiares observados s\xE3o ${e.config.recentDays} e ${e.config.oldDays} dias. N\xE3o \xE9 poss\xEDvel afirmar a carteira completa ou recomendar reativa\xE7\xE3o sem o hist\xF3rico ausente.`
-                : a.includes("venda") || a.includes("pedido")
-                    ? `H\xE1 ${e.orders.length} pedidos neste arquivo. Os pedidos conclu\xEDdos do tipo Venda somam ${rt(n)}. Use Pedidos ou Relat\xF3rios para detalhar o recorte.`
-                    : "Esta \xE9 uma resposta determin\xEDstica local, n\xE3o uma chamada de IA. Posso resumir os pedidos do arquivo, calcular ticket m\xE9dio, listar produtos com itens extra\xEDdos e explicar os limites dos dados.";
-}
 function wz(): any {
-    let { db: e, update: t } = qa(), [a, o] = (0, He.useState)(""), [n, r] = (0, He.useState)(!1), l: any = (s: any) => {
-        go("IA indisponível: provedor não configurado."); return;
-        !s.trim() ||
-            n ||
-            (r(!0),
-                o(""),
-                setTimeout(async () => {
-                    (await t((i: any) => i.chats.push({
-                        id: crypto.randomUUID(),
-                        question: s,
-                        answer: Lz(i, s),
-                        date: bo,
-                        source: "simulado",
-                    })),
-                        r(!1));
-                }, 180));
+    let { db: e, online } = qa(), [a, o] = (0, He.useState)(""), [n, r] = (0, He.useState)(false);
+    const [chats,setChats] = React.useState<any[]>(e.chats??[]);
+    const alive = useRef(true);
+    useEffect(() => {alive.current=true;return()=>{alive.current=false;};},[]);
+    const l = async (s: string) => {
+        if(!s.trim() || n)return;
+        if(!online?.ai){go("Sul IA indisponível nesta sessão.");return;}
+        r(true);
+        try {
+            const history=chats.filter((chat:any)=>chat.source==='observado'&&chat.model).slice(-4).flatMap((chat:any)=>[{role:'user',content:chat.question.slice(0,2000)},{role:'assistant',content:chat.answer.slice(0,4000)}]);
+            const response=await online.ai({message:s.trim(),history});
+            if(!alive.current)return;
+            setChats(previous=>[...previous,{id:crypto.randomUUID(),question:s.trim(),answer:response.answer,date:response.readAt.slice(0,10),source:'observado',model:response.model}]);
+            if(alive.current)o("");
+        } catch(error) {if(alive.current)go(error instanceof Error?error.message:'Não foi possível consultar a Sul IA.');}
+        finally {if(alive.current)r(false);}
     };
     return (0, b.jsxs)(fa, {
         width: "reading",
         children: [
             (0, b.jsx)(Ua, {
                 title: "Sul IA",
-                description: "Conversa simulada e determin\xEDstica \xB7 sem modelo, servi\xE7os externos ou consumo de cr\xE9ditos",
+                description: "Consultas e análises com IA · dados autorizados do Sankhya · somente leitura",
             }),
             (0, b.jsxs)("div", {
                 className: "space-y-4",
                 children: [
-                    !e.chats.length &&
+                    !chats.length &&
                         (0, b.jsxs)(b.Fragment, {
                             children: [
                                 (0, b.jsx)(hn, {
                                     icon: (0, b.jsx)(al, {}),
-                                    title: "O que voc\xEA quer consultar no recorte?",
-                                    hint: "As respostas usam somente os dados deste arquivo.",
+                                    title: "O que você quer consultar?",
+                                    hint: "Consulte vendas, clientes, produtos e estoque no seu escopo de acesso.",
                                 }),
                                 (0, b.jsx)("div", {
                                     className: "flex flex-wrap gap-2",
@@ -4633,7 +4613,7 @@ function wz(): any {
                                 }),
                             ],
                         }),
-                    e.chats.map((s: any) => (0, b.jsxs)("div", {
+                    chats.map((s: any) => (0, b.jsxs)("div", {
                         className: "space-y-3",
                         children: [
                             (0, b.jsx)("div", {
@@ -4648,7 +4628,7 @@ function wz(): any {
                                 children: [
                                     (0, b.jsx)(bi, {
                                         tone: "warn",
-                                        children: "Resposta simulada",
+                                        children: s.model ? "IA · " + s.model : "Resposta antiga · simulada",
                                     }),
                                     (0, b.jsx)("p", {
                                         className: "text-body whitespace-pre-line leading-relaxed",
@@ -4665,7 +4645,7 @@ function wz(): any {
                                 label: "Mensagem",
                                 value: a,
                                 onChange: o,
-                                placeholder: "Pergunte sobre os dados recuperados\u2026",
+                                placeholder: "Pergunte sobre vendas, clientes, produtos ou estoque…",
                                 minRows: 3,
                             }),
                             (0, b.jsxs)("div", {
@@ -4673,8 +4653,8 @@ function wz(): any {
                                 children: [
                                     (0, b.jsx)(Xt, {
                                         children: n
-                                            ? "Calculando resposta local\u2026"
-                                            : "Nenhuma mensagem sai deste arquivo.",
+                                            ? "Consultando a Sul IA…"
+                                            : "IA via Gateway G4 · histórico apenas nesta sessão.",
                                     }),
                                     (0, b.jsxs)(Ft, {
                                         onClick: () => l(a),

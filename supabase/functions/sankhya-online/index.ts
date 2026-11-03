@@ -1,3 +1,4 @@
+import {sulAI,aiModels} from './sul-ai.ts';
 import {readCustomerMetrics} from './customer-metrics.ts';
 import { readCustomerGroups, saveCustomerGroup, GROUP_KIND } from './customer-groups.ts';
 import { groupedWindow } from './group-window.ts';
@@ -147,6 +148,31 @@ Deno.serve(async (request: Request) => {
       return {...result,...('record'in result?{record:mark(result.record)}:{}),...(Array.isArray(result.items)?{items:result.items.map(mark)}:{})};
     };
 
+    if(input.operation==='ai-models') {
+      if(profile.role!=='administrador')throw new SankhyaError('FORBIDDEN','Consulta reservada ao administrador.',403);
+      return reply({models:await aiModels(Deno.env.get('SUL_AI_API_KEY'))});
+    }
+    if(input.operation==='sul-ai') return reply(await sulAI(input.query,{key:Deno.env.get('SUL_AI_API_KEY'),model:Deno.env.get('SUL_AI_MODEL'),read:async(operation,query)=>{
+      if(!query.customerId&&((operation==='window'&&query.resource==='customers')||['wallet-report','nonbuyers-report'].includes(operation)||(['sales-report','billing-report'].includes(operation)&&query.groupBy==='customer')))return groupedWindow({operation,query},await currentGroups(),async(op,q)=>{
+        if(op==='window')return readWindow(commercialGateway,q as any,scope);
+        if(op==='wallet-report')return readWallet(commercialGateway,q,scope);
+        if(op==='nonbuyers-report')return readNonBuyers(commercialGateway,q,scope);
+        if(op==='sales-report')return readSalesReport(commercialGateway,q,scope);
+        if(op==='billing-report')return readBillingReport(commercialGateway,q,scope);
+        if(op==='group-mix'){const {memberIds,...input}=q;return readGroupedMix(commercialGateway,input as any,scope,memberIds);}
+        throw new SankhyaError('INVALID_REQUEST','Consulta inválida.',400);
+      });
+      if(operation==='window')return readWindow(commercialGateway,query as any,scope);
+      if(operation==='sales-report')return identifyMembers(await readSalesReport(commercialGateway,query,scope));
+      if(operation==='billing-report')return identifyMembers(await readBillingReport(commercialGateway,query,scope));
+      if(operation==='wallet-report')return readWallet(commercialGateway,query,scope);
+      if(operation==='nonbuyers-report')return readNonBuyers(commercialGateway,query,scope);
+      if(operation==='stock-report')return readStock(commercialGateway,query,scope);
+      if(operation==='order-items-report')return identifyMembers(await readOrderItemsReport(commercialGateway,query,scope));
+      if(operation==='history')return identifyMembers(await readHistory(commercialGateway,query,scope));
+      if(operation==='document')return identifyMembers(await readDocument(commercialGateway,query,scope));
+      throw new SankhyaError('INVALID_REQUEST','Consulta não autorizada.',400);
+    }}));
     if(input.operation==='customer-groups') {
       if(!input.query||Object.keys(input.query).length)throw new SankhyaError('INVALID_REQUEST','Consulta inválida.',400);
       return reply({...observation(),groups:await readCustomerGroups(commercialGateway,scope,groupStore())});

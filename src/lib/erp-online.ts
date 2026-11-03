@@ -36,11 +36,14 @@ export type ERPDocument = ERPObservation & { record: ERPRow | null; items: ERPRo
 export type ERPPriceQuery = { resource?: never; customerId: string; productId: string; paymentCode: number; type: 'Venda'; sellerCode?: number; quantity?: number; unit?: string; date?: string };
 export type ERPPaymentQuery = { resource?: never; customerId: string; offset: number; limit: number; search?: string; date?: string };
 export type ERPPrice = ERPObservation & { customer: ERPRow; product: ERPRow; seller: ERPRow; companyCode: 1 | 4; operationCode: 1001; operationVersion: string; quantity: number; payment: { code: number; label: string; version: string }; price: { amount: number; unit: string; localCode: number | null; control: string | null; tableVersion: number | null; provider: 'native-context-api' } };
-export type ERPOperation = 'customer-groups' | 'customer-group-save' | 'grouped-window' | 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'billing-report' | 'billed-orders-report' | 'order-items-report' | 'nonbuyers-report' | 'wallet-report' | 'stock-report' | 'receivables-report' | 'ranking-report' | 'indicator-series' | 'commission-report' | 'document' | 'price-query' | 'payment-options';
+export type ERPOperation = 'sul-ai' | 'customer-groups' | 'customer-group-save' | 'grouped-window' | 'page' | 'window' | 'record' | 'facets' | 'history' | 'sales-report' | 'billing-report' | 'billed-orders-report' | 'order-items-report' | 'nonbuyers-report' | 'wallet-report' | 'stock-report' | 'receivables-report' | 'ranking-report' | 'indicator-series' | 'commission-report' | 'document' | 'price-query' | 'payment-options';
 type ERPGroupedQuery = {operation:'window'|'wallet-report'|'nonbuyers-report'|'sales-report'|'billing-report';query:Record<string,unknown>};
 type ERPQuery = Record<string,unknown> | ERPIndicatorQuery | ERPRankingQuery | ERPReceivablesQuery | ERPCommissionQuery | ERPStockQuery | ERPWalletQuery | ERPPageQuery | ERPWindowQuery | ERPRecordQuery | ERPFacetQuery | ERPHistoryQuery | ERPSalesQuery | ERPBillingQuery | ERPOrderItemsQuery | ERPNonBuyersQuery | ERPDocumentQuery | ERPPriceQuery | ERPPaymentQuery;
 export type ERPTransport = (body: { operation: ERPOperation; query: ERPQuery }, signal: AbortSignal) => Promise<{ data: unknown; error: unknown }>;
 const messages = {
+  AI_NOT_CONFIGURED: 'Chave da Sul IA não configurada.',
+  AI_UNAVAILABLE: 'Sul IA indisponível. Confira a chave, os limites de uso ou tente novamente.',
+  AI_INVALID_RESPONSE: 'Resposta da Sul IA inválida ou incompleta.',
   AUTH_REQUIRED: 'Sessão não autorizada. Entre novamente.',
   MEMBERSHIP_PENDING: 'Acesso pendente de ativação pelo administrador.',
   PROFILE_UNAVAILABLE: 'Não foi possível validar o acesso da conta.',
@@ -77,6 +80,10 @@ function observation(data: unknown): asserts data is ERPRow & ERPObservation {
 }
 function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow {
   observation(data);
+  if(operation==='sul-ai'){
+    if(typeof data['answer']!=='string'||!data['answer'].trim()||data['answer'].length>16000||typeof data['model']!=='string'||!Array.isArray(data['sources']))invalid();
+    return data;
+  }
   if (operation === 'customer-groups') {
     if(!Array.isArray(data['groups']))invalid();
     const seen=new Set<string>(),members=new Set<string>();
@@ -255,7 +262,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
         const p = q as ERPPriceQuery;
         if (!/^sankhya:product:[1-9]\d*$/.test(p.productId) || !natural(p.paymentCode) || p.paymentCode < 1 || p.type !== 'Venda') throw new ERPOnlineError('INVALID_REQUEST');
       }
-    } else if (!['customer-groups','customer-group-save','grouped-window'].includes(operation) && !(operation === 'billing-report' ? ['invoices'] : operation === 'sales-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'commission-report' || operation === 'indicator-series' || operation === 'ranking-report' || operation === 'receivables-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(String(query.resource))) throw new ERPOnlineError('INVALID_REQUEST');
+    } else if (!['sul-ai','customer-groups','customer-group-save','grouped-window'].includes(operation) && !(operation === 'billing-report' ? ['invoices'] : operation === 'sales-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'commission-report' || operation === 'indicator-series' || operation === 'ranking-report' || operation === 'receivables-report' ? ['orders'] : operation === 'history' ? ['orders', 'invoices'] : ['customers', 'products', 'sellers']).includes(String(query.resource))) throw new ERPOnlineError('INVALID_REQUEST');
     if (operation === 'window' || operation === 'history' || operation === 'sales-report' || operation === 'billing-report' || operation === 'billed-orders-report' || operation === 'order-items-report' || operation === 'nonbuyers-report' || operation === 'wallet-report' || operation === 'stock-report' || operation === 'commission-report' || operation === 'indicator-series' || operation === 'ranking-report' || operation === 'receivables-report' || operation === 'payment-options') {
       const q = query as ERPWindowQuery | ERPHistoryQuery | ERPPaymentQuery;
       if (!natural(q.offset) || !natural(q.limit) || q.limit < 1 || q.limit > 50) throw new ERPOnlineError('INVALID_REQUEST');
@@ -281,6 +288,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
   return {
     setIdentity,
     customerGroupingEnabled: false,
+    ai:(query:{message:string;history:{role:'user'|'assistant';content:string}[]})=>request<ERPObservation & {answer:string;model:string;sources:ERPRow[]}>('sul-ai',query),
     customerGroups:()=>request<{groups:CustomerGroup[]}>('customer-groups',{}),
     saveCustomerGroup:(query:ReturnType<typeof validateCustomerGroup>)=>request<{result:{saved:true;id:string;version:number}}>('customer-group-save',query),
     groupedWindow:(query:ERPGroupedQuery)=>request<ERPWindow & {summary?:any;companyCodes?:any}>('grouped-window',query),
