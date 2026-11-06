@@ -981,7 +981,8 @@ function sz(): any {
     const [delegatedSeller,setDelegatedSeller]=He.useState('');
     const permittedSellers = actorSeller ? [actorSeller.sellerCode,...(managerOrder ? actorSeller.teamSellerCodes ?? [] : [])] : [];
     const operatingSeller = managerOrder && permittedSellers.includes(Number(delegatedSeller.split(':')[2])) ? delegatedSeller : actorSeller?.sellerId ?? '';
-    const lookups = useERPOrderLookups(online, n, [...h.map((item: any) => item.productId), v], operatingSeller);
+    const lookupSeller = operatingSeller || (/^sankhya:seller:[1-9]\d*$/.test(l) ? l : '');
+    const lookups = useERPOrderLookups(online, n, [...h.map((item: any) => item.productId), v], lookupSeller);
     // Visão transitória só no formulário: os arrays canônicos permanecem intactos.
     const e = React.useMemo(() => online ? { ...base, customers: [...manualRows(base.customers), ...lookups.customers], products: [...manualRows(base.products), ...lookups.products] } : base,
         [base, online, lookups.customers, lookups.products]);
@@ -1014,6 +1015,8 @@ function sz(): any {
         if (!product || adding.current) return;
         if (h.find((item: any) => item.productId === v)) { N('O produto já está no pedido. Ajuste a quantidade no item.'); return; }
         if (onlineOrder) {
+            if(!operatingSeller){N('Sua conta não possui vínculo operacional de vendedor ERP. Selecionar um vendedor para consultar a carteira não concede permissão para criar pedidos.');return;}
+            if(!isERP(product)){N('Para um cliente ERP, selecione um produto autorizado da tabela do cliente. Produtos locais não podem ser enviados ao Sankhya.');return;}
             const key = contextKey; adding.current = true;
             try {
                 const quote = await quoteERPOrderItem(online!, context, product, 1);
@@ -1094,7 +1097,7 @@ function sz(): any {
                                                 label: "Cliente",
                                                 remote: online ? lookups.matches.customers : undefined,
                                                 value: n,
-                                                onValueChange: (D: any) => { r(String(D)); u(''); setPaymentChoice(undefined); },
+                                                onValueChange: (D: any) => { r(String(D)); g(''); u(''); setPaymentChoice(undefined); },
                                                 options: e.customers
                                                     .filter((D: any) => !D.blocked)
                                                     .map((D: any) => ({
@@ -1106,9 +1109,16 @@ function sz(): any {
                                             (0, b.jsx)(Sl, {
                                                 label: "Vendedor",
                                                 remote: online ? lookups.matches.sellers : undefined,
-                                                value: onlineOrder ? context.sellerId : l,
-                                                onValueChange: (D: any) => { if (!onlineOrder) s(String(D)); else if(managerOrder && permittedSellers.includes(Number(String(D).split(':')[2])))setDelegatedSeller(String(D)); },
-                                                options: onlineOrder ? lookups.sellers.filter((seller: any) => permittedSellers.includes(Number(String(seller.id).split(':')[2]))).map((seller: any) => ({ value: seller.id, label: seller.name })) : [...La(sellerNames(e)), ...(online ? lookups.sellers.map((seller: any) => ({ value: seller.id, label: seller.name })) : [])],
+                                                value: online ? lookupSeller : l,
+                                                onValueChange: (D: any) => {
+                                                    const next=String(D);
+                                                    if(online && actorSeller){
+                                                        if(!managerOrder || !permittedSellers.includes(Number(next.split(':')[2])))return;
+                                                        setDelegatedSeller(next);
+                                                    }else s(next);
+                                                    if(online && next!==lookupSeller){r('');g('');u('');setPaymentChoice(undefined);}
+                                                },
+                                                options: online ? lookups.sellers.filter((seller: any) => !actorSeller || permittedSellers.includes(Number(String(seller.id).split(':')[2]))).map((seller: any) => ({ value: seller.id, label: seller.name })) : La(sellerNames(e)),
                                             }),
                                             (0, b.jsx)(ho, {
                                                 label: "Tipo de pedido",
@@ -1142,7 +1152,7 @@ function sz(): any {
                                                         value: v,
                                                         onValueChange: (D: any) => g(String(D)),
                                                         options: e.products
-                                                            .filter((D: any) => D.active !== !1)
+                                                            .filter((D: any) => D.active !== !1 && (!onlineOrder || isERP(D)) && (!online || !isERP(D) || lookups.matches.products.ids.has(String(D.id))))
                                                             .map((D: any) => ({
                                                             value: D.id,
                                                             label: (D.code || "C\xF3digo n\xE3o extra\xEDdo") +

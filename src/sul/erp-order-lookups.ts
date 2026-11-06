@@ -12,6 +12,7 @@ type Consulta = {
   client?: ERPClient | undefined;
   rows: ERPRow[];
   query?: string;
+  context?: string;
   loading: boolean;
   error?: string;
   total?: number;
@@ -40,6 +41,7 @@ function unir(linhas: ERPRow[], selecionados: ERPRow[]): ERPRow[] {
 }
 
 function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: readonly string[], filters?: ERPPageQuery['filters'], label:string = rotulos[recurso]) {
+  const context = JSON.stringify(filters ?? {});
   const [estado, definirEstado] = useState<Consulta>({
     rows: [],
     loading: !!client,
@@ -83,6 +85,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
         client,
         rows: anexar ? anterior.rows : [],
         query: consulta,
+        context,
         loading: true,
         hasMore: false,
       }));
@@ -104,6 +107,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
           client,
           rows: linhas.current,
           query: consulta,
+          context,
           loading: false,
           total,
           hasMore: offset < total,
@@ -113,7 +117,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
         linhas.current = [];
         total = 0;
         offset = 0;
-        definirEstado({ client, rows: [], loading: false, error: mensagem(erro), hasMore: false });
+        definirEstado({ client, context, rows: [], loading: false, error: mensagem(erro), hasMore: false });
       } finally {
         if (vigente(versao)) ocupado = false;
       }
@@ -127,7 +131,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
       total = 0;
       linhas.current = [];
       clearTimeout(temporizador);
-      definirEstado({ client, rows: [], loading: true, hasMore: false });
+      definirEstado({ client, context, rows: [], loading: true, hasMore: false });
       temporizador = setTimeout(() => {
         void carregar();
       }, 180);
@@ -206,7 +210,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, recurso, chave]);
 
-  const pagina = estado.client === client ? estado : undefined;
+  const pagina = estado.client === client && estado.context === context ? estado : undefined;
   const registros =
     fixados && fixados.client === client && fixados.chave === chave ? fixados : undefined;
   const rows = client ? unir(pagina?.rows || vazio, registros?.rows || vazio) : vazio;
@@ -238,7 +242,8 @@ export function useERPOrderLookups(
   productIds: readonly string[],
   actorSellerId?: string,
 ) {
-  const customers = useConsulta(client, "customers", customerId ? [customerId] : []);
+  const sellerCode = /^sankhya:seller:([1-9]\d*)$/.exec(actorSellerId ?? '')?.[1];
+  const customers = useConsulta(client, "customers", customerId ? [customerId] : [], sellerCode ? { sellerCode: Number(sellerCode) } : undefined);
   // Somente produtos da tabela de preço do cliente (cadastro + condição fixa); sem cliente, a lista fica livre.
   const customerCode = /^sankhya:customer:([1-9]\d*)$/.exec(customerId)?.[1];
   const products = useConsulta(client, "products", productIds, customerCode ? { customerCode: Number(customerCode) } : undefined);
