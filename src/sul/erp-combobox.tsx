@@ -30,7 +30,7 @@ import {
 import { Check, ChevronsUpDown, Search } from 'lucide-react';
 import type { ComponentProps } from 'react';
 
-export type ERPMatches = { query: string; ids: ReadonlySet<string> };
+export type ERPMatches = { query: string; ids: ReadonlySet<string>; onSearchChange?: (query: string) => void };
 type Props = ComponentProps<typeof Combobox> & { remote?: ERPMatches | undefined };
 type SingleProps = Extract<Props, { multiple?: false }> & { remote: ERPMatches };
 
@@ -57,6 +57,9 @@ function RemoteSingle(props: SingleProps) {
   return field.wrap(
     <BaseCombobox.Root<ComboboxOption>
       items={options}
+      onInputValueChange={(query, details) => {
+        if (['input', 'change', 'compositionend'].includes(details.event.type)) remote.onSearchChange?.(query);
+      }}
       value={options.find(option => option.value === value) ?? null}
       onValueChange={next => onValueChange(next?.value ?? '')}
       isItemEqualToValue={(a, b) => a.value === b.value}

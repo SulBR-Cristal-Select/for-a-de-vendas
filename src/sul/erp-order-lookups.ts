@@ -54,6 +54,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
     error?: string;
     loading: boolean;
   }>();
+  const buscaAtual = useRef<(query: string) => void>(() => {});
   const atual = useRef(client);
   atual.current = client;
   const linhas = useRef<ERPRow[]>([]);
@@ -153,12 +154,14 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
       )
         void carregar(true);
     }
+    buscaAtual.current = buscar;
     document.addEventListener("input", entrada, true);
     document.addEventListener("focusin", entrada, true);
     document.addEventListener("scroll", rolagem, true);
     void carregar();
     return () => {
       vivo = false;
+      buscaAtual.current = () => {};
       geracao++;
       clearTimeout(temporizador);
       document.removeEventListener("input", entrada, true);
@@ -215,6 +218,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
     fixados && fixados.client === client && fixados.chave === chave ? fixados : undefined;
   const rows = client ? unir(pagina?.rows || vazio, registros?.rows || vazio) : vazio;
   const matches: ERPMatches = {
+    onSearchChange: query => buscaAtual.current(query),
     query: pagina?.query ?? '',
     ids: new Set((pagina?.rows || vazio).map(row => String(row['id']))),
   };

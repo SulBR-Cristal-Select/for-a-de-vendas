@@ -109,3 +109,31 @@ describe('Invariância da estrutura existente DS0.9.0', () => {
     expect(estrutura(adaptedPopup)).toEqual(popup);
   });
 });
+
+describe('Digitação incremental com resposta remota atrasada', () => {
+  it.each(['Cliente', 'Produto'])('mantém a pesquisa em %s enquanto as opções são substituídas', async label => {
+    const resource = label === 'Cliente' ? 'customers' : 'products';
+    const row = { id: `sankhya:${resource === 'customers' ? 'customer' : 'product'}:3559`, name: 'GUERRO & PAGNUSSAT', code: '3559' };
+    const requests: string[] = [];
+    const client = createERPClient(async ({ query }: any) => {
+      if (query.resource === resource) requests.push(query.search);
+      await new Promise(resolve => setTimeout(resolve, query.search === 'g' ? 450 : 80));
+      const items = query.resource === resource && String(row.name).toLowerCase().includes(query.search || '') ? [row] : [];
+      return { error: null, data: { ...observation, items, offset: query.offset, total: items.length, totalWithoutSearch: 1 } };
+    });
+    function Formulario() {
+      const dados = useERPOrderLookups(client, '', []);
+      const [value, setValue] = useState('');
+      return <ERPCombobox label={label} value={value} onValueChange={setValue} remote={dados.matches[resource]} options={dados[resource].map(r => ({value:String(r['id']),label:String(r['name'])}))} />;
+    }
+    render(<Formulario />);
+    fireEvent.click(screen.getByRole('combobox', { name: label }));
+    const input = await screen.findByLabelText(`Buscar em ${label.toLowerCase()}`);
+    fireEvent.change(input, { target: { value: 'g' } });
+    await waitFor(() => expect(requests).toContain('g'));
+    for (const value of ['gu','gue','guer','guerr','guerro']) fireEvent.change(input, { target: { value } });
+    await waitFor(() => expect(requests).toContain('guerro'));
+    await screen.findByRole('option', { name: row.name });
+    expect(input).toHaveValue('guerro');
+  });
+});
