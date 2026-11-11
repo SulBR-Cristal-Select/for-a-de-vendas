@@ -240,7 +240,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
         try { result = transport(body, signal); } catch (error) { result = Promise.reject(error); }
         void Promise.resolve(result).then(resolve, reject).finally(() => {
           activeReads--;
-          while (activeReads < 2 && waitingReads.length) waitingReads.shift()!();
+          while (activeReads < 1 && waitingReads.length) waitingReads.shift()!();
         });
       };
       const cancel = () => {
@@ -249,7 +249,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
         signal.removeEventListener('abort', cancel);
         reject(new ERPOnlineError('REQUEST_CANCELLED'));
       };
-      if (activeReads < 2) start();
+      if (activeReads < 1) start();
       else { waitingReads.push(start); signal.addEventListener('abort', cancel, { once: true }); }
     });
   }

@@ -91,11 +91,11 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
     expect(result.current.sellers).toEqual([]);
     expect(result.current.loading).toBe(false);
   });
-  it("consulta três janelas de 50 com no máximo duas simultâneas, sem persistência", async () => {
+  it("consulta três janelas de 50 uma por vez, sem persistência", async () => {
     const { client, transporte } = preparar();
     const gravar = vi.spyOn(Storage.prototype, "setItem");
     const { result } = renderHook(() => useERPOrderLookups(client, "", []));
-    expect(transporte).toHaveBeenCalledTimes(2);
+    expect(transporte).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(transporte).toHaveBeenCalledTimes(3);
     expect(result.current.customers).toHaveLength(50);
@@ -155,14 +155,14 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
     fireEvent.input(input, { target: { value: "atrasada" } });
     await waitFor(() => expect(concluir).toBeTypeOf("function"));
     fireEvent.input(input, { target: { value: "124" } });
-    await waitFor(() => expect(result.current.customers[0]?.["id"]).toBe("sankhya:customer:124"));
+    expect(result.current.customers).toEqual([]);
     await act(async () =>
       concluir({
         error: null,
         data: { ...observacao, items: [], offset: 0, total: 0, totalWithoutSearch: 125 },
       }),
     );
-    expect(result.current.customers[0]?.["id"]).toBe("sankhya:customer:124");
+    await waitFor(() => expect(result.current.customers[0]?.["id"]).toBe("sankhya:customer:124"));
     transporte.mockRejectedValueOnce(new Error("Falha controlada"));
     fireEvent.input(input, { target: { value: "falha" } });
     await waitFor(() => expect(result.current.error).toBeDefined());
