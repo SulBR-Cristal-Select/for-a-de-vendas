@@ -64,7 +64,19 @@ export class SankhyaGateway {
     if (!response.ok) throw new SankhyaError('ERP_QUERY_FAILED', 'Não foi possível consultar o Sankhya.', 502, response.status);
     let value: ObjectValue;
     try { value = object(await response.json()); } catch { throw new SankhyaError('ERP_INVALID_RESPONSE', 'O Sankhya retornou uma consulta incompatível.'); }
-    if (String(value['status']) !== '1') throw new SankhyaError('ERP_QUERY_REJECTED', 'O Sankhya recusou a consulta da integração.');
+    if (String(value['status']) !== '1') {
+      // Classificação técnica restrita: nunca registra SQL, mensagem bruta ou credenciais.
+      const message = String(value['statusMessage'] ?? value['message'] ?? '');
+      const oracle = /\bORA-([0-9]{5})\b/i.exec(message);
+      const hint = oracle ? `oracle-${oracle[1]}`
+        : /concorr|simult|limite.*(?:requisi|consulta)|too many|rate.?limit/i.test(message) ? 'concurrency-limit'
+        : /sess[aã]o|session|autentica|token.*(?:expir|inv[aá]lid)/i.test(message) ? 'session'
+        : /permiss[aã]o|n[aã]o autorizado|access denied/i.test(message) ? 'permission'
+        : /timeout|tempo.*(?:limite|exced)|timed out/i.test(message) ? 'timeout'
+        : 'unclassified';
+      console.error('ERP_QUERY_REJECTION_CLASS', hint);
+      throw new SankhyaError('ERP_QUERY_REJECTED', 'O Sankhya recusou a consulta da integração.', 502, undefined, { kind: 'query-rejection', fields: [], hint });
+    }
     const body = object(value['responseBody']);
     const fields = body['fieldsMetadata'], rows = body['rows'];
     if (!Array.isArray(fields) || !Array.isArray(rows) || rows.length > limit) throw new SankhyaError('ERP_INVALID_RESPONSE', 'A consulta do Sankhya não respeitou o contrato de campos e limite.');

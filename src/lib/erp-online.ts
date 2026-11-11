@@ -227,6 +227,32 @@ const normalTransport: ERPTransport = async (body, signal) => {
 export function createERPClient(transport: ERPTransport = normalTransport) {
   let identity: string | null = null, generation = 0;
   const pending = new Set<AbortController>();
+  // Limite de leituras da integração comprovado no ERP; FIFO sem retry nem cache.
+  let activeReads = 0;
+  const waitingReads: (() => void)[] = [];
+  function limitedTransport(body: Parameters<ERPTransport>[0], signal: AbortSignal): ReturnType<ERPTransport> {
+    return new Promise((resolve, reject) => {
+      const start = () => {
+        signal.removeEventListener('abort', cancel);
+        if (signal.aborted) { reject(new ERPOnlineError('REQUEST_CANCELLED')); return; }
+        activeReads++;
+        let result: ReturnType<ERPTransport>;
+        try { result = transport(body, signal); } catch (error) { result = Promise.reject(error); }
+        void Promise.resolve(result).then(resolve, reject).finally(() => {
+          activeReads--;
+          while (activeReads < 2 && waitingReads.length) waitingReads.shift()!();
+        });
+      };
+      const cancel = () => {
+        const index = waitingReads.indexOf(start);
+        if (index !== -1) waitingReads.splice(index, 1);
+        signal.removeEventListener('abort', cancel);
+        reject(new ERPOnlineError('REQUEST_CANCELLED'));
+      };
+      if (activeReads < 2) start();
+      else { waitingReads.push(start); signal.addEventListener('abort', cancel, { once: true }); }
+    });
+  }
   function setIdentity(uid: string | null): void {
     if (uid === identity) return;
     identity = uid; generation++;
@@ -272,7 +298,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     let onAbort: () => void = () => {};
     const cancelled = new Promise<never>((_, reject) => { onAbort = () => reject(new ERPOnlineError('REQUEST_CANCELLED')); controller.signal.addEventListener('abort', onAbort, { once: true }); });
     try {
-      const result = await Promise.race([transport({ operation, query }, controller.signal), cancelled]);
+      const result = await Promise.race([limitedTransport({ operation, query }, controller.signal), cancelled]);
       assertCurrent();
       if (result.error || (object(result.data) && result.data['error'])) {
         const code = await Promise.race([errorCode(result.error || result.data), cancelled]);

@@ -40,6 +40,31 @@ describe('Cliente de leitura online', () => {
     expect((await client.page({ resource: 'products' })).items).toEqual([{ id: 'novo' }]);
     delayed.resolve({ data: page, error: null }); await rejected;
   });
+  it('limita leituras a duas simultâneas e mantém FIFO sem repetir chamadas', async () => {
+    const delays = [deferred(), deferred(), deferred(), deferred()];
+    let index = 0;
+    const transport = vi.fn<ERPTransport>(() => delays[index++]!.promise), client = createERPClient(transport);
+    const requests = Array.from({ length: 4 }, () => client.page({ resource: 'products' }));
+    expect(transport).toHaveBeenCalledTimes(2);
+    delays[0]!.resolve({ data: page, error: null });
+    await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(3));
+    delays[1]!.resolve({ data: page, error: null });
+    await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(4));
+    delays[2]!.resolve({ data: page, error: null }); delays[3]!.resolve({ data: page, error: null });
+    await Promise.all(requests);
+    expect(transport).toHaveBeenCalledTimes(4);
+  });
+  it('cancela leituras em fila na troca de identidade sem enviá-las ao ERP', async () => {
+    const delays = [deferred(), deferred()]; let index = 0;
+    const transport = vi.fn<ERPTransport>(() => delays[index++]!.promise), client = createERPClient(transport);
+    client.setIdentity('inicial');
+    const requests = Array.from({ length: 4 }, () => client.page({ resource: 'products' }));
+    const rejected = requests.map(r => expect(r).rejects.toMatchObject({ code: 'REQUEST_CANCELLED' }));
+    client.setIdentity(null); await Promise.all(rejected);
+    delays.forEach(d => d.resolve({ data: page, error: null }));
+    await new Promise(r => setTimeout(r, 0));
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
   it('não cancela ao receber a mesma identidade', async () => {
     const delayed = deferred(), client = createERPClient(() => delayed.promise); client.setIdentity('um');
     const request = client.page({ resource: 'products' }); client.setIdentity('um');

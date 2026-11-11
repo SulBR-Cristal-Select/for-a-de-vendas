@@ -91,12 +91,13 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
     expect(result.current.sellers).toEqual([]);
     expect(result.current.loading).toBe(false);
   });
-  it("consulta três janelas paralelas de 50 ordenadas por nome, sem persistência", async () => {
+  it("consulta três janelas de 50 com no máximo duas simultâneas, sem persistência", async () => {
     const { client, transporte } = preparar();
     const gravar = vi.spyOn(Storage.prototype, "setItem");
     const { result } = renderHook(() => useERPOrderLookups(client, "", []));
-    expect(transporte).toHaveBeenCalledTimes(3);
+    expect(transporte).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(transporte).toHaveBeenCalledTimes(3);
     expect(result.current.customers).toHaveLength(50);
     expect(result.current.products).toHaveLength(50);
     expect(result.current.sellers).toHaveLength(50);

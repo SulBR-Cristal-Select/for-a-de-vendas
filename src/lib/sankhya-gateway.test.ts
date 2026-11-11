@@ -108,6 +108,24 @@ describe('transporte Sankhya somente leitura', () => {
     const malformed = vi.fn().mockResolvedValueOnce(token()).mockResolvedValueOnce(companies([[1]]));
     await expect(new SankhyaGateway(env, malformed).verifyCompanies()).rejects.toMatchObject({ code: 'ERP_INVALID_RESPONSE' });
   });
+  it.each([
+    ['ORA-00904: CONTEUDO_PRIVADO', 'oracle-00904'],
+    ['Limite de consultas simultâneas CONTEUDO_PRIVADO', 'concurrency-limit'],
+    ['Sessão inválida CONTEUDO_PRIVADO', 'session'],
+    ['Sem permissão CONTEUDO_PRIVADO', 'permission'],
+    ['Query timed out CONTEUDO_PRIVADO', 'timeout'],
+    ['CONTEUDO_PRIVADO', 'unclassified'],
+  ])('classifica rejeição sem expor conteúdo nativo: %s', async (message, hint) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const request = vi.fn().mockResolvedValueOnce(token()).mockResolvedValueOnce(json({ status: '0', statusMessage: message }));
+      const result = new SankhyaGateway(env, request).select(query, 2);
+      await expect(result).rejects.toMatchObject({ code: 'ERP_QUERY_REJECTED', nativeFormat: { kind: 'query-rejection', fields: [], hint } });
+      await expect(result).rejects.not.toHaveProperty('message', expect.stringContaining('CONTEUDO_PRIVADO'));
+      expect(log).toHaveBeenCalledWith('ERP_QUERY_REJECTION_CLASS', hint);
+      expect(JSON.stringify(log.mock.calls)).not.toContain('CONTEUDO_PRIVADO');
+    } finally { log.mockRestore(); }
+  });
   it('não trata HTTP 200 com rejeição do ERP como consulta válida', async () => {
     const request = vi.fn().mockResolvedValueOnce(token()).mockResolvedValueOnce(json({ status: '0', statusMessage: 'CONTEUDO_NAO_PUBLICAVEL' }));
     await expect(new SankhyaGateway(env, request).verifyCompanies()).rejects.toMatchObject({ code: 'ERP_QUERY_REJECTED' });
