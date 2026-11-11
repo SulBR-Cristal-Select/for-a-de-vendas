@@ -5,6 +5,13 @@ export class SankhyaError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 502,
     public readonly upstreamStatus?: number, public readonly nativeFormat?: { kind: string; fields: string[]; httpStatus?: number; responseBodyPrices?: boolean; dataPrices?: boolean; providerCode?: number | null; providerType?: string | null; hint?: string; collectionName?: string; rowFields?: string[]; valueTypes?: string[]; context?: { candidates: number; productMatches: number; unitMatches: number; localMatches: number; controlMatches: number; units: (string | null)[]; localTypes: string[]; controlTypes: string[]; controlLengths: number[]; distinctMatches?: number; candidateFields?: string[]; priceValuesEqual?: boolean } }) { super(message); }
 }
+// Apenas classificação restrita; nunca mensagem externa, SQL ou credenciais.
+function readTransportFailure(stage: 'authentication' | 'query', error: unknown): SankhyaError {
+  const name = error instanceof Error ? error.name : '';
+  const hint = `${stage}:${name === 'TimeoutError' ? 'timeout' : name === 'TypeError' ? 'network' : name === 'AbortError' ? 'aborted' : 'unclassified'}`;
+  console.error('ERP_TRANSPORT_FAILURE_CLASS', hint);
+  return new SankhyaError('ERP_UNAVAILABLE', stage === 'authentication' ? 'Não foi possível acessar a autenticação do Sankhya.' : 'O Sankhya está indisponível para consulta.', 503, undefined, {kind:'transport-failure',fields:[],hint});
+}
 type ObjectValue = Record<string, unknown>;
 const object = (value: unknown): ObjectValue => value && typeof value === 'object' && !Array.isArray(value) ? value as ObjectValue : {};
 export const EXPECTED_COMPANIES: Readonly<Record<string, string>> = { '1': '13374270000104', '4': '13374270000457' };
@@ -36,7 +43,7 @@ export class SankhyaGateway {
         body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
         signal: AbortSignal.timeout(12000), redirect: 'error',
       });
-    } catch { throw new SankhyaError('ERP_UNAVAILABLE', 'Não foi possível acessar a autenticação do Sankhya.', 503); }
+    } catch (error) { throw readTransportFailure('authentication', error); }
     if (!response.ok) throw new SankhyaError('ERP_AUTHENTICATION_FAILED', 'O Sankhya não aceitou a autenticação da integração.', 502, response.status);
     let value: ObjectValue;
     try { value = object(await response.json()); } catch { throw new SankhyaError('ERP_INVALID_RESPONSE', 'A autenticação do Sankhya retornou uma resposta incompatível.'); }
@@ -60,7 +67,7 @@ export class SankhyaGateway {
         body: JSON.stringify({ serviceName: 'DbExplorerSP.executeQuery', requestBody: { sql } }),
         signal: AbortSignal.timeout(20000), redirect: 'error',
       });
-    } catch { throw new SankhyaError('ERP_UNAVAILABLE', 'O Sankhya está indisponível para consulta.', 503); }
+    } catch (error) { throw readTransportFailure('query', error); }
     if (!response.ok) throw new SankhyaError('ERP_QUERY_FAILED', 'Não foi possível consultar o Sankhya.', 502, response.status);
     let value: ObjectValue;
     try { value = object(await response.json()); } catch { throw new SankhyaError('ERP_INVALID_RESPONSE', 'O Sankhya retornou uma consulta incompatível.'); }

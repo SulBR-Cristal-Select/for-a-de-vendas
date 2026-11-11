@@ -90,6 +90,27 @@ describe('transporte Sankhya somente leitura', () => {
   it.each([0, 51, 1.5])('recusa limite de saída inválido: %s', async limit => {
     await expect(new SankhyaGateway(env, vi.fn()).select(query, limit)).rejects.toMatchObject({ code: 'ERP_INVALID_QUERY' });
   });
+  it.each([
+    ['authentication', 'TimeoutError', 'authentication:timeout'],
+    ['authentication', 'TypeError', 'authentication:network'],
+    ['query', 'TimeoutError', 'query:timeout'],
+    ['query', 'TypeError', 'query:network'],
+    ['query', 'Error', 'query:unclassified'],
+  ])('identifica falha de transporte %s/%s sem repetir leitura', async (stage, name, hint) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const error = Object.assign(new Error('CONTEUDO_PRIVADO SQL token senha'), {name});
+      const request = vi.fn();
+      if(stage==='query')request.mockResolvedValueOnce(token());
+      request.mockRejectedValueOnce(error);
+      const gateway = new SankhyaGateway(env, request);
+      const result = stage==='query' ? gateway.select(query,2) : gateway.authenticate();
+      await expect(result).rejects.toMatchObject({code:'ERP_UNAVAILABLE',status:503,nativeFormat:{kind:'transport-failure',fields:[],hint}});
+      expect(log).toHaveBeenCalledWith('ERP_TRANSPORT_FAILURE_CLASS',hint);
+      expect(JSON.stringify(log.mock.calls)).not.toContain('CONTEUDO_PRIVADO');
+      expect(request).toHaveBeenCalledTimes(stage==='query'?2:1);
+    } finally {log.mockRestore();}
+  });
   it('não aceita lista vazia como comprovação das empresas', async () => {
     const request = vi.fn().mockResolvedValueOnce(token()).mockResolvedValueOnce(companies([]));
     await expect(new SankhyaGateway(env, request).verifyCompanies()).rejects.toMatchObject({ code: 'ERP_COMPANY_MISMATCH' });
