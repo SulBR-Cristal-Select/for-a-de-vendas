@@ -1,4 +1,5 @@
 import { validateCustomerGroup, type CustomerGroup } from './customer-groups';
+import { withERPReadLock } from './erp-read-lock';
 import { isSalesOperation } from './sales-operations';
 import {decodeIndicatorSeries,validIndicatorQuery,type ERPIndicatorQuery,type ERPIndicatorWindow} from './erp-indicator-series';
 import {decodeRanking,validRankingQuery,type ERPRankingQuery,type ERPRankingWindow} from './erp-ranking';
@@ -238,7 +239,14 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
         if (signal.aborted || superseded?.aborted) { reject(new ERPOnlineError('REQUEST_CANCELLED')); return; }
         activeReads++;
         let result: ReturnType<ERPTransport>;
-        try { result = transport(body, signal); } catch (error) { result = Promise.reject(error); }
+        try {
+          result = transport === normalTransport
+            ? withERPReadLock(() => transport(body, signal), signal, superseded).catch(error => {
+                if (signal.aborted || superseded?.aborted) throw new ERPOnlineError('REQUEST_CANCELLED');
+                throw error;
+              })
+            : transport(body, signal);
+        } catch (error) { result = Promise.reject(error); }
         void Promise.resolve(result).then(resolve, reject).finally(() => {
           activeReads--;
           while (activeReads < 1 && waitingReads.length) waitingReads.shift()!();
