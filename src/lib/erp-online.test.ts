@@ -64,6 +64,22 @@ describe('Cliente de leitura online', () => {
     delay.resolve({ data: page, error: null }); await new Promise(r => setTimeout(r, 0));
     expect(transport).toHaveBeenCalledTimes(1);
   });
+  it('remove termos de busca superados da fila sem abortar a leitura ERP em andamento', async () => {
+    const delayed = deferred();
+    const windowData = { ...observed, items: [], offset: 0, total: 0, totalWithoutSearch: 0 };
+    const transport = vi.fn<ERPTransport>().mockImplementationOnce(() => delayed.promise).mockResolvedValue({ data: windowData, error: null });
+    const client = createERPClient(transport);
+    const active = client.page({ resource: 'products' });
+    const obsolete = new AbortController();
+    const old = client.window({ resource: 'customers', search: 'gu', offset: 0, limit: 50 }, obsolete.signal);
+    const rejected = expect(old).rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+    const next = client.window({ resource: 'customers', search: 'guerro', offset: 0, limit: 50 });
+    obsolete.abort(); await rejected;
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(transport.mock.calls[0]![1].aborted).toBe(false);
+    delayed.resolve({ data: page, error: null }); await active; await next;
+    expect(transport.mock.calls.map(c => 'search' in c[0].query ? c[0].query.search : undefined)).toEqual([undefined, 'guerro']);
+  });
   it('não cancela ao receber a mesma identidade', async () => {
     const delayed = deferred(), client = createERPClient(() => delayed.promise); client.setIdentity('um');
     const request = client.page({ resource: 'products' }); client.setIdentity('um');

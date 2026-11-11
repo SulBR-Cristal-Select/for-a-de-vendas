@@ -77,6 +77,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
       total = 0,
       ocupado = false;
     let temporizador: ReturnType<typeof setTimeout> | undefined;
+    let consultaVigente = new AbortController();
     const vigente = (versao: number) => vivo && atual.current === client && geracao === versao;
     async function carregar(anexar = false) {
       if (ocupado || !vivo) return;
@@ -99,7 +100,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
           direction: "asc",
           offset,
           limit: 50,
-        });
+        }, consultaVigente.signal);
         if (!vigente(versao)) return;
         linhas.current = anexar ? unir(linhas.current, pagina.items) : pagina.items;
         offset += pagina.items.length;
@@ -126,6 +127,8 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
     function buscar(valor: string) {
       if (valor === consulta) return;
       consulta = valor;
+      consultaVigente.abort();
+      consultaVigente = new AbortController();
       geracao++;
       ocupado = false;
       offset = 0;
@@ -161,6 +164,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
     void carregar();
     return () => {
       vivo = false;
+      consultaVigente.abort();
       buscaAtual.current = () => {};
       geracao++;
       clearTimeout(temporizador);

@@ -230,11 +230,12 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
   // Limite de leituras da integração comprovado no ERP; FIFO sem retry nem cache.
   let activeReads = 0;
   const waitingReads: (() => void)[] = [];
-  function limitedTransport(body: Parameters<ERPTransport>[0], signal: AbortSignal): ReturnType<ERPTransport> {
+  function limitedTransport(body: Parameters<ERPTransport>[0], signal: AbortSignal, superseded?: AbortSignal): ReturnType<ERPTransport> {
     return new Promise((resolve, reject) => {
       const start = () => {
         signal.removeEventListener('abort', cancel);
-        if (signal.aborted) { reject(new ERPOnlineError('REQUEST_CANCELLED')); return; }
+        superseded?.removeEventListener('abort', cancel);
+        if (signal.aborted || superseded?.aborted) { reject(new ERPOnlineError('REQUEST_CANCELLED')); return; }
         activeReads++;
         let result: ReturnType<ERPTransport>;
         try { result = transport(body, signal); } catch (error) { result = Promise.reject(error); }
@@ -247,10 +248,16 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
         const index = waitingReads.indexOf(start);
         if (index !== -1) waitingReads.splice(index, 1);
         signal.removeEventListener('abort', cancel);
+        superseded?.removeEventListener('abort', cancel);
         reject(new ERPOnlineError('REQUEST_CANCELLED'));
       };
+      if (signal.aborted || superseded?.aborted) { cancel(); return; }
       if (activeReads < 1) start();
-      else { waitingReads.push(start); signal.addEventListener('abort', cancel, { once: true }); }
+      else {
+        waitingReads.push(start);
+        signal.addEventListener('abort', cancel, { once: true });
+        superseded?.addEventListener('abort', cancel, { once: true });
+      }
     });
   }
   function setIdentity(uid: string | null): void {
@@ -259,7 +266,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     for (const controller of pending) controller.abort();
     pending.clear();
   }
-  async function request<T>(operation: ERPOperation, query: ERPQuery): Promise<T> {
+  async function request<T>(operation: ERPOperation, query: ERPQuery, superseded?: AbortSignal): Promise<T> {
     if (!query) throw new ERPOnlineError('INVALID_REQUEST');
     if(operation==='customer-group-save'){try{validateCustomerGroup(query);}catch{throw new ERPOnlineError('INVALID_REQUEST');}}
 
@@ -298,7 +305,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     let onAbort: () => void = () => {};
     const cancelled = new Promise<never>((_, reject) => { onAbort = () => reject(new ERPOnlineError('REQUEST_CANCELLED')); controller.signal.addEventListener('abort', onAbort, { once: true }); });
     try {
-      const result = await Promise.race([limitedTransport({ operation, query }, controller.signal), cancelled]);
+      const result = await Promise.race([limitedTransport({ operation, query }, controller.signal, superseded), cancelled]);
       assertCurrent();
       if (result.error || (object(result.data) && result.data['error'])) {
         const code = await Promise.race([errorCode(result.error || result.data), cancelled]);
@@ -319,7 +326,7 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     saveCustomerGroup:(query:ReturnType<typeof validateCustomerGroup>)=>request<{result:{saved:true;id:string;version:number}}>('customer-group-save',query),
     groupedWindow:(query:ERPGroupedQuery)=>request<ERPWindow & {summary?:any;companyCodes?:any}>('grouped-window',query),
     page: <T = ERPRow>(query: ERPPageQuery) => request<ERPPage<T>>('page', query),
-    window: <T = ERPRow>(query: ERPWindowQuery) => request<ERPWindow<T>>('window', query),
+    window: <T = ERPRow>(query: ERPWindowQuery, superseded?: AbortSignal) => request<ERPWindow<T>>('window', query, superseded),
     record: <T = ERPRow>(query: ERPRecordQuery) => request<ERPRecord<T>>('record', query),
     facets: <T = ERPRow>(query: ERPFacetQuery) => request<ERPPage<T>>('facets', query),
     history: <T = ERPRow>(query: ERPHistoryQuery) => request<ERPWindow<T>>('history', query),
