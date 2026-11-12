@@ -132,7 +132,15 @@ function queryParts(input: PageInput & Partial<WindowInput>, trustedScope: ReadS
   }
   if (filters.cityCode !== undefined) { if (r !== 'customers') invalid(); where.push(`P.CODCID=${integer(filters.cityCode, 0)}`); }
   const search = searchText(input.search), withoutSearch = [...where];
-  if (search) where.push(`(${config[r].searches.map(field => `${foldSQL(field)} LIKE ${like(search)} ESCAPE '!'`).join(' OR ')})`);
+  if (search) {
+    // Carteira de um único vendedor: o apelido dele casaria com todos os clientes e anularia a busca.
+    const fields = config[r].searches.filter(field => !(r === 'customers' && field === 'V.APELIDO' && filters.sellerCode !== undefined));
+    const conditions = fields.map(field => `${foldSQL(field)} LIKE ${like(search)} ESCAPE '!'`);
+    // Documento digitado com máscara (11.517.841/0049-31) casa pelos dígitos, como está gravado no cadastro.
+    const digits = search.replace(/\D/g, '');
+    if (r === 'customers' && digits.length >= 3 && /^[\d.\/\-\s]+$/.test(search) && digits !== search) conditions.push(`P.CGC_CPF LIKE ${literal('%' + digits + '%')}`);
+    where.push(`(${conditions.join(' OR ')})`);
+  }
   const c = config[r];
   const sortValue = sortFields[r][sort]!;
   const numeric = ['code', 'blocked', 'price'].includes(sort);

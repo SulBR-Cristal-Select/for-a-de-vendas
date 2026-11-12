@@ -354,6 +354,16 @@ describe('Feedbacks de cliente, tabela e inclusão de produto',()=>{
     expect(screen.getByLabelText('Vendedor')).toHaveValue(team.id);
     expect(persist).not.toHaveBeenCalled();
   });
+  it('cliente sem tabela de preço não lista produtos e mostra o aviso na própria lista',async()=>{
+    location.hash='#/pedidos/novo';const client=fakeClient(),persist=vi.fn();
+    vi.mocked(client.window).mockImplementation(async({resource,filters}:any)=>({items:resource==='customers'?[customer]:resource==='sellers'?[seller]:filters?.customerCode?[]:[product],total:resource==='customers'||resource==='sellers'?1:filters?.customerCode?0:1}) as any);
+    const state=createAppState({company:{userId:'00000000-0000-4000-8000-000000000001',erpSeller:{userId:'00000000-0000-4000-8000-000000000001',sellerId:seller.id,sellerCode:8,companyCodes:[4]}},customers:[],products:[],orders:[]});
+    render(<SulApp initialState={state} online={client} persist={persist} onSignOut={vi.fn()}/>);
+    expect(screen.queryByText(/Cliente sem tabela de preço associada/)).not.toBeInTheDocument();
+    await screen.findByRole('option',{name:'Cliente ERP (7)'});fireEvent.change(screen.getByLabelText('Cliente'),{target:{value:customer.id}});
+    expect((await screen.findByRole('alert')).textContent).toContain('Cliente sem tabela de preço associada');
+    expect(screen.queryByRole('option',{name:/Produto ERP/})).not.toBeInTheDocument();
+  });
   it('não oferece produto local ou fixado fora da tabela para um cliente ERP',async()=>{
     location.hash='#/pedidos/novo';const client=fakeClient(),persist=vi.fn(),local={id:'local',name:'Produto local fora da tabela',code:'LOCAL',unit:'PC',price:10,source:'simulado'};
     const state=createAppState({customers:[],products:[local],orders:[]});

@@ -11,6 +11,18 @@ function transport(rows: Record<string, unknown>[] = [], total = 103, withoutSea
 const query = { resource: 'customers' as const };
 
 describe('modelo Sankhya somente leitura', () => {
+  it('busca de cliente na carteira de um vendedor não casa pelo apelido dele e aceita CNPJ com máscara', async () => {
+    const g = transport([]);
+    await readWindow(g, { resource: 'customers', offset: 0, limit: 50, search: 'sul', filters: { sellerCode: 12 } }, seller);
+    const sql = g.select.mock.calls.map(c => c[0]).join('\n');
+    expect(sql).not.toContain('V.APELIDO)');
+    const h = transport([]);
+    await readWindow(h, { resource: 'customers', offset: 0, limit: 50, search: '11.517.841/0049-31' }, admin);
+    expect(h.select.mock.calls.map(c => c[0]).join('\n')).toContain("P.CGC_CPF LIKE '%11517841004931%'");
+    const nome = transport([]);
+    await readWindow(nome, { resource: 'customers', offset: 0, limit: 50, search: 'ahmad' }, admin);
+    expect(nome.select.mock.calls.map(c => c[0]).join('\n')).not.toContain('P.CGC_CPF LIKE');
+  });
   it('pagina no banco, conta universo integral e mantém desempate estável', async () => {
     const g = transport([{ CODPARC: 10, RAZAOSOCIAL: 'Cliente', ATIVO: 'S', CODEMP: null }]);
     const result = await readPage(g, { ...query, page: 3, pageSize: 50, sort: 'name', search: "D'Água_50%" }, admin);

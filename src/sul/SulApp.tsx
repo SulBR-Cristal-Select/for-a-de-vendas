@@ -987,6 +987,8 @@ function sz(): any {
     const e = React.useMemo(() => online ? { ...base, customers: [...manualRows(base.customers), ...lookups.customers], products: [...manualRows(base.products), ...lookups.products] } : base,
         [base, online, lookups.customers, lookups.products]);
     const onlineOrder = !!online && n.startsWith('sankhya:customer:');
+    // A lista de produtos online é a da tabela de preço do cliente: vazia e sem busca = cliente sem tabela.
+    const noPriceTable = !!online && n.startsWith('sankhya:customer:') && !lookups.loading && !lookups.error && lookups.totals['products'] === 0 && lookups.matches.products.query === '';
     const paymentMenu = useERPOrderPayments(online, n);
     const [paymentChoice, setPaymentChoice] = React.useState<{ customerId: string; row: ERPRow }>();
     const selectedPayment = paymentChoice && paymentChoice.customerId === n && paymentChoice.row['id'] === i ? paymentChoice.row : undefined;
@@ -1146,8 +1148,9 @@ function sz(): any {
                                             children: [
                                                 (0, b.jsx)("div", {
                                                     className: "flex-1 min-w-0",
-                                                    children: (0, b.jsx)(Sl, {
+                                                    children: [(0, b.jsx)(Sl, {
                                                         label: "Produto",
+                                                        disabled: noPriceTable,
                                                         remote: online ? lookups.matches.products : undefined,
                                                         value: v,
                                                         onValueChange: (D: any) => g(String(D)),
@@ -1159,7 +1162,7 @@ function sz(): any {
                                                                 " \xB7 " +
                                                                 D.name,
                                                         })),
-                                                    }),
+                                                    }), noPriceTable ? (0, b.jsx)("p", { role: "alert", className: "mt-2 text-[13px] text-rose", children: "Cliente sem tabela de pre\xE7o associada: n\xE3o h\xE1 produtos para listar." }) : null],
                                                 }),
                                                 (0, b.jsxs)(xt, {
                                                     disabled: !v,
