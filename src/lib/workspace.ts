@@ -69,7 +69,7 @@ export async function saveWorkspace(nextState: State): Promise<State> {
       if (prepared.error || prepared.data?.ready !== true) {
         const error = await preparationFailure(prepared.data, prepared.error);
         if (ownGeneration !== generation) throw new WorkspaceError('A sessão mudou. Carregue os dados novamente.');
-        const definitive = ['INVALID_REQUEST','ERP_CONTEXT_REQUIRED','ERP_PRICE_CHANGED','ERP_PRICE_PRECISION_UNSUPPORTED','ERP_PAYMENT_SCOPE_UNAVAILABLE','ERP_PROOF_EXPIRED','REVISION_CONFLICT','FORBIDDEN','AUTH_REQUIRED','MEMBERSHIP_PENDING'].includes(error.code);
+        const definitive = ['INVALID_REQUEST','ERP_CONTEXT_REQUIRED','ERP_PRICE_CHANGED','ERP_PRICE_PRECISION_UNSUPPORTED','ERP_PRICE_TABLE_MISSING','ERP_PAYMENT_SCOPE_UNAVAILABLE','ERP_PROOF_EXPIRED','REVISION_CONFLICT','FORBIDDEN','AUTH_REQUIRED','MEMBERSHIP_PENDING'].includes(error.code);
         if (definitive && (!request.submitted || ['ERP_PROOF_EXPIRED','REVISION_CONFLICT'].includes(error.code))) pending = null;
         if (error.code === 'REVISION_CONFLICT') revision = null;
         throw error;

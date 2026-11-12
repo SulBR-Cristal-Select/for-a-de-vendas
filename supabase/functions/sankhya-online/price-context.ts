@@ -43,13 +43,6 @@ export function currentCommercialDay(now = new Date()): string {
   if (!year || !month || !day) return fail('ERP_CONTEXT_REQUIRED', 'Data comercial não confirmada.');
   return `${year}-${month}-${day}`;
 }
-async function stockContext(gateway: Transport, companyCode: 1 | 4, productCode: number) {
-  // Local/controle são contexto, não preço. Sem tabela atribuída, ler somente o cadastro real do produto/filial.
-  const fields = await gateway.select("SELECT COLUMN_NAME,DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME='TGFEST' AND COLUMN_NAME IN ('CODEMP','CODPROD','CODLOCAL','CONTROLE') ORDER BY COLUMN_NAME FETCH FIRST 4 ROWS ONLY", 4);
-  const numeric = ['CODEMP', 'CODPROD', 'CODLOCAL'];
-  if (fields.length !== 4 || !numeric.every(name => fields.some(f => f['COLUMN_NAME'] === name && f['DATA_TYPE'] === 'NUMBER')) || !fields.some(f => f['COLUMN_NAME'] === 'CONTROLE' && ['VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'].includes(String(f['DATA_TYPE'])))) return fail('ERP_CONTEXT_REQUIRED', 'Local ou controle ERP não confirmado.');
-  return gateway.select(`SELECT DISTINCT CODLOCAL,CONTROLE FROM TGFEST WHERE CODEMP=${companyCode} AND CODPROD=${productCode} ORDER BY CODLOCAL,CONTROLE FETCH FIRST 2 ROWS ONLY`, 2);
-}
 export async function readPrice(gateway: Transport, input: PriceInput, scope: ReadScope) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k => !['customerId', 'productId', 'paymentCode', 'type', 'sellerCode', 'quantity', 'unit', 'date'].includes(k)) || typeof input.customerId !== 'string' || typeof input.productId !== 'string' || input.type !== 'Venda') return fail('INVALID_REQUEST', 'Contexto comercial inválido.');
   const sellerCode = operationSeller(scope, input.sellerCode);
@@ -77,7 +70,9 @@ export async function readPrice(gateway: Transport, input: PriceInput, scope: Re
   if (operations.length !== 1 || Number(operations[0]!['CODTIPOPER']) !== operationCode || operations[0]!['ATIVO'] !== 'S' || operations[0]!['TIPMOV'] !== 'P' || typeof operations[0]!['OPERATION_VERSION'] !== 'string') return fail('ERP_CONTEXT_REQUIRED', 'TOP de venda ativa e vigente não confirmada.');
   // Resolve apenas local/controle reais. O valor continua vindo exclusivamente do motor nativo.
   const tables = [...new Set([customerERP['tableCode'], term.tableCode].filter(v => v !== null && v !== 0).map(v => responseCode(v)))];
-  const variants = tables.length ? await gateway.select(`WITH V AS (SELECT T.NUTAB,ROW_NUMBER() OVER (PARTITION BY T.CODTAB ORDER BY T.DTVIGOR DESC,T.DTALTER DESC,T.NUTAB DESC) AS RN FROM TGFTAB T JOIN TGFNTA N ON N.CODTAB=T.CODTAB WHERE T.CODTAB IN (${tables.join(',')}) AND N.ATIVO='S' AND T.DTVIGOR<=${asOf} AND (T.DTALTER IS NULL OR T.DTALTER<=${asOf})) SELECT DISTINCT E.CODLOCAL,E.CONTROLE FROM TGFEXC E JOIN V ON V.NUTAB=E.NUTAB AND V.RN=1 WHERE E.CODPROD=${productCode} AND E.TIPO='V' ORDER BY E.CODLOCAL,E.CONTROLE FETCH FIRST 2 ROWS ONLY`, 2) : await stockContext(gateway, companyCode, productCode);
+  // Sem tabela de preço associada (cliente e condição), a cotação não é ambiguidade: é ausência de negócio.
+  if (!tables.length) return fail('ERP_PRICE_TABLE_MISSING', 'Cliente sem tabela de preço associada.', 400);
+  const variants = await gateway.select(`WITH V AS (SELECT T.NUTAB,ROW_NUMBER() OVER (PARTITION BY T.CODTAB ORDER BY T.DTVIGOR DESC,T.DTALTER DESC,T.NUTAB DESC) AS RN FROM TGFTAB T JOIN TGFNTA N ON N.CODTAB=T.CODTAB WHERE T.CODTAB IN (${tables.join(',')}) AND N.ATIVO='S' AND T.DTVIGOR<=${asOf} AND (T.DTALTER IS NULL OR T.DTALTER<=${asOf})) SELECT DISTINCT E.CODLOCAL,E.CONTROLE FROM TGFEXC E JOIN V ON V.NUTAB=E.NUTAB AND V.RN=1 WHERE E.CODPROD=${productCode} AND E.TIPO='V' ORDER BY E.CODLOCAL,E.CONTROLE FETCH FIRST 2 ROWS ONLY`, 2);
   if (variants.length !== 1) return fail('ERP_PRICE_AMBIGUOUS', 'Local e controle sem contexto único de preço.', 502);
   const rawLocal = variants[0]!['CODLOCAL'], localCode = Number(rawLocal), control = variants[0]!['CONTROLE'];
   if (!(typeof rawLocal === 'number' || typeof rawLocal === 'string' && /^\d+$/.test(rawLocal)) || !Number.isSafeInteger(localCode) || localCode < 0 || typeof control !== 'string' || control.length > 17) return fail('ERP_CONTEXT_REQUIRED', 'Local ou controle ERP não confirmado.');

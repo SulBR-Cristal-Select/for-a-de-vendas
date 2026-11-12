@@ -58,6 +58,7 @@ const messages = {
   ERP_UNAVAILABLE: 'Consulta ERP indisponível. Tente novamente.',
   ERP_CONTEXT_REQUIRED: 'Contexto comercial ERP incompleto ou não confirmado.',
   ERP_PRICE_AMBIGUOUS: 'Preço ERP sem contexto único confirmado.',
+  ERP_PRICE_TABLE_MISSING: 'Cliente sem tabela de preço associada; cotação indisponível.',
   ERP_INVALID_RESPONSE: 'Resposta ERP inválida ou incompleta.',
   ERP_PRICE_QUERY_FAILED: 'Não foi possível confirmar o preço no ERP.',
   ERP_PAYMENT_SCOPE_UNAVAILABLE: 'Condição de pagamento sem elegibilidade ERP comprovada.',
