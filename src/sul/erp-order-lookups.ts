@@ -249,8 +249,10 @@ export function useERPOrderLookups(
   customerId: string,
   productIds: readonly string[],
   actorSellerId?: string,
+  /** null = carteira inteira autorizada pelo servidor (gestor: o vendedor vem do cliente). */
+  customerSellerId?: string | null,
 ) {
-  const sellerCode = /^sankhya:seller:([1-9]\d*)$/.exec(actorSellerId ?? '')?.[1];
+  const sellerCode = customerSellerId === null ? undefined : /^sankhya:seller:([1-9]\d*)$/.exec(customerSellerId ?? actorSellerId ?? '')?.[1];
   const customers = useConsulta(client, "customers", customerId ? [customerId] : [], sellerCode ? { sellerCode: Number(sellerCode) } : undefined);
   // Somente produtos da tabela de preço do cliente (cadastro + condição fixa); sem cliente, a lista fica livre.
   const customerCode = /^sankhya:customer:([1-9]\d*)$/.exec(customerId)?.[1];

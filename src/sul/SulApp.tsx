@@ -978,11 +978,22 @@ function sz(): any {
     let { db: base, update: t, path: a, online } = qa(), o: any = new URLSearchParams(location.hash.split("?")[1] || ""), [n, r] = (0, He.useState)(o.get("cliente") || ""), [l, s] = (0, He.useState)(base.company.user), [i, u] = (0, He.useState)(""), [c, f] = (0, He.useState)("Venda"), [d, m] = (0, He.useState)(bo), [p, y] = (0, He.useState)("1 - IMEDIATO"), [C, x] = (0, He.useState)("Conclu\xEDdo"), [v, g] = (0, He.useState)(""), [h, S] = (0, He.useState)([]), [L, I] = (0, He.useState)(0), [R, E] = (0, He.useState)(""), [OBS, OBSs] = (0, He.useState)(""), [k, M] = (0, He.useState)(""), [A, N] = (0, He.useState)("");
     const actorSeller = workspaceERPSeller(base.company);
     const managerOrder = base.company.role === 'Gestor';
-    const [delegatedSeller,setDelegatedSeller]=He.useState('');
     const permittedSellers = actorSeller ? [actorSeller.sellerCode,...(managerOrder ? actorSeller.teamSellerCodes ?? [] : [])] : [];
-    const operatingSeller = managerOrder && permittedSellers.includes(Number(delegatedSeller.split(':')[2])) ? delegatedSeller : actorSeller?.sellerId ?? '';
-    const lookupSeller = operatingSeller || (/^sankhya:seller:[1-9]\d*$/.test(l) ? l : '');
-    const lookups = useERPOrderLookups(online, n, [...h.map((item: any) => item.productId), v], lookupSeller);
+    // Gestor: o vendedor é sempre o cadastrado no cliente e não pode ser trocado (evita vender um cliente em nome de outro vendedor).
+    const sellerLocked = !!(online && managerOrder && actorSeller);
+    const [customerSeller, setCustomerSeller] = He.useState({ customerId: '' } as { customerId: string; code?: number });
+    const lockedCode = sellerLocked && customerSeller.customerId === n ? customerSeller.code : undefined;
+    const operatingSeller = !actorSeller ? '' : !sellerLocked || !n ? actorSeller.sellerId : lockedCode !== undefined && permittedSellers.includes(lockedCode) ? `sankhya:seller:${lockedCode}` : '';
+    const lookupSeller = sellerLocked ? operatingSeller : operatingSeller || (/^sankhya:seller:[1-9]\d*$/.test(l) ? l : '');
+    // Gestor vê a carteira inteira autorizada (null = sem filtro de vendedor); o vendedor da venda vem do cliente escolhido.
+    const lookups = useERPOrderLookups(online, n, [...h.map((item: any) => item.productId), v], lookupSeller, sellerLocked ? null : undefined);
+    useEffect(() => {
+        if (!sellerLocked) return;
+        const row: any = lookups.customers.find((c: any) => c.id === n);
+        if (!n || !row) return;
+        const code = typeof row.sellerCode === 'number' ? row.sellerCode : row.erp?.sellerCode;
+        setCustomerSeller((prev: { customerId: string; code?: number }) => prev.customerId === n && prev.code === code ? prev : { customerId: n, ...(typeof code === 'number' ? { code } : {}) });
+    }, [sellerLocked, n, lookups.customers]);
     // Visão transitória só no formulário: os arrays canônicos permanecem intactos.
     const e = React.useMemo(() => online ? { ...base, customers: [...manualRows(base.customers), ...lookups.customers], products: [...manualRows(base.products), ...lookups.products] } : base,
         [base, online, lookups.customers, lookups.products]);
@@ -1017,6 +1028,7 @@ function sz(): any {
         if (!product || adding.current) return;
         if (h.find((item: any) => item.productId === v)) { N('O produto já está no pedido. Ajuste a quantidade no item.'); return; }
         if (onlineOrder) {
+            if(!operatingSeller&&sellerLocked&&n){N(lockedCode===undefined?'Este cliente não tem vendedor cadastrado no ERP; não é possível criar o pedido.':'O vendedor cadastrado neste cliente não está na sua equipe; não é possível criar o pedido.');return;}
             if(!operatingSeller){N('Sua conta não possui vínculo operacional de vendedor ERP. Selecionar um vendedor para consultar a carteira não concede permissão para criar pedidos.');return;}
             if(!isERP(product)){N('Para um cliente ERP, selecione um produto autorizado da tabela do cliente. Produtos locais não podem ser enviados ao Sankhya.');return;}
             const key = contextKey; adding.current = true;
@@ -1040,6 +1052,7 @@ function sz(): any {
     const total = (items: any[], freight = 0): number | undefined => { try { return d1(items, freight); } catch { return undefined; } };
     async function B(): Promise<any> {
         if (savingOrder.current) return;
+        if (sellerLocked && n && !operatingSeller) { N(lockedCode === undefined ? 'Este cliente não tem vendedor cadastrado no ERP; não é possível criar o pedido.' : 'O vendedor cadastrado neste cliente não está na sua equipe; não é possível criar o pedido.'); return; }
         if (!n ||
             !i ||
             !d ||
@@ -1111,12 +1124,13 @@ function sz(): any {
                                             (0, b.jsx)(Sl, {
                                                 label: "Vendedor",
                                                 remote: online ? lookups.matches.sellers : undefined,
-                                                value: online ? lookupSeller : l,
+                                                value: online ? (sellerLocked && !(n && lockedCode !== undefined) ? '' : lookupSeller) : l,
+                                                disabled: sellerLocked,
+                                                placeholder: sellerLocked ? (n ? 'Vendedor do cliente' : 'Selecione o cliente') : undefined,
                                                 onValueChange: (D: any) => {
                                                     const next=String(D);
                                                     if(online && actorSeller){
-                                                        if(!managerOrder || !permittedSellers.includes(Number(next.split(':')[2])))return;
-                                                        setDelegatedSeller(next);
+                                                        if(sellerLocked)return;
                                                     }else s(next);
                                                     if(online && next!==lookupSeller){r('');g('');u('');setPaymentChoice(undefined);}
                                                 },

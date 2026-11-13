@@ -24,8 +24,8 @@ import type { ERPPrice } from "../lib/erp-online";
 vi.mock("@g4ai/ds", async (original) => ({
   ...(await original<Record<string, unknown>>()),
   notify: vi.fn(),
-  Combobox: ({ label, value, onValueChange, options }: any) => (
-    <select aria-label={label} value={value} onChange={(e) => onValueChange(e.target.value)}>
+  Combobox: ({ label, value, onValueChange, options, disabled }: any) => (
+    <select aria-label={label} value={value} disabled={disabled} onChange={(e) => onValueChange(e.target.value)}>
       <option value="" />
       {options.map((option: any) => (
         <option key={option.value} value={option.value}>
@@ -274,14 +274,18 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
     ).toThrow("inválido");
     expect(persist).toHaveBeenCalledTimes(1);
   });
-  it('gestor seleciona integrante explícito, cota e salva sem trocar a identidade Auth',async()=>{
-    location.hash='#/pedidos/novo';const id='00000000-0000-4000-8000-000000000001',team={...seller,id:'sankhya:seller:12',code:'12',name:'Integrante autorizado'};
+  it('gestor seleciona o cliente, o vendedor do cadastro é travado, cota e salva sem trocar a identidade Auth',async()=>{
+    location.hash='#/pedidos/novo';const id='00000000-0000-4000-8000-000000000001',team={...seller,id:'sankhya:seller:12',code:'12',name:'Integrante autorizado'},own={...customer,sellerCode:12};
     const state=createAppState({company:{userId:id,role:'Gestor',erpSeller:{userId:id,sellerId:seller.id,sellerCode:8,companyCodes:[4],teamSellerCodes:[12]}},customers:[],products:[],orders:[]});const client=fakeClient(),persist=vi.fn(async value=>value);
-    vi.mocked(client.window).mockImplementation(async({resource}:any)=>({items:resource==='customers'?[customer]:resource==='products'?[product]:[seller,team],total:resource==='sellers'?2:1}) as any);
-    vi.mocked(client.record).mockImplementation(async({resource,id}:any)=>({record:resource==='customers'?customer:resource==='products'?product:Number(id)===12?team:seller}) as any);
+    vi.mocked(client.window).mockImplementation(async({resource}:any)=>({items:resource==='customers'?[own]:resource==='products'?[product]:[seller,team],total:resource==='sellers'?2:1}) as any);
+    vi.mocked(client.record).mockImplementation(async({resource,id}:any)=>({record:resource==='customers'?own:resource==='products'?product:Number(id)===12?team:seller}) as any);
     vi.mocked(client.price).mockImplementation(async({quantity,sellerCode}:any)=>({...preview(quantity),seller:sellerCode===12?team:seller}));
     render(<SulApp initialState={state} online={client} persist={persist} onSignOut={async()=>{}}/>);
-    await screen.findByRole('option',{name:'Cliente ERP (7)'});fireEvent.change(screen.getByLabelText('Cliente'),{target:{value:customer.id}});await screen.findByRole('option',{name:payment.label});await screen.findByRole('option',{name:team.name});fireEvent.change(screen.getByLabelText('Vendedor'),{target:{value:team.id}});expect(screen.getByLabelText('Cliente')).toHaveValue('');expect(screen.getByLabelText('Condição de pagamento')).toHaveValue('');await waitFor(()=>expect(client.window).toHaveBeenCalledWith(expect.objectContaining({resource:'customers',filters:{sellerCode:12}}),expect.any(AbortSignal)));fireEvent.change(screen.getByLabelText('Cliente'),{target:{value:customer.id}});await waitFor(()=>expect(screen.getByLabelText('Condição de pagamento')).toHaveValue(payment.id));fireEvent.change(screen.getByLabelText('Produto'),{target:{value:product.id}});fireEvent.click(screen.getByRole('button',{name:/Adicionar produto/}));await screen.findByText('Produto ERP',{selector:'strong'});fireEvent.click(screen.getByRole('button',{name:/Salvar pedido/}));await waitFor(()=>expect(persist).toHaveBeenCalledTimes(1));expect(persist.mock.calls[0]![0].company.userId).toBe(id);expect(persist.mock.calls[0]![0].orders[0].erp.sellerCode).toBe(12);expect(client.price).toHaveBeenCalledWith(expect.objectContaining({sellerCode:12}));
+    await screen.findByRole('option',{name:'Cliente ERP (7)'});expect(screen.getByLabelText('Vendedor')).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Cliente'),{target:{value:own.id}});await waitFor(()=>expect(screen.getByLabelText('Condição de pagamento')).toHaveValue(payment.id));
+    expect(screen.getByLabelText('Vendedor')).toBeDisabled();expect(screen.getByLabelText('Vendedor')).toHaveValue(team.id);
+    fireEvent.change(screen.getByLabelText('Vendedor'),{target:{value:seller.id}});expect(screen.getByLabelText('Cliente')).toHaveValue(own.id);expect(screen.getByLabelText('Vendedor')).toHaveValue(team.id);
+    fireEvent.change(screen.getByLabelText('Produto'),{target:{value:product.id}});fireEvent.click(screen.getByRole('button',{name:/Adicionar produto/}));await screen.findByText('Produto ERP',{selector:'strong'});fireEvent.click(screen.getByRole('button',{name:/Salvar pedido/}));await waitFor(()=>expect(persist).toHaveBeenCalledTimes(1));expect(persist.mock.calls[0]![0].company.userId).toBe(id);expect(persist.mock.calls[0]![0].orders[0].erp.sellerCode).toBe(12);expect(client.price).toHaveBeenCalledWith(expect.objectContaining({sellerCode:12}));
   });
   it("integra os seletores existentes, preço contextual e persistência sem baixar carteira", async () => {
     location.hash = "#/pedidos/novo";
@@ -342,17 +346,17 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
 });
 
 describe('Feedbacks de cliente, tabela e inclusão de produto',()=>{
-  it('gestor escolhe vendedor antes do cliente e recebe prazo automático sem escolher manualmente',async()=>{
-    location.hash='#/pedidos/novo';const id='00000000-0000-4000-8000-000000000001',team={...seller,id:'sankhya:seller:12',code:'12',name:'Integrante autorizado'};
+  it('gestor não filtra clientes por vendedor, e cliente de vendedor fora da equipe bloqueia o pedido',async()=>{
+    location.hash='#/pedidos/novo';const id='00000000-0000-4000-8000-000000000001',stranger={...customer,sellerCode:99};
     const state=createAppState({company:{userId:id,role:'Gestor',erpSeller:{userId:id,sellerId:seller.id,sellerCode:8,companyCodes:[4],teamSellerCodes:[12]}},customers:[],products:[],orders:[]}),client=fakeClient(),persist=vi.fn();
-    vi.mocked(client.window).mockImplementation(async({resource}:any)=>({items:resource==='customers'?[customer]:resource==='products'?[product]:[seller,team],total:resource==='sellers'?2:1}) as any);
+    vi.mocked(client.window).mockImplementation(async({resource}:any)=>({items:resource==='customers'?[stranger]:resource==='products'?[product]:[seller],total:1}) as any);
     render(<SulApp initialState={state} online={client} persist={persist} onSignOut={vi.fn()}/>);
-    await screen.findByRole('option',{name:team.name});fireEvent.change(screen.getByLabelText('Vendedor'),{target:{value:team.id}});
-    await waitFor(()=>expect(client.window).toHaveBeenCalledWith(expect.objectContaining({resource:'customers',filters:{sellerCode:12}}),expect.any(AbortSignal)));
-    fireEvent.change(screen.getByLabelText('Cliente'),{target:{value:customer.id}});
-    await waitFor(()=>expect(screen.getByLabelText('Condição de pagamento')).toHaveValue(payment.id));
-    expect(screen.getByLabelText('Vendedor')).toHaveValue(team.id);
-    expect(persist).not.toHaveBeenCalled();
+    await screen.findByRole('option',{name:'Cliente ERP (7)'});
+    expect(client.window).toHaveBeenCalledWith(expect.objectContaining({resource:'customers'}),expect.any(AbortSignal));
+    expect(vi.mocked(client.window).mock.calls.some(([q]:any)=>q.resource==='customers'&&q.filters?.sellerCode!==undefined)).toBe(false);
+    fireEvent.change(screen.getByLabelText('Cliente'),{target:{value:stranger.id}});
+    fireEvent.click(screen.getByRole('button',{name:/Salvar pedido/}));
+    expect(await screen.findByText(/não está na sua equipe/)).toBeInTheDocument();expect(screen.getByLabelText('Vendedor')).toBeDisabled();expect(persist).not.toHaveBeenCalled();
   });
   it('cliente sem tabela de preço não lista produtos e mostra o aviso na própria lista',async()=>{
     location.hash='#/pedidos/novo';const client=fakeClient(),persist=vi.fn();
