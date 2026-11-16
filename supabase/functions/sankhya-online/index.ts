@@ -32,7 +32,7 @@ const commercialGateway = { select: async (sql: string, limit: number) => {
   await gateway.ensureCompanyScope();
   return gateway.select(sql, limit);
 } };
-const site = 'https://sales-spark-crew.lovable.app';
+const sites = ['https://sales-spark-crew.lovable.app', 'https://forca-de-vendas-tau.vercel.app'];
 const jsonKeys = (name: string): Record<string, string> => {
   try { const value = JSON.parse(Deno.env.get(name) || '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; } catch { return {}; }
 };
@@ -92,7 +92,7 @@ const writeSubmission: ReceiptWriter = async args => {
 Deno.serve(async (request: Request) => {
   const started = performance.now();
   const origin = request.headers.get('Origin');
-  const allowed = !origin || origin === site || origin === 'https://supabase.com' || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+  const allowed = !origin || sites.includes(origin) || origin === 'https://supabase.com' || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Origin',
     'Access-Control-Allow-Headers': 'authorization,apikey,content-type,x-client-info',
