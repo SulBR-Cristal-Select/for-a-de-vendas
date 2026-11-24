@@ -479,7 +479,6 @@ describe('Feedbacks de cliente, tabela e inclusão de produto',()=>{
   });
 });
 
-
 describe("Dados reais do cliente no detalhe do pedido", () => {
   it("consulta o cadastro ERP mesmo sem cliente persistido localmente", async () => {
     const id = "00000000-0000-4000-8000-000000000099";
