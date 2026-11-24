@@ -16,15 +16,17 @@ type Consulta = {
   loading: boolean;
   error?: string;
   total?: number;
-  priceTableState?: 'missing' | 'unavailable' | 'empty' | undefined;
+  priceTableState?: "missing" | "unavailable" | "empty" | undefined;
   hasMore: boolean;
 };
 
 /** Só reconhece o popup que contém a busca exata do Combobox do DS. */
-function popupDoCampo(input: HTMLInputElement, recurso: ERPResource, label:string = rotulos[recurso]): HTMLElement | null {
-  if (
-    input.getAttribute("aria-label") !== `Buscar em ${label.toLocaleLowerCase("pt-BR")}`
-  )
+function popupDoCampo(
+  input: HTMLInputElement,
+  recurso: ERPResource,
+  label: string = rotulos[recurso],
+): HTMLElement | null {
+  if (input.getAttribute("aria-label") !== `Buscar em ${label.toLocaleLowerCase("pt-BR")}`)
     return null;
   const popup = input.closest<HTMLElement>(`[aria-label="${label}"]`);
   return popup && popup.tagName !== "BUTTON" ? popup : null;
@@ -41,7 +43,13 @@ function unir(linhas: ERPRow[], selecionados: ERPRow[]): ERPRow[] {
   return [...new Map([...selecionados, ...linhas].map((linha) => [linha["id"], linha])).values()];
 }
 
-function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: readonly string[], filters?: ERPPageQuery['filters'], label:string = rotulos[recurso]) {
+function useConsulta(
+  client: ERPClient | undefined,
+  recurso: ERPResource,
+  ids: readonly string[],
+  filters?: ERPPageQuery["filters"],
+  label: string = rotulos[recurso],
+) {
   const context = JSON.stringify(filters ?? {});
   const [estado, definirEstado] = useState<Consulta>({
     rows: [],
@@ -93,15 +101,18 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
         hasMore: false,
       }));
       try {
-        const pagina = await client!.window({
-          resource: recurso,
-          ...(filters ? { filters } : {}),
-          search: consulta,
-          sort: "name",
-          direction: "asc",
-          offset,
-          limit: 50,
-        }, consultaVigente.signal);
+        const pagina = await client!.window(
+          {
+            resource: recurso,
+            ...(filters ? { filters } : {}),
+            search: consulta,
+            sort: "name",
+            direction: "asc",
+            offset,
+            limit: 50,
+          },
+          consultaVigente.signal,
+        );
         if (!vigente(versao)) return;
         linhas.current = anexar ? unir(linhas.current, pagina.items) : pagina.items;
         offset += pagina.items.length;
@@ -121,7 +132,14 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
         linhas.current = [];
         total = 0;
         offset = 0;
-        definirEstado({ client, context, rows: [], loading: false, error: mensagem(erro), hasMore: false });
+        definirEstado({
+          client,
+          context,
+          rows: [],
+          loading: false,
+          error: mensagem(erro),
+          hasMore: false,
+        });
       } finally {
         if (vigente(versao)) ocupado = false;
       }
@@ -144,14 +162,16 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
     }
     function entrada(evento: Event) {
       const alvo = evento.target;
-      if (alvo instanceof HTMLInputElement && popupDoCampo(alvo, recurso, label)) buscar(alvo.value);
+      if (alvo instanceof HTMLInputElement && popupDoCampo(alvo, recurso, label))
+        buscar(alvo.value);
     }
     function rolagem(evento: Event) {
       const lista = evento.target;
       if (!(lista instanceof HTMLElement) || lista.getAttribute("role") !== "listbox") return;
       const popup = lista.closest<HTMLElement>(`[aria-label="${label}"]`);
       const input = popup?.querySelector<HTMLInputElement>("input");
-      if (!input || popupDoCampo(input, recurso, label) !== popup || input.value !== consulta) return;
+      if (!input || popupDoCampo(input, recurso, label) !== popup || input.value !== consulta)
+        return;
       if (
         lista.scrollHeight > lista.clientHeight &&
         lista.scrollTop + lista.clientHeight >= lista.scrollHeight - 4 &&
@@ -226,9 +246,9 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
   const matches: ERPMatches = {
     loading: !!client && (!pagina || pagina.loading),
     error: pagina?.error,
-    onSearchChange: query => buscaAtual.current(query),
-    query: pagina?.query ?? '',
-    ids: new Set((pagina?.rows || vazio).map(row => String(row['id']))),
+    onSearchChange: (query) => buscaAtual.current(query),
+    query: pagina?.query ?? "",
+    ids: new Set((pagina?.rows || vazio).map((row) => String(row["id"]))),
   };
   return {
     rows,
@@ -242,9 +262,15 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
 }
 
 /** Filtros do relatório existente: somente os dois cadastros necessários, por código. */
-export function useERPCustomerReportLookups(client: ERPClient | undefined, customerId: string, sellerId: string) {
-  const customers = useConsulta(client, 'customers', customerId ? [customerId] : [], { active: 'all' });
-  const sellers = useConsulta(client, 'sellers', sellerId ? [sellerId] : []);
+export function useERPCustomerReportLookups(
+  client: ERPClient | undefined,
+  customerId: string,
+  sellerId: string,
+) {
+  const customers = useConsulta(client, "customers", customerId ? [customerId] : [], {
+    active: "all",
+  });
+  const sellers = useConsulta(client, "sellers", sellerId ? [sellerId] : []);
   return { customers, sellers };
 }
 
@@ -257,13 +283,29 @@ export function useERPOrderLookups(
   /** null = carteira inteira autorizada pelo servidor (gestor: o vendedor vem do cliente). */
   customerSellerId?: string | null,
 ) {
-  const sellerCode = customerSellerId === null ? undefined : /^sankhya:seller:([1-9]\d*)$/.exec(customerSellerId ?? actorSellerId ?? '')?.[1];
-  const customers = useConsulta(client, "customers", customerId ? [customerId] : [], sellerCode ? { sellerCode: Number(sellerCode) } : undefined);
+  const sellerCode =
+    customerSellerId === null
+      ? undefined
+      : /^sankhya:seller:([1-9]\d*)$/.exec(customerSellerId ?? actorSellerId ?? "")?.[1];
+  const customers = useConsulta(
+    client,
+    "customers",
+    customerId ? [customerId] : [],
+    sellerCode ? { sellerCode: Number(sellerCode) } : undefined,
+  );
   // Somente produtos da tabela de preço do cliente (cadastro + condição fixa); sem cliente, a lista fica livre.
   const customerCode = /^sankhya:customer:([1-9]\d*)$/.exec(customerId)?.[1];
-  const products = useConsulta(client, "products", productIds, customerCode ? { customerCode: Number(customerCode) } : undefined);
+  const products = useConsulta(
+    client,
+    "products",
+    productIds,
+    customerCode ? { customerCode: Number(customerCode) } : undefined,
+  );
   // A carteira do cliente não identifica a pessoa autenticada. Fixar somente o vínculo da sessão.
-  const sellerId = typeof actorSellerId === 'string' && /^sankhya:seller:[1-9]\d*$/.test(actorSellerId) ? actorSellerId : '';
+  const sellerId =
+    typeof actorSellerId === "string" && /^sankhya:seller:[1-9]\d*$/.test(actorSellerId)
+      ? actorSellerId
+      : "";
   const sellers = useConsulta(client, "sellers", sellerId ? [sellerId] : []);
   const estados = { customers, products, sellers };
   const erro = recursos.map((recurso) => estados[recurso].error).find(Boolean);
@@ -281,4 +323,17 @@ export function useERPOrderLookups(
 }
 
 /** Reaproveita busca/paginação de cadastros para filtros transitórios dos indicadores. */
-export function useERPIndicatorLookup(client:ERPClient|undefined,resource:'customers'|'products',id:string,label:string){return useConsulta(client,resource,id?[id]:[],resource==='customers'?{active:'all'}:undefined,label);}
+export function useERPIndicatorLookup(
+  client: ERPClient | undefined,
+  resource: "customers" | "products",
+  id: string,
+  label: string,
+) {
+  return useConsulta(
+    client,
+    resource,
+    id ? [id] : [],
+    resource === "customers" ? { active: "all" } : undefined,
+    label,
+  );
+}

@@ -1016,6 +1016,22 @@ function sz(): any {
     const [catalogOpen, setCatalogOpen] = React.useState(false);
     const catalogPrices = useERPCatalogPrices(onlineOrder ? online : undefined, {customerId:n, paymentCode:context.paymentCode, type:'Venda', sellerCode:Number(operatingSeller.split(':')[2]), date:context.date}, lookups.products.filter(row => lookups.matches.products.ids.has(String(row['id']))), catalogOpen);
     const prices = useERPOrderPrices(onlineOrder ? online : undefined, context, h, e.products);
+  // Valores antigos permanecem somente como rascunho interno, nunca como preço confirmado.
+  const priceFailure = noPriceTable
+    ? "Cliente sem tabela de preço associada"
+    : catalogUnavailable
+      ? "Tabela de preço sem versão ativa e vigente."
+      : prices?.error;
+  const pricesConfirmed =
+    !onlineOrder || (!priceFailure && !!prices?.quotes && prices.quotes.length === h.length);
+  const priceLabel = priceFailure ? "Preço indisponível" : "Preço pendente";
+  const itemPrice = (index: number) =>
+    onlineOrder
+      ? pricesConfirmed
+        ? prices?.quotes?.[index]?.price.amount
+        : undefined
+      : h[index]?.price;
+  const quotedItems = h.map((item: { productId: string; qty: number; unit: string; price?: number }, index: number) => ({ ...item, price: itemPrice(index) }));
     const contextKey = JSON.stringify([context, v]);
     const activeContext = useRef(contextKey); activeContext.current = contextKey;
     const adding = useRef(false);
@@ -1056,6 +1072,7 @@ function sz(): any {
     const total = (items: any[], freight = 0): number | undefined => { try { return d1(items, freight); } catch { return undefined; } };
     async function B(): Promise<any> {
         if (savingOrder.current) return;
+        if (onlineOrder && priceFailure) { N(priceFailure); return; }
         if (sellerLocked && n && !operatingSeller) { N(lockedCode === undefined ? 'Este cliente não tem vendedor cadastrado no ERP; não é possível criar o pedido.' : 'O vendedor cadastrado neste cliente não está na sua equipe; não é possível criar o pedido.'); return; }
         if (!n ||
             !i ||
@@ -1210,7 +1227,7 @@ function sz(): any {
                                                                             children: [
                                                                                 Ur(e, D.productId)?.code,
                                                                                 " \xB7 pre\xE7o unit\xE1rio ",
-                                                                                rt(D.price),
+                                                                                itemPrice(j) === undefined ? priceLabel : rt(itemPrice(j)),
                                                                             ],
                                                                         }),
                                                                     ],
@@ -1237,7 +1254,7 @@ function sz(): any {
                                                                 }),
                                                                 (0, b.jsx)("strong", {
                                                                     className: "tabular-nums",
-                                                                    children: rt((D.qty || 0) * D.price),
+                                                                    children: itemPrice(j) === undefined ? priceLabel : rt((D.qty || 0) * itemPrice(j)),
                                                                 }),
                                                             ],
                                                         }),
@@ -1324,11 +1341,11 @@ function sz(): any {
                                         items: [
                                             { label: "Itens", value: h.length },
                                             { label: "Quantidade total", value: Zo(h, "qty") },
-                                            { label: "Produtos", value: rt(total(h)) },
+                                            { label: "Produtos", value: pricesConfirmed ? rt(total(quotedItems)) : priceLabel },
                                             {
                                                 label: "Valor total",
                                                 value: (0, b.jsx)("strong", {
-                                                    children: rt(total(h, L || 0)),
+                                                    children: pricesConfirmed ? rt(total(quotedItems, L || 0)) : priceLabel,
                                                 }),
                                             },
                                         ],

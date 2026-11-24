@@ -346,6 +346,103 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
 });
 
 describe('Feedbacks de cliente, tabela e inclusão de produto',()=>{
+  it("invalida valores na troca de cliente, preserva erro definitivo e recota ao voltar", async () => {
+    location.hash = "#/pedidos/novo";
+    const other = { ...customer, id: "sankhya:customer:10", code: "10", name: "Sem tabela" };
+    const id = "00000000-0000-4000-8000-000000000001";
+    const client = fakeClient(),
+      persist = vi.fn(async (value) => value);
+    let release!: (value: ERPPrice) => void;
+    vi.mocked(client.window).mockImplementation(
+      async ({ resource, filters }) =>
+        ({
+          source: "sankhya" as const, readOnly: true as const, readAt: "2026-11-24T21:00:00Z", totalWithoutSearch: 1, offset: 0, limit: 50,
+          items:
+            resource === "customers"
+              ? [customer, other]
+              : resource === "sellers"
+                ? [seller]
+                : filters?.customerCode === 10
+                  ? []
+                  : [product],
+          total:
+            resource === "customers"
+              ? 2
+              : resource === "products" && filters?.customerCode === 10
+                ? 0
+                : 1,
+          ...(resource === "products" && filters?.customerCode === 10 ? { priceTableState: "missing" as const } : {}),
+        }),
+    );
+    vi.mocked(client.record).mockImplementation(
+      async ({ resource, id }) =>
+        ({
+          source: "sankhya" as const, readOnly: true as const, readAt: "2026-11-24T21:00:00Z",
+          record:
+            resource === "customers"
+              ? id === other.id
+                ? other
+                : customer
+              : resource === "products"
+                ? product
+                : seller,
+        }),
+    );
+    vi.mocked(client.price).mockImplementation(async ({ customerId, quantity }) => {
+      if (customerId === other.id) throw new Error("Cliente sem tabela de preço associada");
+      return preview(quantity);
+    });
+    render(
+      <SulApp
+        initialState={createAppState({
+          company: {
+            userId: id,
+            erpSeller: { userId: id, sellerId: seller.id, sellerCode: 8, companyCodes: [1] },
+          },
+          customers: [],
+          products: [],
+          orders: [],
+        })}
+        online={client}
+        persist={persist}
+        onSignOut={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "Cliente ERP (7)" });
+    fireEvent.change(screen.getByLabelText("Cliente"), { target: { value: customer.id } });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Condição de pagamento")).toHaveValue(payment.id),
+    );
+    fireEvent.change(screen.getByLabelText("Produto"), { target: { value: product.id } });
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar produto/ }));
+    await screen.findByText("Produto ERP", { selector: "strong" });
+    await waitFor(() => expect(screen.getAllByText(/12,34/).length).toBeGreaterThan(0));
+    fireEvent.change(screen.getByLabelText("Cliente"), { target: { value: other.id } });
+    expect(screen.queryByText(/12,34/)).not.toBeInTheDocument();
+    await screen.findByText(/não há produtos para listar/);
+    fireEvent.click(screen.getByRole("button", { name: /Salvar pedido/ }));
+    expect(await screen.findByText("Cliente sem tabela de preço associada")).toBeInTheDocument();
+    expect(screen.queryByText(/Aguarde a confirmação/)).not.toBeInTheDocument();
+    expect(persist).not.toHaveBeenCalled();
+    vi.mocked(client.price).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    fireEvent.change(screen.getByLabelText("Cliente"), { target: { value: customer.id } });
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    expect(screen.queryByText(/12,34/)).not.toBeInTheDocument();
+    await act(async () => {
+      release(preview());
+    });
+    await waitFor(() => expect(screen.getAllByText(/12,34/).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: /Salvar pedido/ }));
+    await waitFor(() => expect(persist).toHaveBeenCalledTimes(1));
+    expect(persist.mock.calls[0]![0].orders[0].customerId).toBe(customer.id);
+  });
+
+
   it('gestor não filtra clientes por vendedor, e cliente de vendedor fora da equipe bloqueia o pedido',async()=>{
     location.hash='#/pedidos/novo';const id='00000000-0000-4000-8000-000000000001',stranger={...customer,sellerCode:99};
     const state=createAppState({company:{userId:id,role:'Gestor',erpSeller:{userId:id,sellerId:seller.id,sellerCode:8,companyCodes:[4],teamSellerCodes:[12]}},customers:[],products:[],orders:[]}),client=fakeClient(),persist=vi.fn();
