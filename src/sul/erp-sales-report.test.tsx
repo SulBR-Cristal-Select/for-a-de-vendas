@@ -1,162 +1,1090 @@
-import React from 'react';
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createERPClient, type ERPRow, type ERPSalesQuery } from '../lib/erp-online';
-import { decimalUnits, formatERPShare, sumERPDecimals } from '../lib/erp-decimal';
-import { foldERPText } from '../lib/erp-order';
-import { STANDARD_SALES_REPORT_POLICY } from '../../supabase/functions/sankhya-online/policy';
-import { salesReportQuery } from './erp-sales-report';
-import { exportERPRows } from './erp-hooks';
-import SulApp, { createAppState } from './SulApp';
-import { readERPSalesChart, salesChartCoordinate, useERPSalesChart, type SalesChartContext } from './erp-sales-chart';
-const chartSpy=vi.hoisted(()=>vi.fn());
-vi.mock('@g4ai/ds', async original => {const o=await original<typeof import('@g4ai/ds')>();return{...o,notify:vi.fn(),BarChart:(props:React.ComponentProps<typeof o.BarChart>)=>{chartSpy(props);return <o.BarChart {...props}/>;}};});
-const observation={source:'sankhya',readOnly:true,readAt:'2026-10-25T13:28:00.000Z'};
-function order(id:number):ERPRow {return {id:`sankhya:order:${id}`,source:'observado',readOnly:true,number:String(id),date:'2026-10-25',customerId:`sankhya:customer:${id%2+1}`,customerName:`Cliente documental ${id%2+1}`,sellerCode:id%2?34:12,sellerName:'Homônimo',total:'0.1',status:'confirmado',operationName:'Venda normal',erp:{source:'sankhya',companyCode:1,documentCode:id,movement:'P',operationCode:1001,statusCode:'L'}};}
-function fakeERP(rows=Array.from({length:65},(_,i)=>order(i+1))) {
- const customers=[1,2].map(n=>({id:`sankhya:customer:${n}`,code:String(n),name:`Cliente documental ${n}`,active:true}));
- const sellers=[34,12].map(n=>({id:`sankhya:seller:${n}`,code:n,name:'Homônimo'}));
- const transport=vi.fn(async({operation,query}:any)=>{
-  if(operation==='record') {const r=query.resource==='sellers'?sellers:customers;return{error:null,data:{...observation,record:r.find(x=>x.id===query.id||x.code===query.id)||null}};}
-  if(operation==='window') {const r=[...(query.resource==='sellers'?sellers:customers)].sort((a,b)=>Number(a.code)-Number(b.code));return{error:null,data:{...observation,items:r.slice(query.offset,query.offset+query.limit),offset:query.offset,total:r.length,totalWithoutSearch:r.length}};}
-  if(operation!=='sales-report')throw Error('Operação não esperada no relatório');
-  let filtered=rows.filter(r=>(!query.customerId||r['customerId']===query.customerId)&&(!query.sellerCode||r['sellerCode']===query.sellerCode)&&(!query.from||String(r['date'])>=query.from)&&(!query.to||String(r['date'])<=query.to));
-  const group=(source:ERPRow[]):ERPRow[]=>{if(!query.groupBy)return source;const groups=new Map<any,ERPRow[]>();for(const r of source){const code=query.groupBy==='seller'?r['sellerCode']:Number(String(r['customerId']).split(':').at(-1));groups.set(code,[...(groups.get(code)||[]),r]);}return [...groups].map(([code,records])=>({id:`sankhya:sales:${query.groupBy}:${code}`,groupBy:query.groupBy,groupCode:code,name:query.groupBy==='seller'?'Homônimo':`Cliente documental ${code}`,count:records.length,total:records.some(r=>r['total']===null)?null:sumERPDecimals(records.map(r=>String(r['total']))),...(query.productMix?{qty:records.some(r=>r['testProducts']==null)?null:new Set(records.flatMap(r=>r['testProducts'] as string[])).size}:{})}));};
-  const totalWithoutSearch=group(filtered).length;
-  if(query.search)filtered=filtered.filter(r=>foldERPText([r['number'],r['customerName'],r['sellerName']].join(' ')).includes(foldERPText(query.search)));
-  const missing=filtered.filter(r=>r['total']===null).length;
-  const summary={documentCount:filtered.length,documentAmount:missing?null:sumERPDecimals(filtered.map(r=>String(r['total']))),missingAmountCount:missing,amountField:'TGFCAB.VLRNOTA',headerCountedOnce:true,atomicSnapshot:false};
-  let selected=group(filtered);if(query.sort){const key=query.sort==='customer'?'customerName':query.sort==='seller'?'sellerName':query.sort;selected=[...selected].sort((a,b)=>(key==='total' && typeof a[key]==='string' && typeof b[key]==='string' ? (decimalUnits(a[key])<decimalUnits(b[key])?-1:decimalUnits(a[key])>decimalUnits(b[key])?1:0) : String(a[key]).localeCompare(String(b[key]),'pt-BR',{numeric:true}))*(query.direction==='desc'?-1:1));}
-  return{error:null,data:{...observation,items:selected.slice(query.offset,query.offset+query.limit),total:selected.length,totalWithoutSearch,offset:query.offset,summary,salesPolicy:STANDARD_SALES_REPORT_POLICY,...(query.productMix?{productCountPolicy:{field:'TGFITE.CODPROD',distinctPerCustomer:true,quantitiesAdded:false,missingItems:'unavailable'}}:{}),companyCodes:[1],groupBy:query.groupBy??null}};
- });
- return{client:createERPClient(transport),transport,rows};
-}
-function mount(rows?:ERPRow[],route='vendas'){location.hash='#/relatorios/'+route;const f=fakeERP(rows);const state=createAppState({orders:[{id:'manual',number:'MANUAL-NÃO-SOMAR',total:999999,type:'Venda',status:'Concluído',seller:'Homônimo'}]});const persist=vi.fn();const view=render(<SulApp initialState={state} online={f.client} persist={persist} onSignOut={vi.fn()}/>);return{...view,...f,persist,state};}
-beforeEach(()=>{chartSpy.mockClear();vi.stubGlobal('ResizeObserver',class{constructor(private callback:(entries:ResizeObserverEntry[])=>void){}observe(){this.callback([{contentRect:{width:900}}] as ResizeObserverEntry[]);}unobserve(){}disconnect(){}});HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};});
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();location.hash='';});
-async function selectGroup(label:string){fireEvent.click(screen.getByRole('combobox',{name:'Agrupar por'}));const option=await screen.findByRole('option',{name:label});fireEvent.pointerDown(option,{pointerType:'mouse'});fireEvent.click(option);}
-describe('Vendas na interface existente',()=>{
- it('página inicial e KPIs usam o agregado integral de65 pedidos; não os10 visíveis ou manuais',async()=>{
-  const f=mount();await screen.findByText('R$ 6,50');expect(screen.getByText('#1')).toBeInTheDocument();expect(screen.queryByText('#11')).not.toBeInTheDocument();expect(screen.queryByText('#MANUAL-NÃO-SOMAR')).not.toBeInTheDocument();expect(screen.getAllByText('R$ 0,10')).toHaveLength(11);expect(f.transport.mock.calls.every(([b])=>b.operation==='sales-report'&&b.query.limit<=50)).toBe(true);expect(f.state['orders']).toHaveLength(1);expect(f.persist).not.toHaveBeenCalled();
- });
- it('agrupa vendedores homônimos por código, sem reduzir o KPI a dois grupos',async()=>{
-  const f=mount();await screen.findByText('R$ 6,50');await selectGroup('Vendedor');await waitFor(()=>expect(f.transport.mock.calls.at(-1)?.[0].query.groupBy).toBe('seller'));await waitFor(()=>expect(screen.getAllByText('Homônimo')).toHaveLength(2));expect(screen.getByText('R$ 6,50')).toBeInTheDocument();expect(screen.getByText('33')).toBeInTheDocument();expect(screen.getByText('32')).toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();
- });
- it('agrupa por cliente e preserva retorno aos detalhes, mesmo após ordenação anterior',async()=>{
-  const f=mount();await screen.findByText('R$ 6,50');fireEvent.click(screen.getByRole('button',{name:/Pedido/}));await selectGroup('Cliente');await waitFor(()=>expect(f.transport.mock.calls.at(-1)?.[0].query.groupBy).toBe('customer'));expect(f.transport.mock.calls.at(-1)?.[0].query.sort).not.toBe('number');await selectGroup('Sem agrupamento');await screen.findByText('#1');expect(f.transport.mock.calls.at(-1)?.[0].query.groupBy).toBeUndefined();
- });
- it('busca no servidor, limpa KPIs antigos e mantém o campo para nova busca',async()=>{
-  const f=mount();await screen.findByText('R$ 6,50');const input=screen.getByPlaceholderText('Filtrar…');fireEvent.change(input,{target:{value:'Cliente documental 1'}});await screen.findByText('R$ 3,20');expect(input).toBeInTheDocument();expect(screen.queryByText('R$ 6,50')).not.toBeInTheDocument();expect(f.transport.mock.calls.at(-1)?.[0].query.search).toBe('Cliente documental 1');
- });
- it('filtra cliente no controle real e não carrega produtos/pedidos em arrays canônicos',async()=>{
-  const f=mount();await screen.findByText('R$ 6,50');fireEvent.click(screen.getByRole('button',{name:'Filtros'}));fireEvent.click(await screen.findByRole('combobox',{name:'Cliente'}));fireEvent.click(await screen.findByRole('option',{name:'Cliente documental 1 (1)'}));fireEvent.click(screen.getByRole('button',{name:'Aplicar filtros'}));await screen.findByText('R$ 3,20');expect(f.transport.mock.calls.at(-1)?.[0].query.customerId).toBe('sankhya:customer:1');expect(f.transport.mock.calls.every(([b])=>b.query.resource!=='products')).toBe(true);expect(f.state['customers']).toEqual([]);expect(f.persist).not.toHaveBeenCalled();
- });
- it('filtra vendedor por código mesmo com nomes idênticos, sem escolher identidade comercial',async()=>{
-  const f=mount();await screen.findByText('R$ 6,50');fireEvent.click(screen.getByRole('button',{name:'Filtros'}));fireEvent.click(await screen.findByRole('combobox',{name:'Vendedor'}));const options=await screen.findAllByRole('option',{name:'Homônimo'});fireEvent.click(options[1]!);fireEvent.click(screen.getByRole('button',{name:'Aplicar filtros'}));await waitFor(()=>expect(f.transport.mock.calls.at(-1)?.[0].query.sellerCode).toBe(34));expect(f.persist).not.toHaveBeenCalled();
- });
- it('erro remoto não transforma indicador em zero nem mantém valor antigo',async()=>{
-  const f=mount();await screen.findByText('R$ 6,50');f.transport.mockRejectedValue(new Error('falha sintética'));fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'novo'}});await screen.findByText('Consulta ERP indisponível. Tente novamente.');expect(screen.queryByText('R$ 6,50')).not.toBeInTheDocument();expect(screen.queryByText('R$ 0,00')).not.toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();
- });
- it('CSV pelos controles originais contém65 registros e as sete colunas, não só a página',async()=>{
-  const create=vi.fn((_blob:Blob)=> 'blob:csv-vendas');Object.defineProperty(URL,'createObjectURL',{configurable:true,value:create});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
-  const f=mount();await screen.findByText('R$ 6,50');fireEvent.click(screen.getByRole('button',{name:'Exportar CSV'}));await waitFor(()=>expect(create).toHaveBeenCalledOnce());const blob=create.mock.calls[0]![0] as Blob;const text=await new Promise<string>(resolve=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.readAsText(blob);});expect(text.split('\r\n')).toHaveLength(66);expect(text).toContain('number;date;customer;seller;delivery;total;cargoStatus');expect(text).toContain('"65";"2026-10-25"');expect(text).not.toContain('MANUAL-NÃO-SOMAR');expect(f.persist).not.toHaveBeenCalled();
- });
+import React from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createERPClient, type ERPRow, type ERPSalesQuery } from "../lib/erp-online";
+import { decimalUnits, formatERPShare, sumERPDecimals } from "../lib/erp-decimal";
+import { foldERPText } from "../lib/erp-order";
+import { STANDARD_SALES_REPORT_POLICY } from "../../supabase/functions/sankhya-online/policy";
+import { salesReportQuery } from "./erp-sales-report";
+import { exportERPRows } from "./erp-hooks";
+import SulApp, { createAppState } from "./SulApp";
+import {
+  readERPSalesChart,
+  salesChartCoordinate,
+  useERPSalesChart,
+  type SalesChartContext,
+} from "./erp-sales-chart";
+const chartSpy = vi.hoisted(() => vi.fn());
+vi.mock("@g4ai/ds", async (original) => {
+  const o = await original<typeof import("@g4ai/ds")>();
+  return {
+    ...o,
+    notify: vi.fn(),
+    BarChart: (props: React.ComponentProps<typeof o.BarChart>) => {
+      chartSpy(props);
+      return <o.BarChart {...props} />;
+    },
+  };
 });
-describe('Contrato fixo de vendas e exportação coerente',()=>{
- it('propaga período, situação e códigos; entrada malformada não retira o filtro',()=>{expect(salesReportQuery({customer:'sankhya:customer:1',seller:'sankhya:seller:34',status:'confirmado',from:'2026-10-01',to:'2026-10-25'},'vendedor')).toEqual({customerId:'sankhya:customer:1',sellerCode:34,status:'confirmado',from:'2026-10-01',to:'2026-10-25',groupBy:'seller'});expect(salesReportQuery({seller:'Homônimo'},'nenhum').sellerCode).toBeNaN();});
- it('SDK recusa resumo sem política, notaV, dinheiro binário ou número de documentos incoerente',async()=>{
-  const f=fakeERP([order(1)]);const original=await f.client.salesReport({resource:'orders',offset:0,limit:10});
-  for(const bad of [{salesPolicy:null},{summary:{...original.summary,documentAmount:0.1}},{summary:{...original.summary,documentCount:2}},{items:[{...order(1),erp:{...(order(1)['erp'] as ERPRow),movement:'V'}}]}]){const c=createERPClient(async()=>({error:null,data:{...original,...bad}}));await expect(c.salesReport({resource:'orders',offset:0,limit:10})).rejects.toMatchObject({code:'INVALID_RESPONSE'});}
- });
- it('exportação recusa mudança financeira com contagem idêntica entre janelas',async()=>{
-  const f=fakeERP();const original=f.client.salesReport.bind(f.client);vi.spyOn(f.client,'salesReport').mockImplementation(async q=>{const r=await original(q);return q.offset?{...r,summary:{...r.summary,documentAmount:'999'}}:r;});await expect(exportERPRows({client:f.client,resource:'orders',salesReport:{}},{resource:'orders'},[],()=>{})).rejects.toMatchObject({code:'INVALID_RESPONSE'});
- });
- it('ausência monetária preserva documento/contagem, não produz valor ou ticket0',async()=>{
-  const f=mount([{...order(1),total:null}]);await screen.findByText('#1');expect(screen.queryByText('R$ 0,00')).not.toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();
- });
+const observation = { source: "sankhya", readOnly: true, readAt: "2026-10-25T13:28:00.000Z" };
+function order(id: number): ERPRow {
+  return {
+    id: `sankhya:order:${id}`,
+    source: "observado",
+    readOnly: true,
+    number: String(id),
+    date: "2026-10-25",
+    customerId: `sankhya:customer:${(id % 2) + 1}`,
+    customerName: `Cliente documental ${(id % 2) + 1}`,
+    sellerCode: id % 2 ? 34 : 12,
+    sellerName: "Homônimo",
+    total: "0.1",
+    status: "confirmado",
+    operationName: "Venda normal",
+    erp: {
+      source: "sankhya",
+      companyCode: 1,
+      documentCode: id,
+      movement: "P",
+      operationCode: 1001,
+      statusCode: "L",
+    },
+  };
+}
+function fakeERP(rows = Array.from({ length: 65 }, (_, i) => order(i + 1))) {
+  const customers = [1, 2].map((n) => ({
+    id: `sankhya:customer:${n}`,
+    code: String(n),
+    name: `Cliente documental ${n}`,
+    active: true,
+  }));
+  const sellers = [34, 12].map((n) => ({ id: `sankhya:seller:${n}`, code: n, name: "Homônimo" }));
+  const transport = vi.fn(
+    async ({ operation, query }: import("../test/erp-fixture-types").FixtureRequest) => {
+      if (operation === "record") {
+        const r = query.resource === "sellers" ? sellers : customers;
+        return {
+          error: null,
+          data: {
+            ...observation,
+            record: r.find((x) => x.id === query.id || x.code === query.id) || null,
+          },
+        };
+      }
+      if (operation === "window") {
+        const r = [...(query.resource === "sellers" ? sellers : customers)].sort(
+          (a, b) => Number(a.code) - Number(b.code),
+        );
+        return {
+          error: null,
+          data: {
+            ...observation,
+            items: r.slice(query.offset, query.offset + query.limit),
+            offset: query.offset,
+            total: r.length,
+            totalWithoutSearch: r.length,
+          },
+        };
+      }
+      if (operation !== "sales-report") throw Error("Operação não esperada no relatório");
+      let filtered = rows.filter(
+        (r) =>
+          (!query.customerId || r["customerId"] === query.customerId) &&
+          (!query.sellerCode || r["sellerCode"] === query.sellerCode) &&
+          (!query.from || String(r["date"]) >= query.from) &&
+          (!query.to || String(r["date"]) <= query.to),
+      );
+      const group = (source: ERPRow[]): ERPRow[] => {
+        if (!query.groupBy) return source;
+        const groups = new Map<unknown, ERPRow[]>();
+        for (const r of source) {
+          const code =
+            query.groupBy === "seller"
+              ? r["sellerCode"]
+              : Number(String(r["customerId"]).split(":").at(-1));
+          groups.set(code, [...(groups.get(code) || []), r]);
+        }
+        return [...groups].map(([code, records]) => ({
+          id: `sankhya:sales:${query.groupBy}:${code}`,
+          groupBy: query.groupBy,
+          groupCode: code,
+          name: query.groupBy === "seller" ? "Homônimo" : `Cliente documental ${code}`,
+          count: records.length,
+          total: records.some((r) => r["total"] === null)
+            ? null
+            : sumERPDecimals(records.map((r) => String(r["total"]))),
+          ...(query.productMix
+            ? {
+                qty: records.some((r) => r["testProducts"] == null)
+                  ? null
+                  : new Set(records.flatMap((r) => r["testProducts"] as string[])).size,
+              }
+            : {}),
+        }));
+      };
+      const totalWithoutSearch = group(filtered).length;
+      if (query.search)
+        filtered = filtered.filter((r) =>
+          foldERPText([r["number"], r["customerName"], r["sellerName"]].join(" ")).includes(
+            foldERPText(query.search),
+          ),
+        );
+      const missing = filtered.filter((r) => r["total"] === null).length;
+      const summary = {
+        documentCount: filtered.length,
+        documentAmount: missing ? null : sumERPDecimals(filtered.map((r) => String(r["total"]))),
+        missingAmountCount: missing,
+        amountField: "TGFCAB.VLRNOTA",
+        headerCountedOnce: true,
+        atomicSnapshot: false,
+      };
+      let selected = group(filtered);
+      if (query.sort) {
+        const key =
+          query.sort === "customer"
+            ? "customerName"
+            : query.sort === "seller"
+              ? "sellerName"
+              : query.sort;
+        selected = [...selected].sort(
+          (a, b) =>
+            (key === "total" && typeof a[key] === "string" && typeof b[key] === "string"
+              ? decimalUnits(a[key]) < decimalUnits(b[key])
+                ? -1
+                : decimalUnits(a[key]) > decimalUnits(b[key])
+                  ? 1
+                  : 0
+              : String(a[key]).localeCompare(String(b[key]), "pt-BR", { numeric: true })) *
+            (query.direction === "desc" ? -1 : 1),
+        );
+      }
+      return {
+        error: null,
+        data: {
+          ...observation,
+          items: selected.slice(query.offset, query.offset + query.limit),
+          total: selected.length,
+          totalWithoutSearch,
+          offset: query.offset,
+          summary,
+          salesPolicy: STANDARD_SALES_REPORT_POLICY,
+          ...(query.productMix
+            ? {
+                productCountPolicy: {
+                  field: "TGFITE.CODPROD",
+                  distinctPerCustomer: true,
+                  quantitiesAdded: false,
+                  missingItems: "unavailable",
+                },
+              }
+            : {}),
+          companyCodes: [1],
+          groupBy: query.groupBy ?? null,
+        },
+      };
+    },
+  );
+  return {
+    client: createERPClient(transport as unknown as import("../lib/erp-online").ERPTransport),
+    transport,
+    rows,
+  };
+}
+function mount(rows?: ERPRow[], route = "vendas") {
+  location.hash = "#/relatorios/" + route;
+  const f = fakeERP(rows);
+  const state = createAppState({
+    orders: [
+      {
+        id: "manual",
+        number: "MANUAL-NÃO-SOMAR",
+        total: 999999,
+        type: "Venda",
+        status: "Concluído",
+        seller: "Homônimo",
+      },
+    ],
+  });
+  const persist = vi.fn();
+  const view = render(
+    <SulApp initialState={state} online={f.client} persist={persist} onSignOut={vi.fn()} />,
+  );
+  return { ...view, ...f, persist, state };
+}
+beforeEach(() => {
+  chartSpy.mockClear();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private callback: (entries: ResizeObserverEntry[]) => void) {}
+      observe() {
+        this.callback([{ contentRect: { width: 900 } }] as ResizeObserverEntry[]);
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.removeAttribute("open");
+  };
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  location.hash = "";
+});
+async function selectGroup(label: string) {
+  fireEvent.click(screen.getByRole("combobox", { name: "Agrupar por" }));
+  const option = await screen.findByRole("option", { name: label });
+  fireEvent.pointerDown(option, { pointerType: "mouse" });
+  fireEvent.click(option);
+}
+describe("Vendas na interface existente", () => {
+  it("página inicial e KPIs usam o agregado integral de65 pedidos; não os10 visíveis ou manuais", async () => {
+    const f = mount();
+    await screen.findByText("R$ 6,50");
+    expect(screen.getByText("#1")).toBeInTheDocument();
+    expect(screen.queryByText("#11")).not.toBeInTheDocument();
+    expect(screen.queryByText("#MANUAL-NÃO-SOMAR")).not.toBeInTheDocument();
+    expect(screen.getAllByText("R$ 0,10")).toHaveLength(11);
+    expect(
+      f.transport.mock.calls.every(([b]) => b.operation === "sales-report" && b.query.limit <= 50),
+    ).toBe(true);
+    expect(f.state["orders"]).toHaveLength(1);
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("agrupa vendedores homônimos por código, sem reduzir o KPI a dois grupos", async () => {
+    const f = mount();
+    await screen.findByText("R$ 6,50");
+    await selectGroup("Vendedor");
+    await waitFor(() => expect(f.transport.mock.calls.at(-1)?.[0].query.groupBy).toBe("seller"));
+    await waitFor(() => expect(screen.getAllByText("Homônimo")).toHaveLength(2));
+    expect(screen.getByText("R$ 6,50")).toBeInTheDocument();
+    expect(screen.getByText("33")).toBeInTheDocument();
+    expect(screen.getByText("32")).toBeInTheDocument();
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("agrupa por cliente e preserva retorno aos detalhes, mesmo após ordenação anterior", async () => {
+    const f = mount();
+    await screen.findByText("R$ 6,50");
+    fireEvent.click(screen.getByRole("button", { name: /Pedido/ }));
+    await selectGroup("Cliente");
+    await waitFor(() => expect(f.transport.mock.calls.at(-1)?.[0].query.groupBy).toBe("customer"));
+    expect(f.transport.mock.calls.at(-1)?.[0].query.sort).not.toBe("number");
+    await selectGroup("Sem agrupamento");
+    await screen.findByText("#1");
+    expect(f.transport.mock.calls.at(-1)?.[0].query.groupBy).toBeUndefined();
+  });
+  it("busca no servidor, limpa KPIs antigos e mantém o campo para nova busca", async () => {
+    const f = mount();
+    await screen.findByText("R$ 6,50");
+    const input = screen.getByPlaceholderText("Filtrar…");
+    fireEvent.change(input, { target: { value: "Cliente documental 1" } });
+    await screen.findByText("R$ 3,20");
+    expect(input).toBeInTheDocument();
+    expect(screen.queryByText("R$ 6,50")).not.toBeInTheDocument();
+    expect(f.transport.mock.calls.at(-1)?.[0].query.search).toBe("Cliente documental 1");
+  });
+  it("filtra cliente no controle real e não carrega produtos/pedidos em arrays canônicos", async () => {
+    const f = mount();
+    await screen.findByText("R$ 6,50");
+    fireEvent.click(screen.getByRole("button", { name: "Filtros" }));
+    fireEvent.click(await screen.findByRole("combobox", { name: "Cliente" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Cliente documental 1 (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar filtros" }));
+    await screen.findByText("R$ 3,20");
+    expect(f.transport.mock.calls.at(-1)?.[0].query.customerId).toBe("sankhya:customer:1");
+    expect(f.transport.mock.calls.every(([b]) => b.query.resource !== "products")).toBe(true);
+    expect(f.state["customers"]).toEqual([]);
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("filtra vendedor por código mesmo com nomes idênticos, sem escolher identidade comercial", async () => {
+    const f = mount();
+    await screen.findByText("R$ 6,50");
+    fireEvent.click(screen.getByRole("button", { name: "Filtros" }));
+    fireEvent.click(await screen.findByRole("combobox", { name: "Vendedor" }));
+    const options = await screen.findAllByRole("option", { name: "Homônimo" });
+    fireEvent.click(options[1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar filtros" }));
+    await waitFor(() => expect(f.transport.mock.calls.at(-1)?.[0].query.sellerCode).toBe(34));
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("erro remoto não transforma indicador em zero nem mantém valor antigo", async () => {
+    const f = mount();
+    await screen.findByText("R$ 6,50");
+    f.transport.mockRejectedValue(new Error("falha sintética"));
+    fireEvent.change(screen.getByPlaceholderText("Filtrar…"), { target: { value: "novo" } });
+    await screen.findByText("Consulta ERP indisponível. Tente novamente.");
+    expect(screen.queryByText("R$ 6,50")).not.toBeInTheDocument();
+    expect(screen.queryByText("R$ 0,00")).not.toBeInTheDocument();
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("CSV pelos controles originais contém65 registros e as sete colunas, não só a página", async () => {
+    const create = vi.fn((_blob: Blob) => "blob:csv-vendas");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const f = mount();
+    await screen.findByText("R$ 6,50");
+    fireEvent.click(screen.getByRole("button", { name: "Exportar CSV" }));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    const blob = create.mock.calls[0]![0] as Blob;
+    const text = await new Promise<string>((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.readAsText(blob);
+    });
+    expect(text.split("\r\n")).toHaveLength(66);
+    expect(text).toContain("number;date;customer;seller;delivery;total;cargoStatus");
+    expect(text).toContain('"65";"2026-10-25"');
+    expect(text).not.toContain("MANUAL-NÃO-SOMAR");
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+});
+describe("Contrato fixo de vendas e exportação coerente", () => {
+  it("propaga período, situação e códigos; entrada malformada não retira o filtro", () => {
+    expect(
+      salesReportQuery(
+        {
+          customer: "sankhya:customer:1",
+          seller: "sankhya:seller:34",
+          status: "confirmado",
+          from: "2026-10-01",
+          to: "2026-10-25",
+        },
+        "vendedor",
+      ),
+    ).toEqual({
+      customerId: "sankhya:customer:1",
+      sellerCode: 34,
+      status: "confirmado",
+      from: "2026-10-01",
+      to: "2026-10-25",
+      groupBy: "seller",
+    });
+    expect(salesReportQuery({ seller: "Homônimo" }, "nenhum").sellerCode).toBeNaN();
+  });
+  it("SDK recusa resumo sem política, notaV, dinheiro binário ou número de documentos incoerente", async () => {
+    const f = fakeERP([order(1)]);
+    const original = await f.client.salesReport({ resource: "orders", offset: 0, limit: 10 });
+    for (const bad of [
+      { salesPolicy: null },
+      { summary: { ...original.summary, documentAmount: 0.1 } },
+      { summary: { ...original.summary, documentCount: 2 } },
+      { items: [{ ...order(1), erp: { ...(order(1)["erp"] as ERPRow), movement: "V" } }] },
+    ]) {
+      const c = createERPClient(async () => ({ error: null, data: { ...original, ...bad } }));
+      await expect(
+        c.salesReport({ resource: "orders", offset: 0, limit: 10 }),
+      ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    }
+  });
+  it("exportação recusa mudança financeira com contagem idêntica entre janelas", async () => {
+    const f = fakeERP();
+    const original = f.client.salesReport.bind(f.client);
+    vi.spyOn(f.client, "salesReport").mockImplementation(async (q) => {
+      const r = await original(q);
+      return q.offset ? { ...r, summary: { ...r.summary, documentAmount: "999" } } : r;
+    });
+    await expect(
+      exportERPRows(
+        { client: f.client, resource: "orders", salesReport: {} },
+        { resource: "orders" },
+        [],
+        () => {},
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+  it("ausência monetária preserva documento/contagem, não produz valor ou ticket0", async () => {
+    const f = mount([{ ...order(1), total: null }]);
+    await screen.findByText("#1");
+    expect(screen.queryByText("R$ 0,00")).not.toBeInTheDocument();
+    expect(f.persist).not.toHaveBeenCalled();
+  });
 });
 
-async function chartContext(f:ReturnType<typeof fakeERP>,query:ERPSalesQuery={resource:'orders',offset:0,limit:10}):Promise<SalesChartContext>{const w=await f.client.salesReport(query);return{summary:w.summary,source:{query,companyCodes:w.companyCodes}};}
-const chartData=()=>chartSpy.mock.calls.at(-1)?.[0].data as {id:string;total:number;nativeTotal:string;vendedor:string}[];
-describe('Agregados integrais do gráfico de vendas',()=>{
- it('preserva dois vendedores homônimos por código e soma decimal exata dos65 pedidos',async()=>{const f=fakeERP(),c=await chartContext(f),rows=await readERPSalesChart(f.client,c);expect(rows).toHaveLength(2);expect(new Set(rows.map(r=>r.id)).size).toBe(2);expect(rows.map(r=>r.vendedor)).toEqual(['Homônimo','Homônimo']);expect(sumERPDecimals(rows.map(r=>r.nativeTotal))).toBe('6.5');expect(rows.map(r=>r.total)).toEqual([3.3,3.2]);expect(f.rows).toHaveLength(65);});
- it('lê61 grupos em janelas50/11 sem ler61 históricos ou carteiras',async()=>{const f=fakeERP(Array.from({length:61},(_,i)=>({...order(i+1),sellerCode:i+1}))),c=await chartContext(f);f.transport.mockClear();const rows=await readERPSalesChart(f.client,c);expect(rows).toHaveLength(61);expect(f.transport.mock.calls.map(([b])=>[b.operation,b.query.groupBy,b.query.offset,b.query.limit])).toEqual([['sales-report','seller',0,50],['sales-report','seller',50,50]]);});
- it('usa a busca/filtros da tabela mas mantém gráfico por vendedor quando a tabela agrupa por cliente',async()=>{const f=fakeERP(),c=await chartContext(f,{resource:'orders',offset:0,limit:10,customerId:'sankhya:customer:1',sellerCode:12,companyCode:1,from:'2026-10-01',to:'2026-10-25',status:'confirmado',search:'Cliente documental 1',groupBy:'customer',sort:'total',direction:'desc'});f.transport.mockClear();expect(await readERPSalesChart(f.client,c)).toHaveLength(1);expect(f.transport.mock.calls[0]?.[0].query).toMatchObject({resource:'orders',customerId:'sankhya:customer:1',sellerCode:12,companyCode:1,from:'2026-10-01',to:'2026-10-25',status:'confirmado',search:'Cliente documental 1',groupBy:'seller',sort:'name',direction:'asc',offset:0,limit:50});});
- it('ausência monetária deixa gráfico indisponível sem fabricar zero ou consultar outro universo',async()=>{const f=fakeERP([{...order(1),total:null}]),c=await chartContext(f);f.transport.mockClear();expect(await readERPSalesChart(f.client,c)).toEqual([]);expect(f.transport).not.toHaveBeenCalled();});
- it('zero documental observado não exige uma leitura redundante de grupos',async()=>{const f=fakeERP([]),c=await chartContext(f);f.transport.mockClear();expect(await readERPSalesChart(f.client,c)).toEqual([]);expect(f.transport).not.toHaveBeenCalled();});
- for(const scenario of ['resumo','filiais','contagem','valor'] as const)it('recusa divergência de '+scenario+' sem aceitar gráfico parcial',async()=>{const f=fakeERP(),c=await chartContext(f),original=f.client.salesReport.bind(f.client);vi.spyOn(f.client,'salesReport').mockImplementation(async q=>{const w=await original(q);return scenario==='resumo'?{...w,summary:{...w.summary,documentAmount:'9'}}:scenario==='filiais'?{...w,companyCodes:[4]}:{...w,items:w.items.map((r,i)=>i?r:{...r,...(scenario==='contagem'?{count:1}:{total:'9'})})};});await expect(readERPSalesChart(f.client,c)).rejects.toMatchObject({code:'INVALID_RESPONSE'});});
- for(const scenario of ['duplicado','contagem_alterada'] as const)it('recusa '+scenario+' entre janelas de grupos',async()=>{const f=fakeERP(Array.from({length:61},(_,i)=>({...order(i+1),sellerCode:i+1}))),c=await chartContext(f),original=f.client.salesReport.bind(f.client);vi.spyOn(f.client,'salesReport').mockImplementation(async q=>{const w=await original(q);return !q.offset?w:scenario==='duplicado'?{...w,items:[{...w.items[0],id:'sankhya:sales:seller:1'},...w.items.slice(1)]}:{...w,total:w.total+1};});await expect(readERPSalesChart(f.client,c)).rejects.toMatchObject({code:'INVALID_RESPONSE'});});
- it('cancela antes de iniciar consulta sem reutilizar resposta anterior',async()=>{const f=fakeERP(),c=await chartContext(f);f.transport.mockClear();await expect(readERPSalesChart(f.client,c,()=>{throw Object.assign(Error('cancelado'),{code:'REQUEST_CANCELLED'});})).rejects.toMatchObject({code:'REQUEST_CANCELLED'});expect(f.transport).not.toHaveBeenCalled();});
- it.each(['0','0.1','0.000000001','-10.015','9007199254740991'])('converte%s somente para coordenada de apresentação, mantendo total nativo separado',value=>{expect(Number.isFinite(salesChartCoordinate(value))).toBe(true);});
- it.each(['9007199254740993','0.1234567891','NaN','1e2'])('não plota valor%s incompatível ou com perda no percurso decimal',value=>{expect(()=>salesChartCoordinate(value)).toThrow();});
- it('resposta assíncrona da fonte anterior não reaparece após invalidar contexto',async()=>{const f=fakeERP(),c=await chartContext(f),original=f.client.salesReport.bind(f.client);let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);vi.spyOn(f.client,'salesReport').mockImplementation(async q=>{await gate;return original(q);});const hook=renderHook(({context}:{context:SalesChartContext|undefined})=>useERPSalesChart(f.client,context),{initialProps:{context:c as SalesChartContext|undefined}});hook.rerender({context:undefined});await act(async()=>{release();await gate;});expect(hook.result.current).toEqual([]);});
+async function chartContext(
+  f: ReturnType<typeof fakeERP>,
+  query: ERPSalesQuery = { resource: "orders", offset: 0, limit: 10 },
+): Promise<SalesChartContext> {
+  const w = await f.client.salesReport(query);
+  return { summary: w.summary, source: { query, companyCodes: w.companyCodes } };
+}
+const chartData = () =>
+  chartSpy.mock.calls.at(-1)?.[0].data as {
+    id: string;
+    total: number;
+    nativeTotal: string;
+    vendedor: string;
+  }[];
+describe("Agregados integrais do gráfico de vendas", () => {
+  it("preserva dois vendedores homônimos por código e soma decimal exata dos65 pedidos", async () => {
+    const f = fakeERP(),
+      c = await chartContext(f),
+      rows = await readERPSalesChart(f.client, c);
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(2);
+    expect(rows.map((r) => r.vendedor)).toEqual(["Homônimo", "Homônimo"]);
+    expect(sumERPDecimals(rows.map((r) => r.nativeTotal))).toBe("6.5");
+    expect(rows.map((r) => r.total)).toEqual([3.3, 3.2]);
+    expect(f.rows).toHaveLength(65);
+  });
+  it("lê61 grupos em janelas50/11 sem ler61 históricos ou carteiras", async () => {
+    const f = fakeERP(
+        Array.from({ length: 61 }, (_, i) => ({ ...order(i + 1), sellerCode: i + 1 })),
+      ),
+      c = await chartContext(f);
+    f.transport.mockClear();
+    const rows = await readERPSalesChart(f.client, c);
+    expect(rows).toHaveLength(61);
+    expect(
+      f.transport.mock.calls.map(([b]) => [
+        b.operation,
+        b.query.groupBy,
+        b.query.offset,
+        b.query.limit,
+      ]),
+    ).toEqual([
+      ["sales-report", "seller", 0, 50],
+      ["sales-report", "seller", 50, 50],
+    ]);
+  });
+  it("usa a busca/filtros da tabela mas mantém gráfico por vendedor quando a tabela agrupa por cliente", async () => {
+    const f = fakeERP(),
+      c = await chartContext(f, {
+        resource: "orders",
+        offset: 0,
+        limit: 10,
+        customerId: "sankhya:customer:1",
+        sellerCode: 12,
+        companyCode: 1,
+        from: "2026-10-01",
+        to: "2026-10-25",
+        status: "confirmado",
+        search: "Cliente documental 1",
+        groupBy: "customer",
+        sort: "total",
+        direction: "desc",
+      });
+    f.transport.mockClear();
+    expect(await readERPSalesChart(f.client, c)).toHaveLength(1);
+    expect(f.transport.mock.calls[0]?.[0].query).toMatchObject({
+      resource: "orders",
+      customerId: "sankhya:customer:1",
+      sellerCode: 12,
+      companyCode: 1,
+      from: "2026-10-01",
+      to: "2026-10-25",
+      status: "confirmado",
+      search: "Cliente documental 1",
+      groupBy: "seller",
+      sort: "name",
+      direction: "asc",
+      offset: 0,
+      limit: 50,
+    });
+  });
+  it("ausência monetária deixa gráfico indisponível sem fabricar zero ou consultar outro universo", async () => {
+    const f = fakeERP([{ ...order(1), total: null }]),
+      c = await chartContext(f);
+    f.transport.mockClear();
+    expect(await readERPSalesChart(f.client, c)).toEqual([]);
+    expect(f.transport).not.toHaveBeenCalled();
+  });
+  it("zero documental observado não exige uma leitura redundante de grupos", async () => {
+    const f = fakeERP([]),
+      c = await chartContext(f);
+    f.transport.mockClear();
+    expect(await readERPSalesChart(f.client, c)).toEqual([]);
+    expect(f.transport).not.toHaveBeenCalled();
+  });
+  for (const scenario of ["resumo", "filiais", "contagem", "valor"] as const)
+    it("recusa divergência de " + scenario + " sem aceitar gráfico parcial", async () => {
+      const f = fakeERP(),
+        c = await chartContext(f),
+        original = f.client.salesReport.bind(f.client);
+      vi.spyOn(f.client, "salesReport").mockImplementation(async (q) => {
+        const w = await original(q);
+        return scenario === "resumo"
+          ? { ...w, summary: { ...w.summary, documentAmount: "9" } }
+          : scenario === "filiais"
+            ? { ...w, companyCodes: [4] }
+            : {
+                ...w,
+                items: w.items.map((r, i) =>
+                  i ? r : { ...r, ...(scenario === "contagem" ? { count: 1 } : { total: "9" }) },
+                ),
+              };
+      });
+      await expect(readERPSalesChart(f.client, c)).rejects.toMatchObject({
+        code: "INVALID_RESPONSE",
+      });
+    });
+  for (const scenario of ["duplicado", "contagem_alterada"] as const)
+    it("recusa " + scenario + " entre janelas de grupos", async () => {
+      const f = fakeERP(
+          Array.from({ length: 61 }, (_, i) => ({ ...order(i + 1), sellerCode: i + 1 })),
+        ),
+        c = await chartContext(f),
+        original = f.client.salesReport.bind(f.client);
+      vi.spyOn(f.client, "salesReport").mockImplementation(async (q) => {
+        const w = await original(q);
+        return !q.offset
+          ? w
+          : scenario === "duplicado"
+            ? {
+                ...w,
+                items: [{ ...w.items[0], id: "sankhya:sales:seller:1" }, ...w.items.slice(1)],
+              }
+            : { ...w, total: w.total + 1 };
+      });
+      await expect(readERPSalesChart(f.client, c)).rejects.toMatchObject({
+        code: "INVALID_RESPONSE",
+      });
+    });
+  it("cancela antes de iniciar consulta sem reutilizar resposta anterior", async () => {
+    const f = fakeERP(),
+      c = await chartContext(f);
+    f.transport.mockClear();
+    await expect(
+      readERPSalesChart(f.client, c, () => {
+        throw Object.assign(Error("cancelado"), { code: "REQUEST_CANCELLED" });
+      }),
+    ).rejects.toMatchObject({ code: "REQUEST_CANCELLED" });
+    expect(f.transport).not.toHaveBeenCalled();
+  });
+  it.each(["0", "0.1", "0.000000001", "-10.015", "9007199254740991"])(
+    "converte%s somente para coordenada de apresentação, mantendo total nativo separado",
+    (value) => {
+      expect(Number.isFinite(salesChartCoordinate(value))).toBe(true);
+    },
+  );
+  it.each(["9007199254740993", "0.1234567891", "NaN", "1e2"])(
+    "não plota valor%s incompatível ou com perda no percurso decimal",
+    (value) => {
+      expect(() => salesChartCoordinate(value)).toThrow();
+    },
+  );
+  it("resposta assíncrona da fonte anterior não reaparece após invalidar contexto", async () => {
+    const f = fakeERP(),
+      c = await chartContext(f),
+      original = f.client.salesReport.bind(f.client);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    vi.spyOn(f.client, "salesReport").mockImplementation(async (q) => {
+      await gate;
+      return original(q);
+    });
+    const hook = renderHook(
+      ({ context }: { context: SalesChartContext | undefined }) =>
+        useERPSalesChart(f.client, context),
+      { initialProps: { context: c as SalesChartContext | undefined } },
+    );
+    hook.rerender({ context: undefined });
+    await act(async () => {
+      release();
+      await gate;
+    });
+    expect(hook.result.current).toEqual([]);
+  });
 });
-describe('Resumo e versão anterior usam a fonte remota, sem redesenho',()=>{
- for(const route of ['resumo','vendas-anterior'])it(route+': tabela de65 pedidos e gráfico integral, nunca pedidos manuais ou página10',async()=>{const f=mount(undefined,route);await screen.findByText('#1');await waitFor(()=>expect(chartData()).toHaveLength(2));expect(sumERPDecimals(chartData().map(r=>r.nativeTotal))).toBe('6.5');expect(screen.queryByText('#MANUAL-NÃO-SOMAR')).not.toBeInTheDocument();expect(screen.queryByText('#11')).not.toBeInTheDocument();expect(f.transport.mock.calls.every(([b])=>b.operation==='sales-report'&&b.query.limit<=50)).toBe(true);expect(f.persist).not.toHaveBeenCalled();});
- it('busca recompõe gráfico e KPIs sobre o mesmo recorte integral do servidor',async()=>{mount(undefined,'resumo');await waitFor(()=>expect(chartData()).toHaveLength(2));fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'Cliente documental 1'}});await waitFor(()=>expect(chartData().map(r=>r.nativeTotal)).toEqual(['3.2']));expect(screen.getAllByText('R$ 3,20').some(el=>el.tagName==='DIV')).toBe(true);expect(screen.queryByText('R$ 6,50')).not.toBeInTheDocument();});
- it('mudar grupo da tabela para cliente não muda a dimensão por vendedor do gráfico',async()=>{const f=mount(undefined,'resumo');await waitFor(()=>expect(chartData()).toHaveLength(2));await selectGroup('Cliente');await waitFor(()=>expect(f.transport.mock.calls.some(([b])=>b.query.groupBy==='customer')).toBe(true));await waitFor(()=>expect(chartData()).toHaveLength(2));expect(chartData().every(r=>r.id.startsWith('sankhya:sales:seller:'))).toBe(true);expect(screen.getByText('R$ 6,50')).toBeInTheDocument();});
- it('falha na nova busca limpa gráfico/indicadores antigos sem mostrar dinheiro zero',async()=>{const f=mount(undefined,'resumo');await waitFor(()=>expect(chartData()).toHaveLength(2));f.transport.mockRejectedValue(Error('falha sintética'));fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'novo'}});await screen.findByText('Consulta ERP indisponível. Tente novamente.');expect(chartData()).toEqual([]);expect(screen.queryByText('R$ 6,50')).not.toBeInTheDocument();expect(screen.queryAllByText('R$ 0,00').filter(el=>el.tagName==='DIV')).toHaveLength(0);});
- it('CSV do resumo conserva65 detalhes e sete campos usando exportação existente',async()=>{const create=vi.fn((_blob:Blob)=>'blob:csv-resumo');Object.defineProperty(URL,'createObjectURL',{configurable:true,value:create});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});const f=mount(undefined,'resumo');await waitFor(()=>expect(chartData()).toHaveLength(2));fireEvent.click(screen.getByRole('button',{name:'Exportar CSV'}));await waitFor(()=>expect(create).toHaveBeenCalledOnce());const text=await new Promise<string>(resolve=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.readAsText(create.mock.calls[0]![0]);});expect(text.split('\r\n')).toHaveLength(66);expect(text).toContain('number;date;customer;seller;delivery;total;cargoStatus');expect(text).not.toContain('MANUAL-NÃO-SOMAR');expect(f.persist).not.toHaveBeenCalled();});
+describe("Resumo e versão anterior usam a fonte remota, sem redesenho", () => {
+  for (const route of ["resumo", "vendas-anterior"])
+    it(
+      route + ": tabela de65 pedidos e gráfico integral, nunca pedidos manuais ou página10",
+      async () => {
+        const f = mount(undefined, route);
+        await screen.findByText("#1");
+        await waitFor(() => expect(chartData()).toHaveLength(2));
+        expect(sumERPDecimals(chartData().map((r) => r.nativeTotal))).toBe("6.5");
+        expect(screen.queryByText("#MANUAL-NÃO-SOMAR")).not.toBeInTheDocument();
+        expect(screen.queryByText("#11")).not.toBeInTheDocument();
+        expect(
+          f.transport.mock.calls.every(
+            ([b]) => b.operation === "sales-report" && b.query.limit <= 50,
+          ),
+        ).toBe(true);
+        expect(f.persist).not.toHaveBeenCalled();
+      },
+    );
+  it("busca recompõe gráfico e KPIs sobre o mesmo recorte integral do servidor", async () => {
+    mount(undefined, "resumo");
+    await waitFor(() => expect(chartData()).toHaveLength(2));
+    fireEvent.change(screen.getByPlaceholderText("Filtrar…"), {
+      target: { value: "Cliente documental 1" },
+    });
+    await waitFor(() => expect(chartData().map((r) => r.nativeTotal)).toEqual(["3.2"]));
+    expect(screen.getAllByText("R$ 3,20").some((el) => el.tagName === "DIV")).toBe(true);
+    expect(screen.queryByText("R$ 6,50")).not.toBeInTheDocument();
+  });
+  it("mudar grupo da tabela para cliente não muda a dimensão por vendedor do gráfico", async () => {
+    const f = mount(undefined, "resumo");
+    await waitFor(() => expect(chartData()).toHaveLength(2));
+    await selectGroup("Cliente");
+    await waitFor(() =>
+      expect(f.transport.mock.calls.some(([b]) => b.query.groupBy === "customer")).toBe(true),
+    );
+    await waitFor(() => expect(chartData()).toHaveLength(2));
+    expect(chartData().every((r) => r.id.startsWith("sankhya:sales:seller:"))).toBe(true);
+    expect(screen.getByText("R$ 6,50")).toBeInTheDocument();
+  });
+  it("falha na nova busca limpa gráfico/indicadores antigos sem mostrar dinheiro zero", async () => {
+    const f = mount(undefined, "resumo");
+    await waitFor(() => expect(chartData()).toHaveLength(2));
+    f.transport.mockRejectedValue(Error("falha sintética"));
+    fireEvent.change(screen.getByPlaceholderText("Filtrar…"), { target: { value: "novo" } });
+    await screen.findByText("Consulta ERP indisponível. Tente novamente.");
+    expect(chartData()).toEqual([]);
+    expect(screen.queryByText("R$ 6,50")).not.toBeInTheDocument();
+    expect(screen.queryAllByText("R$ 0,00").filter((el) => el.tagName === "DIV")).toHaveLength(0);
+  });
+  it("CSV do resumo conserva65 detalhes e sete campos usando exportação existente", async () => {
+    const create = vi.fn((_blob: Blob) => "blob:csv-resumo");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const f = mount(undefined, "resumo");
+    await waitFor(() => expect(chartData()).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: "Exportar CSV" }));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    const text = await new Promise<string>((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.readAsText(create.mock.calls[0]![0]);
+    });
+    expect(text.split("\r\n")).toHaveLength(66);
+    expect(text).toContain("number;date;customer;seller;delivery;total;cargoStatus");
+    expect(text).not.toContain("MANUAL-NÃO-SOMAR");
+    expect(f.persist).not.toHaveBeenCalled();
+  });
 });
 
 // Participação não é classificação ABC. Casos sintéticos, sem Auth ou escrita ERP.
-describe('Valores e participação da vista ABC, sem limiares inventados',()=>{
- it.each([
-  ['1','3','33%'],['1','8','13%'],['-1','8','-13%'],['1','-8','-13%'],['-1','-8','13%'],
-  ['0','2','0%'],['1','1000','0%'],['-1','1000','-0%'],['1','0',null],
-  [null,'2',null],['1',null,null],[1,'2',null],['NaN','2',null],['1e2','2',null],
-  ['4999999999999999999999999999','1000000000000000000000000000000','0%'],
- ] as const)('razão textual %s / %s sem ponto flutuante', (value,total,expected)=>{expect(formatERPShare(value,total)).toBe(expected);});
- const many=()=>Array.from({length:65},(_,i)=>({...order(i+1),customerId:`sankhya:customer:${i+1}`,customerName:`Cliente documental ${i+1}`}));
- it('pagina65 clientes com denominador integral6,5, nunca soma da página ou dados manuais',async()=>{
-  const f=mount(many(),'abc');await screen.findByText('Cliente documental 1');expect(screen.getAllByText('2%')).toHaveLength(10);expect(screen.getAllByText('A')).toHaveLength(10);expect(screen.getByText(/Curva ABC pelo critério Pareto adotado/)).toBeInTheDocument();expect(f.transport.mock.calls.every(([b])=>b.operation==='sales-report'&&b.query.groupBy==='customer'&&b.query.from===undefined&&b.query.to===undefined&&b.query.limit<=50)).toBe(true);expect(screen.queryByRole('combobox',{name:'Agrupar por'})).not.toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button',{name:/Próxima/}));await waitFor(()=>expect(f.transport.mock.calls.some(([b])=>b.query.offset===10)).toBe(true));await waitFor(()=>expect(screen.getAllByText('2%')).toHaveLength(10));expect(f.state['customers']).toEqual([]);
- });
- it('busca recompõe participação pelo novo agregado, sem curvaA/B/C automática',async()=>{
-  const f=mount(many(),'abc');await screen.findByText('Cliente documental 1');fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'Cliente documental 65'}});await screen.findByText('100%');expect(screen.queryByText('2%')).not.toBeInTheDocument();expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({groupBy:'customer',search:'Cliente documental 65'});expect(screen.getByText('C')).toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();
- });
- it('cliente selecionado usa código e mesma venda padrão; não importa a carteira inteira',async()=>{
-  const f=mount(undefined,'abc');await screen.findByText('49%');fireEvent.click(screen.getByRole('button',{name:'Filtros'}));fireEvent.click(await screen.findByRole('combobox',{name:'Cliente'}));fireEvent.click(await screen.findByRole('option',{name:'Cliente documental 1 (1)'}));fireEvent.click(screen.getByRole('button',{name:'Aplicar filtros'}));await screen.findByText('100%');expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({customerId:'sankhya:customer:1',groupBy:'customer'});expect(f.persist).not.toHaveBeenCalled();
- });
- it('denominador ausente deixa participação indisponível, sem0% ou classificação',async()=>{
-  const f=mount([{...order(1),total:null},order(2)],'abc');await screen.findByText('Cliente documental 1');expect(screen.queryByText('0%')).not.toBeInTheDocument();expect(screen.queryByText('100%')).not.toBeInTheDocument();expect(screen.getAllByText('Não verificada')).toHaveLength(2);expect(f.persist).not.toHaveBeenCalled();
- });
- it('erro na busca limpa valores e participação anteriores sem fabricar zeros',async()=>{
-  const f=mount(many(),'abc');await screen.findByText('Cliente documental 1');f.transport.mockRejectedValue(Error('falha sintética'));fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'novo'}});await screen.findByText('Consulta ERP indisponível. Tente novamente.');expect(screen.queryByText('2%')).not.toBeInTheDocument();expect(screen.queryByText('0%')).not.toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();
- });
- it('ordenação por participação é nativa por valor, não ordenação textual da página',async()=>{
-  const f=mount([{...order(1),total:'1'},{...order(2),total:'3'}],'abc');await screen.findByText('25%');fireEvent.click(screen.getByRole('button',{name:/Participação no recorte/}));await waitFor(()=>expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({sort:'total',direction:'asc',groupBy:'customer'}));expect(f.transport.mock.calls.every(([b])=>b.query.sort!=='share')).toBe(true);
- });
- it('CSV integral contém65 grupos e quatro campos, preserva participação arredondada sem normalizar para100',async()=>{
-  const create=vi.fn((_blob:Blob)=>'blob:csv-abc');Object.defineProperty(URL,'createObjectURL',{configurable:true,value:create});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
-  const f=mount(many(),'abc');await screen.findByText('Cliente documental 1');fireEvent.click(screen.getByRole('button',{name:'Exportar CSV'}));await waitFor(()=>expect(create).toHaveBeenCalledOnce());const text=await new Promise<string>(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.readAsText(create.mock.calls[0]![0]);});expect(text.split('\r\n')).toHaveLength(66);expect(text).toContain('name;curve;total;share');expect(text).toContain('"Cliente documental 65";"C";"0.1";"2%"');expect(f.transport.mock.calls.filter(([b])=>b.query.limit===50&&b.query.sort===undefined).map(([b])=>b.query.offset)).toEqual([0,50]);expect(f.persist).not.toHaveBeenCalled();
- });
- it('exportação mantém códigos distintos de clientes homônimos e razão correta para denominador negativo',async()=>{
-  const f=fakeERP([{...order(1),total:'-1'},{...order(2),total:'-3'}]),original=f.client.salesReport.bind(f.client);vi.spyOn(f.client,'salesReport').mockImplementation(async q=>{const w=await original(q);return{...w,items:w.items.map(row=>({...row,name:'Homônimo'}))};});
-  const rows=await exportERPRows({client:f.client,resource:'orders',salesReport:{groupBy:'customer'},salesParticipation:true},{resource:'orders',groupBy:'customer',sort:'share',direction:'asc'},[],()=>{});expect(rows.map(r=>[r['id'],r['total'],r['share']])).toEqual([['sankhya:sales:customer:2','-1','25%'],['sankhya:sales:customer:1','-3','75%']]);expect(rows.map(r=>r['name'])).toEqual(['Homônimo','Homônimo']);expect(f.transport.mock.calls.slice(0,2).map(([b])=>[b.query.sort,b.query.direction])).toEqual([['total','asc'],['total','desc']]);
- });
- it('mudança financeira na janela invertida é recusada sem CSV parcial',async()=>{
-  const f=fakeERP([{...order(1),total:'-1'}]),original=f.client.salesReport.bind(f.client);vi.spyOn(f.client,'salesReport').mockImplementation(async q=>{const w=await original(q);return q.direction==='desc'?{...w,summary:{...w.summary,documentAmount:'-2'}}:w;});await expect(exportERPRows({client:f.client,resource:'orders',salesReport:{groupBy:'customer'},salesParticipation:true},{resource:'orders',groupBy:'customer',sort:'share',direction:'asc'},[],()=>{})).rejects.toMatchObject({code:'INVALID_RESPONSE'});
- });
- it('projeção fora de agrupamento por cliente falha antes de consultar outra fonte',async()=>{
-  const f=fakeERP();await expect(exportERPRows({client:f.client,resource:'orders',salesReport:{groupBy:'seller'},salesParticipation:true},{resource:'orders',groupBy:'seller'},[],()=>{})).rejects.toMatchObject({code:'INVALID_RESPONSE'});expect(f.transport).not.toHaveBeenCalled();
- });
+describe("Valores e participação da vista ABC, sem limiares inventados", () => {
+  it.each([
+    ["1", "3", "33%"],
+    ["1", "8", "13%"],
+    ["-1", "8", "-13%"],
+    ["1", "-8", "-13%"],
+    ["-1", "-8", "13%"],
+    ["0", "2", "0%"],
+    ["1", "1000", "0%"],
+    ["-1", "1000", "-0%"],
+    ["1", "0", null],
+    [null, "2", null],
+    ["1", null, null],
+    [1, "2", null],
+    ["NaN", "2", null],
+    ["1e2", "2", null],
+    ["4999999999999999999999999999", "1000000000000000000000000000000", "0%"],
+  ] as const)("razão textual %s / %s sem ponto flutuante", (value, total, expected) => {
+    expect(formatERPShare(value, total)).toBe(expected);
+  });
+  const many = () =>
+    Array.from({ length: 65 }, (_, i) => ({
+      ...order(i + 1),
+      customerId: `sankhya:customer:${i + 1}`,
+      customerName: `Cliente documental ${i + 1}`,
+    }));
+  it("pagina65 clientes com denominador integral6,5, nunca soma da página ou dados manuais", async () => {
+    const f = mount(many(), "abc");
+    await screen.findByText("Cliente documental 1");
+    expect(screen.getAllByText("2%")).toHaveLength(10);
+    expect(screen.getAllByText("A")).toHaveLength(10);
+    expect(screen.getByText(/Curva ABC pelo critério Pareto adotado/)).toBeInTheDocument();
+    expect(
+      f.transport.mock.calls.every(
+        ([b]) =>
+          b.operation === "sales-report" &&
+          b.query.groupBy === "customer" &&
+          b.query.from === undefined &&
+          b.query.to === undefined &&
+          b.query.limit <= 50,
+      ),
+    ).toBe(true);
+    expect(screen.queryByRole("combobox", { name: "Agrupar por" })).not.toBeInTheDocument();
+    expect(f.persist).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Próxima/ }));
+    await waitFor(() =>
+      expect(f.transport.mock.calls.some(([b]) => b.query.offset === 10)).toBe(true),
+    );
+    await waitFor(() => expect(screen.getAllByText("2%")).toHaveLength(10));
+    expect(f.state["customers"]).toEqual([]);
+  });
+  it("busca recompõe participação pelo novo agregado, sem curvaA/B/C automática", async () => {
+    const f = mount(many(), "abc");
+    await screen.findByText("Cliente documental 1");
+    fireEvent.change(screen.getByPlaceholderText("Filtrar…"), {
+      target: { value: "Cliente documental 65" },
+    });
+    await screen.findByText("100%");
+    expect(screen.queryByText("2%")).not.toBeInTheDocument();
+    expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({
+      groupBy: "customer",
+      search: "Cliente documental 65",
+    });
+    expect(screen.getByText("C")).toBeInTheDocument();
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("cliente selecionado usa código e mesma venda padrão; não importa a carteira inteira", async () => {
+    const f = mount(undefined, "abc");
+    await screen.findByText("49%");
+    fireEvent.click(screen.getByRole("button", { name: "Filtros" }));
+    fireEvent.click(await screen.findByRole("combobox", { name: "Cliente" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Cliente documental 1 (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar filtros" }));
+    await screen.findByText("100%");
+    expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({
+      customerId: "sankhya:customer:1",
+      groupBy: "customer",
+    });
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("denominador ausente deixa participação indisponível, sem0% ou classificação", async () => {
+    const f = mount([{ ...order(1), total: null }, order(2)], "abc");
+    await screen.findByText("Cliente documental 1");
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(screen.queryByText("100%")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Não verificada")).toHaveLength(2);
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("erro na busca limpa valores e participação anteriores sem fabricar zeros", async () => {
+    const f = mount(many(), "abc");
+    await screen.findByText("Cliente documental 1");
+    f.transport.mockRejectedValue(Error("falha sintética"));
+    fireEvent.change(screen.getByPlaceholderText("Filtrar…"), { target: { value: "novo" } });
+    await screen.findByText("Consulta ERP indisponível. Tente novamente.");
+    expect(screen.queryByText("2%")).not.toBeInTheDocument();
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("ordenação por participação é nativa por valor, não ordenação textual da página", async () => {
+    const f = mount(
+      [
+        { ...order(1), total: "1" },
+        { ...order(2), total: "3" },
+      ],
+      "abc",
+    );
+    await screen.findByText("25%");
+    fireEvent.click(screen.getByRole("button", { name: /Participação no recorte/ }));
+    await waitFor(() =>
+      expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({
+        sort: "total",
+        direction: "asc",
+        groupBy: "customer",
+      }),
+    );
+    expect(f.transport.mock.calls.every(([b]) => b.query.sort !== "share")).toBe(true);
+  });
+  it("CSV integral contém65 grupos e quatro campos, preserva participação arredondada sem normalizar para100", async () => {
+    const create = vi.fn((_blob: Blob) => "blob:csv-abc");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const f = mount(many(), "abc");
+    await screen.findByText("Cliente documental 1");
+    fireEvent.click(screen.getByRole("button", { name: "Exportar CSV" }));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    const text = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(create.mock.calls[0]![0]);
+    });
+    expect(text.split("\r\n")).toHaveLength(66);
+    expect(text).toContain("name;curve;total;share");
+    expect(text).toContain('"Cliente documental 65";"C";"0.1";"2%"');
+    expect(
+      f.transport.mock.calls
+        .filter(([b]) => b.query.limit === 50 && b.query.sort === undefined)
+        .map(([b]) => b.query.offset),
+    ).toEqual([0, 50]);
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("exportação mantém códigos distintos de clientes homônimos e razão correta para denominador negativo", async () => {
+    const f = fakeERP([
+        { ...order(1), total: "-1" },
+        { ...order(2), total: "-3" },
+      ]),
+      original = f.client.salesReport.bind(f.client);
+    vi.spyOn(f.client, "salesReport").mockImplementation(async (q) => {
+      const w = await original(q);
+      return { ...w, items: w.items.map((row) => ({ ...row, name: "Homônimo" })) };
+    });
+    const rows = await exportERPRows(
+      {
+        client: f.client,
+        resource: "orders",
+        salesReport: { groupBy: "customer" },
+        salesParticipation: true,
+      },
+      { resource: "orders", groupBy: "customer", sort: "share", direction: "asc" },
+      [],
+      () => {},
+    );
+    expect(rows.map((r) => [r["id"], r["total"], r["share"]])).toEqual([
+      ["sankhya:sales:customer:2", "-1", "25%"],
+      ["sankhya:sales:customer:1", "-3", "75%"],
+    ]);
+    expect(rows.map((r) => r["name"])).toEqual(["Homônimo", "Homônimo"]);
+    expect(
+      f.transport.mock.calls.slice(0, 2).map(([b]) => [b.query.sort, b.query.direction]),
+    ).toEqual([
+      ["total", "asc"],
+      ["total", "desc"],
+    ]);
+  });
+  it("mudança financeira na janela invertida é recusada sem CSV parcial", async () => {
+    const f = fakeERP([{ ...order(1), total: "-1" }]),
+      original = f.client.salesReport.bind(f.client);
+    vi.spyOn(f.client, "salesReport").mockImplementation(async (q) => {
+      const w = await original(q);
+      return q.direction === "desc" ? { ...w, summary: { ...w.summary, documentAmount: "-2" } } : w;
+    });
+    await expect(
+      exportERPRows(
+        {
+          client: f.client,
+          resource: "orders",
+          salesReport: { groupBy: "customer" },
+          salesParticipation: true,
+        },
+        { resource: "orders", groupBy: "customer", sort: "share", direction: "asc" },
+        [],
+        () => {},
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+  it("projeção fora de agrupamento por cliente falha antes de consultar outra fonte", async () => {
+    const f = fakeERP();
+    await expect(
+      exportERPRows(
+        {
+          client: f.client,
+          resource: "orders",
+          salesReport: { groupBy: "seller" },
+          salesParticipation: true,
+        },
+        { resource: "orders", groupBy: "seller" },
+        [],
+        () => {},
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    expect(f.transport).not.toHaveBeenCalled();
+  });
 });
 
 // Contrato/componente: não representa execução Oracle, sessão Auth ou criação pela UI real.
-describe('Produtos distintos por cliente na estrutura existente',()=>{
- const sample=(id:number,products:string[]|null=['500']):ERPRow=>({...order(id),customerId:`sankhya:customer:${id}`,customerName:`Cliente documental ${id}`,testProducts:products});
- const many=()=>Array.from({length:65},(_,i)=>sample(i+1,Array.from({length:i%3+1},(_,p)=>String(500+p))));
- const q:ERPSalesQuery={resource:'orders',offset:0,limit:10,groupBy:'customer',productMix:true};
- it('65 compradores remotos sem carteira replicada, pedido manual ou mês presumido',async()=>{const f=mount(many(),'mix');await screen.findByText('Cliente documental 1');expect(screen.getAllByText('R$ 0,10')).toHaveLength(10);expect(screen.getByRole('columnheader',{name:/Produtos diferentes com itens extraídos/})).toBeInTheDocument();expect(f.transport.mock.calls.every(([b])=>b.operation==='sales-report'&&b.query.groupBy==='customer'&&b.query.productMix===true&&b.query.from===undefined&&b.query.to===undefined&&b.query.limit<=50)).toBe(true);expect(screen.queryByRole('combobox',{name:'Agrupar por'})).not.toBeInTheDocument();expect(f.state['customers']).toEqual([]);expect(f.persist).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:/Próxima/}));await waitFor(()=>expect(f.transport.mock.calls.some(([b])=>b.query.offset===10)).toBe(true));});
- it('busca troca a base sem preencher comparação temporal',async()=>{const f=mount(many(),'mix');await screen.findByText('Cliente documental 1');fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'Cliente documental 65'}});await waitFor(()=>expect(screen.queryByText('Cliente documental 1')).not.toBeInTheDocument());await screen.findByText('Cliente documental 65');expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({productMix:true,groupBy:'customer',search:'Cliente documental 65'});expect(screen.getByText(/Não foram extraídas duas séries comparáveis/)).toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();});
- it('cliente é filtrado pelo código no controle existente',async()=>{const f=mount([sample(1),sample(2)],'mix');await screen.findByText('Cliente documental 1');fireEvent.click(screen.getByRole('button',{name:'Filtros'}));fireEvent.click(await screen.findByRole('combobox',{name:'Cliente'}));fireEvent.click(await screen.findByRole('option',{name:'Cliente documental 1 (1)'}));fireEvent.click(screen.getByRole('button',{name:'Aplicar filtros'}));await waitFor(()=>expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({customerId:'sankhya:customer:1',groupBy:'customer',productMix:true}));expect(f.persist).not.toHaveBeenCalled();});
- it('vendedor homônimo filtra CODVEND, não escolhe identidade de venda',async()=>{const f=mount([sample(1),sample(2)],'mix');await screen.findByText('Cliente documental 1');fireEvent.click(screen.getByRole('button',{name:'Filtros'}));fireEvent.click(await screen.findByRole('combobox',{name:'Vendedor'}));const options=await screen.findAllByRole('option',{name:'Homônimo'});fireEvent.click(options[1]!);fireEvent.click(screen.getByRole('button',{name:'Aplicar filtros'}));await waitFor(()=>expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({sellerCode:34,productMix:true}));expect(f.persist).not.toHaveBeenCalled();});
- it('itens ausentes ficam indisponíveis e valor permanece nativo, sem contagem zero',async()=>{const f=mount([{...sample(1,null),total:'12'}],'mix');await screen.findByText('Cliente documental 1');expect(screen.getByText('Não extraído')).toBeInTheDocument();expect(screen.getByText('R$ 12,00')).toBeInTheDocument();expect(screen.queryByText('0')).not.toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();});
- it('ordena número de produtos no servidor, não apenas os dez grupos visíveis',async()=>{const f=mount(many(),'mix');await screen.findByText('Cliente documental 1');fireEvent.click(screen.getByRole('button',{name:/Produtos diferentes com itens extraídos/}));await waitFor(()=>expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({sort:'qty',direction:'asc',productMix:true}));});
- it('falha remota limpa linhas antigas sem fabricar zero ou disparar escrita',async()=>{const f=mount(many(),'mix');await screen.findByText('Cliente documental 1');f.transport.mockRejectedValue(Error('falha sintética'));fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'novo'}});await screen.findByText('Consulta ERP indisponível. Tente novamente.');expect(screen.queryByText('Cliente documental 1')).not.toBeInTheDocument();expect(screen.queryByText('R$ 0,00')).not.toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();});
- it('CSV conserva65 grupos e três campos, usando janelas50/15 e fechamento1',async()=>{const create=vi.fn((_blob:Blob)=>'blob:csv-mix');Object.defineProperty(URL,'createObjectURL',{configurable:true,value:create});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});const f=mount(many(),'mix');await screen.findByText('Cliente documental 1');fireEvent.click(screen.getByRole('button',{name:'Exportar CSV'}));await waitFor(()=>expect(create).toHaveBeenCalledOnce());const text=await new Promise<string>(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.readAsText(create.mock.calls[0]![0]);});expect(text.split('\r\n')).toHaveLength(66);expect(text).toContain('name;qty;total');expect(text).toContain('"Cliente documental 65";"2";"0.1"');expect(f.transport.mock.calls.filter(([b])=>b.query.limit===50).map(([b])=>b.query.offset)).toEqual([0,50]);expect(f.persist).not.toHaveBeenCalled();});
- it.each([undefined,0,-1,1.5,'2',Number.MAX_SAFE_INTEGER+1])('SDK recusa contagem incompatível %s, sem converter ausência em zero',async qty=>{const f=fakeERP([sample(1)]),valid=await f.client.salesReport(q);const client=createERPClient(async()=>({error:null,data:{...valid,items:[{...valid.items[0],qty}]}}));await expect(client.salesReport(q)).rejects.toMatchObject({code:'INVALID_RESPONSE'});});
- it.each([undefined,{field:'TGFITE.QTDNEG',distinctPerCustomer:true,quantitiesAdded:false,missingItems:'unavailable'},{field:'TGFITE.CODPROD',distinctPerCustomer:true,quantitiesAdded:true,missingItems:'unavailable'}])('SDK exige contrato de produtos distintos, não soma de quantidades: %j',async productCountPolicy=>{const f=fakeERP([sample(1)]),valid=await f.client.salesReport(q),client=createERPClient(async()=>({error:null,data:{...valid,productCountPolicy}}));await expect(client.salesReport(q)).rejects.toMatchObject({code:'INVALID_RESPONSE'});});
- it('sinal de mix não pode ser usado em nota, vendedor ou detalhe',async()=>{const f=fakeERP();await expect(f.client.salesReport({...q,groupBy:'seller'})).rejects.toMatchObject({code:'INVALID_REQUEST'});await expect(f.client.salesReport({...q,groupBy:undefined} as unknown as ERPSalesQuery)).rejects.toMatchObject({code:'INVALID_REQUEST'});await expect(f.client.billingReport({...q,resource:'invoices'} as never)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(f.transport).not.toHaveBeenCalled();});
+describe("Produtos distintos por cliente na estrutura existente", () => {
+  const sample = (id: number, products: string[] | null = ["500"]): ERPRow => ({
+    ...order(id),
+    customerId: `sankhya:customer:${id}`,
+    customerName: `Cliente documental ${id}`,
+    testProducts: products,
+  });
+  const many = () =>
+    Array.from({ length: 65 }, (_, i) =>
+      sample(
+        i + 1,
+        Array.from({ length: (i % 3) + 1 }, (_, p) => String(500 + p)),
+      ),
+    );
+  const q: ERPSalesQuery = {
+    resource: "orders",
+    offset: 0,
+    limit: 10,
+    groupBy: "customer",
+    productMix: true,
+  };
+  it("65 compradores remotos sem carteira replicada, pedido manual ou mês presumido", async () => {
+    const f = mount(many(), "mix");
+    await screen.findByText("Cliente documental 1");
+    expect(screen.getAllByText("R$ 0,10")).toHaveLength(10);
+    expect(
+      screen.getByRole("columnheader", { name: /Produtos diferentes com itens extraídos/ }),
+    ).toBeInTheDocument();
+    expect(
+      f.transport.mock.calls.every(
+        ([b]) =>
+          b.operation === "sales-report" &&
+          b.query.groupBy === "customer" &&
+          b.query.productMix === true &&
+          b.query.from === undefined &&
+          b.query.to === undefined &&
+          b.query.limit <= 50,
+      ),
+    ).toBe(true);
+    expect(screen.queryByRole("combobox", { name: "Agrupar por" })).not.toBeInTheDocument();
+    expect(f.state["customers"]).toEqual([]);
+    expect(f.persist).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Próxima/ }));
+    await waitFor(() =>
+      expect(f.transport.mock.calls.some(([b]) => b.query.offset === 10)).toBe(true),
+    );
+  });
+  it("busca troca a base sem preencher comparação temporal", async () => {
+    const f = mount(many(), "mix");
+    await screen.findByText("Cliente documental 1");
+    fireEvent.change(screen.getByPlaceholderText("Filtrar…"), {
+      target: { value: "Cliente documental 65" },
+    });
+    await waitFor(() => expect(screen.queryByText("Cliente documental 1")).not.toBeInTheDocument());
+    await screen.findByText("Cliente documental 65");
+    expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({
+      productMix: true,
+      groupBy: "customer",
+      search: "Cliente documental 65",
+    });
+    expect(screen.getByText(/Não foram extraídas duas séries comparáveis/)).toBeInTheDocument();
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("cliente é filtrado pelo código no controle existente", async () => {
+    const f = mount([sample(1), sample(2)], "mix");
+    await screen.findByText("Cliente documental 1");
+    fireEvent.click(screen.getByRole("button", { name: "Filtros" }));
+    fireEvent.click(await screen.findByRole("combobox", { name: "Cliente" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Cliente documental 1 (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar filtros" }));
+    await waitFor(() =>
+      expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({
+        customerId: "sankhya:customer:1",
+        groupBy: "customer",
+        productMix: true,
+      }),
+    );
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("vendedor homônimo filtra CODVEND, não escolhe identidade de venda", async () => {
+    const f = mount([sample(1), sample(2)], "mix");
+    await screen.findByText("Cliente documental 1");
+    fireEvent.click(screen.getByRole("button", { name: "Filtros" }));
+    fireEvent.click(await screen.findByRole("combobox", { name: "Vendedor" }));
+    const options = await screen.findAllByRole("option", { name: "Homônimo" });
+    fireEvent.click(options[1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar filtros" }));
+    await waitFor(() =>
+      expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({
+        sellerCode: 34,
+        productMix: true,
+      }),
+    );
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("itens ausentes ficam indisponíveis e valor permanece nativo, sem contagem zero", async () => {
+    const f = mount([{ ...sample(1, null), total: "12" }], "mix");
+    await screen.findByText("Cliente documental 1");
+    expect(screen.getByText("Não extraído")).toBeInTheDocument();
+    expect(screen.getByText("R$ 12,00")).toBeInTheDocument();
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("ordena número de produtos no servidor, não apenas os dez grupos visíveis", async () => {
+    const f = mount(many(), "mix");
+    await screen.findByText("Cliente documental 1");
+    fireEvent.click(
+      screen.getByRole("button", { name: /Produtos diferentes com itens extraídos/ }),
+    );
+    await waitFor(() =>
+      expect(f.transport.mock.calls.at(-1)?.[0].query).toMatchObject({
+        sort: "qty",
+        direction: "asc",
+        productMix: true,
+      }),
+    );
+  });
+  it("falha remota limpa linhas antigas sem fabricar zero ou disparar escrita", async () => {
+    const f = mount(many(), "mix");
+    await screen.findByText("Cliente documental 1");
+    f.transport.mockRejectedValue(Error("falha sintética"));
+    fireEvent.change(screen.getByPlaceholderText("Filtrar…"), { target: { value: "novo" } });
+    await screen.findByText("Consulta ERP indisponível. Tente novamente.");
+    expect(screen.queryByText("Cliente documental 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("R$ 0,00")).not.toBeInTheDocument();
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("CSV conserva65 grupos e três campos, usando janelas50/15 e fechamento1", async () => {
+    const create = vi.fn((_blob: Blob) => "blob:csv-mix");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const f = mount(many(), "mix");
+    await screen.findByText("Cliente documental 1");
+    fireEvent.click(screen.getByRole("button", { name: "Exportar CSV" }));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    const text = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(create.mock.calls[0]![0]);
+    });
+    expect(text.split("\r\n")).toHaveLength(66);
+    expect(text).toContain("name;qty;total");
+    expect(text).toContain('"Cliente documental 65";"2";"0.1"');
+    expect(
+      f.transport.mock.calls.filter(([b]) => b.query.limit === 50).map(([b]) => b.query.offset),
+    ).toEqual([0, 50]);
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it.each([undefined, 0, -1, 1.5, "2", Number.MAX_SAFE_INTEGER + 1])(
+    "SDK recusa contagem incompatível %s, sem converter ausência em zero",
+    async (qty) => {
+      const f = fakeERP([sample(1)]),
+        valid = await f.client.salesReport(q);
+      const client = createERPClient(async () => ({
+        error: null,
+        data: { ...valid, items: [{ ...valid.items[0], qty }] },
+      }));
+      await expect(client.salesReport(q)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    },
+  );
+  it.each([
+    undefined,
+    {
+      field: "TGFITE.QTDNEG",
+      distinctPerCustomer: true,
+      quantitiesAdded: false,
+      missingItems: "unavailable",
+    },
+    {
+      field: "TGFITE.CODPROD",
+      distinctPerCustomer: true,
+      quantitiesAdded: true,
+      missingItems: "unavailable",
+    },
+  ])(
+    "SDK exige contrato de produtos distintos, não soma de quantidades: %j",
+    async (productCountPolicy) => {
+      const f = fakeERP([sample(1)]),
+        valid = await f.client.salesReport(q),
+        client = createERPClient(async () => ({
+          error: null,
+          data: { ...valid, productCountPolicy },
+        }));
+      await expect(client.salesReport(q)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    },
+  );
+  it("sinal de mix não pode ser usado em nota, vendedor ou detalhe", async () => {
+    const f = fakeERP();
+    await expect(f.client.salesReport({ ...q, groupBy: "seller" })).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+    });
+    await expect(
+      f.client.salesReport({ ...q, groupBy: undefined } as unknown as ERPSalesQuery),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    await expect(
+      f.client.billingReport({ ...q, resource: "invoices" } as never),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    expect(f.transport).not.toHaveBeenCalled();
+  });
 });

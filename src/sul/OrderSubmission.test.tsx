@@ -1,29 +1,177 @@
-import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import OrderSubmission from './OrderSubmission';
-import { createMutationQueue } from './SulApp';
-import type { SubmissionClient } from '../lib/erp-submission';
-import { canonicalHash, type SubmissionReceipt } from '../lib/erp-submission-contract';
-import { canonicalFixture, fixtureActorId as actorId, fixtureOrderId as orderId, fixtureRequestId as requestId, fixtureFingerprint as fingerprint, submissionFixture } from '../test/submission-fixture';
+import React from "react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import OrderSubmission from "./OrderSubmission";
+import { createMutationQueue } from "./SulApp";
+import type { SubmissionClient } from "../lib/erp-submission";
+import { canonicalHash, type SubmissionReceipt } from "../lib/erp-submission-contract";
+import {
+  canonicalFixture,
+  fixtureActorId as actorId,
+  fixtureOrderId as orderId,
+  fixtureRequestId as requestId,
+  fixtureFingerprint as fingerprint,
+  submissionFixture,
+} from "../test/submission-fixture";
 afterEach(cleanup);
-async function setup(){
-  const canonical=canonicalFixture(),hash=await canonicalHash(canonical),order={...submissionFixture(),freightType:undefined};
-  const receipt:SubmissionReceipt={id:requestId,hash,approvedBy:actorId,approvedAt:'2026-10-26T11:56:00Z',phase:'confirmado',nunota:101,status:'L',checkedAt:'2026-10-26T11:56:01Z',errorCode:null};
-  const review=vi.fn(async()=>({orderId,fingerprint,hash,canonical,receipt:null})),submit=vi.fn(async()=>({orderId,receipt,verified:true})),refresh=vi.fn(async()=>({}));
-  const client:SubmissionClient={review,submit,status:vi.fn(),setIdentity:vi.fn()};
-  const view=render(<OrderSubmission order={order} client={client} refresh={refresh}/>);
-  return{client,review,submit,refresh,receipt,order,view};
+async function setup() {
+  const canonical = canonicalFixture(),
+    hash = await canonicalHash(canonical),
+    order = { ...submissionFixture(), freightType: undefined };
+  const receipt: SubmissionReceipt = {
+    id: requestId,
+    hash,
+    approvedBy: actorId,
+    approvedAt: "2026-10-26T11:56:00Z",
+    phase: "confirmado",
+    nunota: 101,
+    status: "L",
+    checkedAt: "2026-10-26T11:56:01Z",
+    errorCode: null,
+  };
+  const review = vi.fn(async () => ({ orderId, fingerprint, hash, canonical, receipt: null })),
+    submit = vi.fn(async () => ({ orderId, receipt, verified: true })),
+    refresh = vi.fn(async () => ({}));
+  const client: SubmissionClient = { review, submit, status: vi.fn(), setIdentity: vi.fn() };
+  const view = render(<OrderSubmission order={order} client={client} refresh={refresh} />);
+  return { client, review, submit, refresh, receipt, order, view };
 }
-async function chooseCIF(){fireEvent.click(screen.getByRole('button',{name:'Enviar ao Sankhya'}));fireEvent.click(await screen.findByRole('combobox',{name:'Tipo de frete'}));fireEvent.click(await screen.findByRole('option',{name:'CIF'}));}
-describe('conferência e aprovação explícita no formulário existente',()=>{
-  it('não consulta nem envia ao renderizar ou abrir a conferência',async()=>{const r=await setup();expect(r.review).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'Enviar ao Sankhya'}));await screen.findByRole('dialog');expect(r.review).not.toHaveBeenCalled();expect(r.submit).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'Aprovar e enviar'})).not.toBeInTheDocument();});
-  it('CIF/FOB começa sem padrão e impede conferir sem escolha',async()=>{await setup();fireEvent.click(screen.getByRole('button',{name:'Enviar ao Sankhya'}));await screen.findByRole('dialog');expect(screen.getByRole('button',{name:/Conferir pedido/})).toHaveAttribute('aria-disabled','true');expect(screen.getByRole('combobox',{name:'Tipo de frete'})).toHaveTextContent('Selecione');});
-  it('separa escolha, conferência e aprovação; mostra NUNOTA/status após resposta',async()=>{const r=await setup();await chooseCIF();fireEvent.click(screen.getByRole('button',{name:'Conferir pedido'}));await screen.findByRole('button',{name:'Aprovar e enviar'});expect(r.review).toHaveBeenCalledWith(orderId,'C');expect(r.submit).not.toHaveBeenCalled();expect(screen.getByRole('table',{name:'Itens da conferência de envio'})).toHaveTextContent('Produto sintético');fireEvent.click(screen.getByRole('button',{name:'Aprovar e enviar'}));await waitFor(()=>expect(r.submit).toHaveBeenCalledTimes(1));await waitFor(()=>expect(r.refresh).toHaveBeenCalledTimes(1));expect(screen.getAllByText(/NUNOTA 101.*STATUSNOTA=L/).length).toBeGreaterThan(0);});
-  it('clique duplicado durante o envio não chama a API duas vezes',async()=>{const r=await setup();let finish!:(v:any)=>void;r.submit.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));await chooseCIF();fireEvent.click(screen.getByRole('button',{name:'Conferir pedido'}));const button=await screen.findByRole('button',{name:'Aprovar e enviar'});fireEvent.click(button);fireEvent.click(button);await waitFor(()=>expect(r.submit).toHaveBeenCalledTimes(1));finish({orderId,receipt:r.receipt,verified:true});await waitFor(()=>expect(r.refresh).toHaveBeenCalledTimes(1));});
-  it('trocar CIF porFOB invalida a conferência anterior',async()=>{const r=await setup();await chooseCIF();fireEvent.click(screen.getByRole('button',{name:'Conferir pedido'}));await screen.findByRole('button',{name:'Aprovar e enviar'});fireEvent.click(screen.getByRole('combobox',{name:'Tipo de frete'}));const option=await screen.findByRole('option',{name:'FOB'});fireEvent.pointerMove(option,{pointerType:'mouse'});fireEvent.pointerDown(option,{pointerType:'mouse',button:0});fireEvent.pointerUp(option,{pointerType:'mouse',button:0});fireEvent.click(option);await waitFor(()=>expect(screen.getByRole('combobox',{name:'Tipo de frete'})).toHaveTextContent('FOB'));expect(screen.queryByRole('button',{name:'Aprovar e enviar'})).not.toBeInTheDocument();expect(r.submit).not.toHaveBeenCalled();});
-  it('alteração do pedido invalida a versão apresentada',async()=>{const r=await setup();await chooseCIF();fireEvent.click(screen.getByRole('button',{name:'Conferir pedido'}));await screen.findByRole('button',{name:'Aprovar e enviar'});r.view.rerender(<OrderSubmission order={{...r.order,clientOrder:'OUTRA-VERSAO'}} client={r.client} refresh={r.refresh}/>);expect(screen.queryByRole('button',{name:'Aprovar e enviar'})).not.toBeInTheDocument();});
-  it('recibo preservado reaparece ao reabrir, sem nova chamada',async()=>{const r=await setup();r.view.rerender(<OrderSubmission order={{...r.order,freightType:'C',erpSubmission:r.receipt}} client={r.client} refresh={r.refresh}/>);expect(screen.getByRole('status')).toHaveTextContent('NUNOTA 101');expect(r.submit).not.toHaveBeenCalled();});
-  it('falha de envio não cria nova tentativa automática',async()=>{const r=await setup();r.submit.mockRejectedValue(new Error('Resultado incerto; consultar o mesmo pedido.'));await chooseCIF();fireEvent.click(screen.getByRole('button',{name:'Conferir pedido'}));fireEvent.click(await screen.findByRole('button',{name:'Aprovar e enviar'}));await screen.findByText('Resultado incerto; consultar o mesmo pedido.');expect(r.submit).toHaveBeenCalledTimes(1);});
-  it('recarga espera o salvamento já enfileirado',async()=>{let release!:(v:any)=>void;const order:string[]=[],initial={current:{orders:[]}},commit=vi.fn();const save=vi.fn(async()=>{order.push('salvar');return new Promise<any>(resolve=>{release=resolve;});});const reload=vi.fn(async()=>{order.push('recarregar');return{orders:[]};});const queue=createMutationQueue(initial,save,commit,reload);const saving=queue(()=>{});const refreshing=queue.refresh();await waitFor(()=>expect(save).toHaveBeenCalledTimes(1));expect(reload).not.toHaveBeenCalled();release({orders:[]});await saving;await refreshing;expect(order).toEqual(['salvar','recarregar']);expect(commit).toHaveBeenCalledTimes(2);});
+async function chooseCIF() {
+  fireEvent.click(screen.getByRole("button", { name: "Enviar ao Sankhya" }));
+  fireEvent.click(await screen.findByRole("combobox", { name: "Tipo de frete" }));
+  fireEvent.click(await screen.findByRole("option", { name: "CIF" }));
+}
+describe("conferência e aprovação explícita no formulário existente", () => {
+  it("não consulta nem envia ao renderizar ou abrir a conferência", async () => {
+    const r = await setup();
+    expect(r.review).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar ao Sankhya" }));
+    await screen.findByRole("dialog");
+    expect(r.review).not.toHaveBeenCalled();
+    expect(r.submit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Aprovar e enviar" })).not.toBeInTheDocument();
+  });
+  it("CIF/FOB começa sem padrão e impede conferir sem escolha", async () => {
+    await setup();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar ao Sankhya" }));
+    await screen.findByRole("dialog");
+    expect(screen.getByRole("button", { name: /Conferir pedido/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("combobox", { name: "Tipo de frete" })).toHaveTextContent("Selecione");
+  });
+  it("separa escolha, conferência e aprovação; mostra NUNOTA/status após resposta", async () => {
+    const r = await setup();
+    await chooseCIF();
+    fireEvent.click(screen.getByRole("button", { name: "Conferir pedido" }));
+    await screen.findByRole("button", { name: "Aprovar e enviar" });
+    expect(r.review).toHaveBeenCalledWith(orderId, "C");
+    expect(r.submit).not.toHaveBeenCalled();
+    expect(screen.getByRole("table", { name: "Itens da conferência de envio" })).toHaveTextContent(
+      "Produto sintético",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Aprovar e enviar" }));
+    await waitFor(() => expect(r.submit).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(r.refresh).toHaveBeenCalledTimes(1));
+    expect(screen.getAllByText(/NUNOTA 101.*STATUSNOTA=L/).length).toBeGreaterThan(0);
+  });
+  it("clique duplicado durante o envio não chama a API duas vezes", async () => {
+    const r = await setup();
+    let finish!: (
+      v: Awaited<ReturnType<import("../lib/erp-submission").SubmissionClient["submit"]>>,
+    ) => void;
+    r.submit.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await chooseCIF();
+    fireEvent.click(screen.getByRole("button", { name: "Conferir pedido" }));
+    const button = await screen.findByRole("button", { name: "Aprovar e enviar" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(r.submit).toHaveBeenCalledTimes(1));
+    finish({ orderId, receipt: r.receipt, verified: true });
+    await waitFor(() => expect(r.refresh).toHaveBeenCalledTimes(1));
+  });
+  it("trocar CIF porFOB invalida a conferência anterior", async () => {
+    const r = await setup();
+    await chooseCIF();
+    fireEvent.click(screen.getByRole("button", { name: "Conferir pedido" }));
+    await screen.findByRole("button", { name: "Aprovar e enviar" });
+    fireEvent.click(screen.getByRole("combobox", { name: "Tipo de frete" }));
+    const option = await screen.findByRole("option", { name: "FOB" });
+    fireEvent.pointerMove(option, { pointerType: "mouse" });
+    fireEvent.pointerDown(option, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(option, { pointerType: "mouse", button: 0 });
+    fireEvent.click(option);
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Tipo de frete" })).toHaveTextContent("FOB"),
+    );
+    expect(screen.queryByRole("button", { name: "Aprovar e enviar" })).not.toBeInTheDocument();
+    expect(r.submit).not.toHaveBeenCalled();
+  });
+  it("alteração do pedido invalida a versão apresentada", async () => {
+    const r = await setup();
+    await chooseCIF();
+    fireEvent.click(screen.getByRole("button", { name: "Conferir pedido" }));
+    await screen.findByRole("button", { name: "Aprovar e enviar" });
+    r.view.rerender(
+      <OrderSubmission
+        order={{ ...r.order, clientOrder: "OUTRA-VERSAO" }}
+        client={r.client}
+        refresh={r.refresh}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Aprovar e enviar" })).not.toBeInTheDocument();
+  });
+  it("recibo preservado reaparece ao reabrir, sem nova chamada", async () => {
+    const r = await setup();
+    r.view.rerender(
+      <OrderSubmission
+        order={{ ...r.order, freightType: "C", erpSubmission: r.receipt }}
+        client={r.client}
+        refresh={r.refresh}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("NUNOTA 101");
+    expect(r.submit).not.toHaveBeenCalled();
+  });
+  it("falha de envio não cria nova tentativa automática", async () => {
+    const r = await setup();
+    r.submit.mockRejectedValue(new Error("Resultado incerto; consultar o mesmo pedido."));
+    await chooseCIF();
+    fireEvent.click(screen.getByRole("button", { name: "Conferir pedido" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Aprovar e enviar" }));
+    await screen.findByText("Resultado incerto; consultar o mesmo pedido.");
+    expect(r.submit).toHaveBeenCalledTimes(1);
+  });
+  it("recarga espera o salvamento já enfileirado", async () => {
+    let release!: (v: Record<string, unknown>) => void;
+    const order: string[] = [],
+      initial = { current: { orders: [] } },
+      commit = vi.fn();
+    const save = vi.fn(async () => {
+      order.push("salvar");
+      return new Promise<Record<string, unknown>>((resolve) => {
+        release = resolve;
+      });
+    });
+    const reload = vi.fn(async () => {
+      order.push("recarregar");
+      return { orders: [] };
+    });
+    const queue = createMutationQueue(initial, save, commit, reload);
+    const saving = queue(() => {});
+    const refreshing = queue.refresh();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(reload).not.toHaveBeenCalled();
+    release({ orders: [] });
+    await saving;
+    await refreshing;
+    expect(order).toEqual(["salvar", "recarregar"]);
+    expect(commit).toHaveBeenCalledTimes(2);
+  });
 });

@@ -1,16 +1,180 @@
-import {erpDecimal,sumERPDecimals} from './erp-decimal';
-export const RECEIVABLES_POLICY={sourceTable:'TGFFIN',receivableField:'RECDESP',receivableValue:1,provisionField:'PROVISAO',provisionValue:'N',amountField:'TGFFIN.VLRDESDOB',dateField:'TGFFIN.DTVENC',settlementField:'TGFFIN.DHBAIXA',customerScope:'current-client-wallet',settlementConfirmed:false,balanceCalculated:false,salesAdded:false,atomicSnapshot:false} as const;
-export type ERPReceivablesQuery={resource:'orders';offset:number;limit:number;customerId?:string;sellerCode?:number;companyCode?:1|4;from?:string;to?:string;settlement?:'registrada'|'sem-registro';search?:string;sort?:string;direction?:'asc'|'desc'};
-export type ERPReceivablesWindow={source:'sankhya';readOnly:true;readAt:string;items:Record<string,unknown>[];total:number;totalWithoutSearch:number;offset:number;companyCodes:(1|4)[];receivablesPolicy:typeof RECEIVABLES_POLICY;summary:{recordCount:number;amount:string|null;missingAmountCount:number;amountField:'TGFFIN.VLRDESDOB';headerCountedOnce:true;atomicSnapshot:false}};
-const natural=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
-const obj=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
-const day=(v:unknown):v is string=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&v.slice(0,4)!=='0000'&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
-const id=(v:unknown,prefix:string)=>typeof v==='string'&&new RegExp('^'+prefix+'[1-9]\\d{0,9}$').test(v)&&Number(v.slice(prefix.length))<=2147483647;
-export function validReceivablesQuery(q:ERPReceivablesQuery){return q.resource==='orders'&&Object.keys(q).every(k=>['resource','offset','limit','customerId','sellerCode','companyCode','from','to','settlement','search','sort','direction'].includes(k))&&natural(q.offset)&&natural(q.limit)&&q.limit>=1&&q.limit<=50&&q.offset<=2147483647-q.limit&&(q.companyCode===undefined||q.companyCode===1||q.companyCode===4)&&(q.customerId===undefined||id(q.customerId,'sankhya:customer:'))&&(q.sellerCode===undefined||natural(q.sellerCode)&&q.sellerCode>0&&q.sellerCode<=2147483647)&&(q.from===undefined||day(q.from))&&(q.to===undefined||day(q.to))&&(!q.from||!q.to||q.from<=q.to)&&(q.settlement===undefined||['registrada','sem-registro'].includes(q.settlement))&&(q.sort===undefined||['customer','due','value','status','document','code'].includes(q.sort))&&(q.direction===undefined||['asc','desc'].includes(q.direction))&&(q.search===undefined||typeof q.search==='string'&&q.search.length<=120&&!/[\x00-\x1f;]|--|\/\*|\*\//.test(q.search));}
-export function decodeReceivables(data:Record<string,unknown>,q:ERPReceivablesQuery,fail:()=>never){
- const p=data['receivablesPolicy'],cs=data['companyCodes'],s=data['summary'],items=data['items'];
- if(!obj(p)||Object.entries(RECEIVABLES_POLICY).some(([k,v])=>p[k]!==v)||!Array.isArray(cs)||cs.length<1||cs.length>2||new Set(cs).size!==cs.length||cs.some(c=>c!==1&&c!==4)||q.companyCode!==undefined&&(cs.length!==1||cs[0]!==q.companyCode)||!obj(s)||s['recordCount']!==data['total']||!natural(s['missingAmountCount'])||s['missingAmountCount']>Number(data['total'])||s['amountField']!=='TGFFIN.VLRDESDOB'||s['headerCountedOnce']!==true||s['atomicSnapshot']!==false||!Array.isArray(items))return fail();
- if(s['missingAmountCount']?s['amount']!==null:typeof s['amount']!=='string'||erpDecimal(s['amount'])!==s['amount'])return fail();
- const seen=new Set<string>();for(const r of items){if(!obj(r)||!id(r['id'],'sankhya:receivable:')||seen.has(String(r['id']))||r['source']!=='observado'||r['readOnly']!==true||!cs.includes(r['companyCode'])||!id(r['customerId'],'sankhya:customer:')||q.customerId!==undefined&&q.customerId!==r['customerId']||r['sellerCode']!==null&&(!natural(r['sellerCode'])||r['sellerCode']>2147483647)||q.sellerCode!==undefined&&q.sellerCode!==r['sellerCode']||r['customerName']!==null&&typeof r['customerName']!=='string'||r['document']!==null&&(typeof r['document']!=='string'||!/^\d+$/.test(r['document']))||r['value']!==null&&(typeof r['value']!=='string'||erpDecimal(r['value'])!==r['value'])||r['due']!==null&&!day(r['due'])||r['settlementDate']!==null&&!day(r['settlementDate'])||r['status']!==(r['settlementDate']===null?'Sem baixa registrada':'Baixa registrada')||q.settlement!==undefined&&(q.settlement==='registrada')!==(r['settlementDate']!==null)||q.from&&(r['due']===null||String(r['due'])<q.from)||q.to&&(r['due']===null||String(r['due'])>q.to))return fail();seen.add(String(r['id']));}
- if(q.offset===0&&items.length===data['total']&&(items.filter(r=>r['value']===null).length!==s['missingAmountCount']||s['amount']!==null&&sumERPDecimals(items.map(r=>String(r['value'])))!==s['amount']))return fail();
+import { erpDecimal, sumERPDecimals } from "./erp-decimal";
+export const RECEIVABLES_POLICY = {
+  sourceTable: "TGFFIN",
+  receivableField: "RECDESP",
+  receivableValue: 1,
+  provisionField: "PROVISAO",
+  provisionValue: "N",
+  amountField: "TGFFIN.VLRDESDOB",
+  dateField: "TGFFIN.DTVENC",
+  settlementField: "TGFFIN.DHBAIXA",
+  customerScope: "current-client-wallet",
+  settlementConfirmed: false,
+  balanceCalculated: false,
+  salesAdded: false,
+  atomicSnapshot: false,
+} as const;
+export type ERPReceivablesQuery = {
+  resource: "orders";
+  offset: number;
+  limit: number;
+  customerId?: string;
+  sellerCode?: number;
+  companyCode?: 1 | 4;
+  from?: string;
+  to?: string;
+  settlement?: "registrada" | "sem-registro";
+  search?: string;
+  sort?: string;
+  direction?: "asc" | "desc";
+};
+export type ERPReceivablesWindow = {
+  source: "sankhya";
+  readOnly: true;
+  readAt: string;
+  items: Record<string, unknown>[];
+  total: number;
+  totalWithoutSearch: number;
+  offset: number;
+  companyCodes: (1 | 4)[];
+  receivablesPolicy: typeof RECEIVABLES_POLICY;
+  summary: {
+    recordCount: number;
+    amount: string | null;
+    missingAmountCount: number;
+    amountField: "TGFFIN.VLRDESDOB";
+    headerCountedOnce: true;
+    atomicSnapshot: false;
+  };
+};
+const natural = (v: unknown): v is number =>
+  typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+const obj = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === "object" && !Array.isArray(v);
+const day = (v: unknown): v is string =>
+  typeof v === "string" &&
+  /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+  v.slice(0, 4) !== "0000" &&
+  Number.isFinite(Date.parse(v + "T00:00:00Z")) &&
+  new Date(v + "T00:00:00Z").toISOString().slice(0, 10) === v;
+const id = (v: unknown, prefix: string) =>
+  typeof v === "string" &&
+  new RegExp("^" + prefix + "[1-9]\\d{0,9}$").test(v) &&
+  Number(v.slice(prefix.length)) <= 2147483647;
+export function validReceivablesQuery(q: ERPReceivablesQuery) {
+  return (
+    q.resource === "orders" &&
+    Object.keys(q).every((k) =>
+      [
+        "resource",
+        "offset",
+        "limit",
+        "customerId",
+        "sellerCode",
+        "companyCode",
+        "from",
+        "to",
+        "settlement",
+        "search",
+        "sort",
+        "direction",
+      ].includes(k),
+    ) &&
+    natural(q.offset) &&
+    natural(q.limit) &&
+    q.limit >= 1 &&
+    q.limit <= 50 &&
+    q.offset <= 2147483647 - q.limit &&
+    (q.companyCode === undefined || q.companyCode === 1 || q.companyCode === 4) &&
+    (q.customerId === undefined || id(q.customerId, "sankhya:customer:")) &&
+    (q.sellerCode === undefined ||
+      (natural(q.sellerCode) && q.sellerCode > 0 && q.sellerCode <= 2147483647)) &&
+    (q.from === undefined || day(q.from)) &&
+    (q.to === undefined || day(q.to)) &&
+    (!q.from || !q.to || q.from <= q.to) &&
+    (q.settlement === undefined || ["registrada", "sem-registro"].includes(q.settlement)) &&
+    (q.sort === undefined ||
+      ["customer", "due", "value", "status", "document", "code"].includes(q.sort)) &&
+    (q.direction === undefined || ["asc", "desc"].includes(q.direction)) &&
+    (q.search === undefined ||
+      (typeof q.search === "string" &&
+        q.search.length <= 120 &&
+        !(
+          /[;]|--|\/\*|\*\//.test(q.search) ||
+          Array.from(q.search).some((character) => character.charCodeAt(0) < 32)
+        )))
+  );
+}
+export function decodeReceivables(
+  data: Record<string, unknown>,
+  q: ERPReceivablesQuery,
+  fail: () => never,
+) {
+  const p = data["receivablesPolicy"],
+    cs = data["companyCodes"],
+    s = data["summary"],
+    items = data["items"];
+  if (
+    !obj(p) ||
+    Object.entries(RECEIVABLES_POLICY).some(([k, v]) => p[k] !== v) ||
+    !Array.isArray(cs) ||
+    cs.length < 1 ||
+    cs.length > 2 ||
+    new Set(cs).size !== cs.length ||
+    cs.some((c) => c !== 1 && c !== 4) ||
+    (q.companyCode !== undefined && (cs.length !== 1 || cs[0] !== q.companyCode)) ||
+    !obj(s) ||
+    s["recordCount"] !== data["total"] ||
+    !natural(s["missingAmountCount"]) ||
+    s["missingAmountCount"] > Number(data["total"]) ||
+    s["amountField"] !== "TGFFIN.VLRDESDOB" ||
+    s["headerCountedOnce"] !== true ||
+    s["atomicSnapshot"] !== false ||
+    !Array.isArray(items)
+  )
+    return fail();
+  if (
+    s["missingAmountCount"]
+      ? s["amount"] !== null
+      : typeof s["amount"] !== "string" || erpDecimal(s["amount"]) !== s["amount"]
+  )
+    return fail();
+  const seen = new Set<string>();
+  for (const r of items) {
+    if (
+      !obj(r) ||
+      !id(r["id"], "sankhya:receivable:") ||
+      seen.has(String(r["id"])) ||
+      r["source"] !== "observado" ||
+      r["readOnly"] !== true ||
+      !cs.includes(r["companyCode"]) ||
+      !id(r["customerId"], "sankhya:customer:") ||
+      (q.customerId !== undefined && q.customerId !== r["customerId"]) ||
+      (r["sellerCode"] !== null && (!natural(r["sellerCode"]) || r["sellerCode"] > 2147483647)) ||
+      (q.sellerCode !== undefined && q.sellerCode !== r["sellerCode"]) ||
+      (r["customerName"] !== null && typeof r["customerName"] !== "string") ||
+      (r["document"] !== null &&
+        (typeof r["document"] !== "string" || !/^\d+$/.test(r["document"]))) ||
+      (r["value"] !== null &&
+        (typeof r["value"] !== "string" || erpDecimal(r["value"]) !== r["value"])) ||
+      (r["due"] !== null && !day(r["due"])) ||
+      (r["settlementDate"] !== null && !day(r["settlementDate"])) ||
+      r["status"] !==
+        (r["settlementDate"] === null ? "Sem baixa registrada" : "Baixa registrada") ||
+      (q.settlement !== undefined &&
+        (q.settlement === "registrada") !== (r["settlementDate"] !== null)) ||
+      (q.from && (r["due"] === null || String(r["due"]) < q.from)) ||
+      (q.to && (r["due"] === null || String(r["due"]) > q.to))
+    )
+      return fail();
+    seen.add(String(r["id"]));
+  }
+  if (
+    q.offset === 0 &&
+    items.length === data["total"] &&
+    (items.filter((r) => r["value"] === null).length !== s["missingAmountCount"] ||
+      (s["amount"] !== null &&
+        sumERPDecimals(items.map((r) => String(r["value"]))) !== s["amount"]))
+  )
+    return fail();
 }

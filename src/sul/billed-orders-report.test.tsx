@@ -1,16 +1,134 @@
-import React from 'react';
-import {cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
-import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import SulApp,{createAppState} from './SulApp';
-import {billedFixture,closeBilledFixtures} from '../test/billed-orders-fixture';
-vi.mock('@g4ai/ds',async original=>({...await original<typeof import('@g4ai/ds')>(),notify:vi.fn()}));
-beforeEach(()=>{vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};});
-afterEach(()=>{cleanup();closeBilledFixtures();vi.restoreAllMocks();vi.unstubAllGlobals();location.hash='';});
-function mount(many=false){location.hash='#/relatorios/faturados';const f=billedFixture();for(let n=1;n<=(many?65:1);n++){f.order(n,'20');f.origin(n,1000+n);}const state=createAppState({orders:[{id:'manual',number:'MANUAL-NÃO-SOMAR',total:999999,type:'Venda',status:'Concluído'}],invoices:[{id:'fake',orderId:'manual',number:'NF-MANUAL'}]}),persist=vi.fn();render(<SulApp initialState={state} online={f.client} persist={persist} onSignOut={vi.fn()}/>);return{...f,state,persist};}
-describe('Pedidos faturados na vista existente, incluindo parciais',()=>{
- it('mostra pedido e nota em campos separados, sem classificar integralidade ou mesclar manuais',async()=>{const f=mount();await screen.findByText('R$ 20,00');const table=screen.getByRole('table',{name:'Pedidos faturados'});expect(within(table).getByText('1')).toBeInTheDocument();expect(screen.getByText(/incluindo parciais, sem presumir faturamento integral/)).toBeInTheDocument();expect(screen.queryByText('MANUAL-NÃO-SOMAR')).not.toBeInTheDocument();expect(f.transport.mock.calls.every(([b])=>b.operation==='billed-orders-report')).toBe(true);expect(f.persist).not.toHaveBeenCalled();});
- it('nota de vários pedidos mantém ambos e valor faturado desconhecido, sem repartir20',async()=>{location.hash='#/relatorios/faturados';const f=billedFixture();f.order(1,'20');f.origin(1,1001);f.origin(1,2001);render(<SulApp initialState={createAppState()} online={f.client} persist={vi.fn()} onSignOut={vi.fn()}/>);await screen.findByText('#1001');expect(screen.getByText('#2001')).toBeInTheDocument();expect(screen.queryByText('R$ 20,00')).not.toBeInTheDocument();expect(screen.queryByText('R$ 10,00')).not.toBeInTheDocument();});
- it('busca é remota e conserva os KPIs do recorte em vez de exibir apenas a página',async()=>{const f=mount(true);await screen.findByText('#1065');fireEvent.change(screen.getByPlaceholderText('Filtrar…'),{target:{value:'1001'}});await screen.findByText('#1001');await waitFor(()=>expect(f.transport.mock.calls.at(-1)?.[0].query.search).toBe('1001'));expect(screen.queryByText('#1065')).not.toBeInTheDocument();expect(f.persist).not.toHaveBeenCalled();});
- it('CSV pelos controles originais contém65 pedidos e nove campos, com valores nativos separados',async()=>{const create=vi.fn((_b:Blob)=>'blob:billed');Object.defineProperty(URL,'createObjectURL',{configurable:true,value:create});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});const f=mount(true);await screen.findByText('#1065');fireEvent.click(screen.getByRole('button',{name:'Exportar CSV'}));await waitFor(()=>expect(create).toHaveBeenCalledOnce());const text=await new Promise<string>(resolve=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.readAsText(create.mock.calls[0]![0]);});expect(text.split('\r\n')).toHaveLength(66);expect(text).toContain('number;date;customer;seller;delivery;total;cargoStatus;invoiced;nf');expect(text).toContain('"99999";"null";"20";"65"');expect(text).not.toContain('MANUAL');expect(f.persist).not.toHaveBeenCalled();});
- it('falha remota não converte vendas locais em pedidos faturados',async()=>{location.hash='#/relatorios/faturados';const f=billedFixture();f.transport.mockRejectedValue(Error('Falha sintética'));render(<SulApp initialState={createAppState()} online={f.client} persist={vi.fn()} onSignOut={vi.fn()}/>);await screen.findByText('Consulta ERP indisponível. Tente novamente.');expect(screen.queryByText('R$ 0,00')).not.toBeInTheDocument();});
+import React from "react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import SulApp, { createAppState } from "./SulApp";
+import { billedFixture, closeBilledFixtures } from "../test/billed-orders-fixture";
+vi.mock("@g4ai/ds", async (original) => ({
+  ...(await original<typeof import("@g4ai/ds")>()),
+  notify: vi.fn(),
+}));
+beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.removeAttribute("open");
+  };
+});
+afterEach(() => {
+  cleanup();
+  closeBilledFixtures();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  location.hash = "";
+});
+function mount(many = false) {
+  location.hash = "#/relatorios/faturados";
+  const f = billedFixture();
+  for (let n = 1; n <= (many ? 65 : 1); n++) {
+    f.order(n, "20");
+    f.origin(n, 1000 + n);
+  }
+  const state = createAppState({
+      orders: [
+        {
+          id: "manual",
+          number: "MANUAL-NÃO-SOMAR",
+          total: 999999,
+          type: "Venda",
+          status: "Concluído",
+        },
+      ],
+      invoices: [{ id: "fake", orderId: "manual", number: "NF-MANUAL" }],
+    }),
+    persist = vi.fn();
+  render(<SulApp initialState={state} online={f.client} persist={persist} onSignOut={vi.fn()} />);
+  return { ...f, state, persist };
+}
+describe("Pedidos faturados na vista existente, incluindo parciais", () => {
+  it("mostra pedido e nota em campos separados, sem classificar integralidade ou mesclar manuais", async () => {
+    const f = mount();
+    await screen.findByText("R$ 20,00");
+    const table = screen.getByRole("table", { name: "Pedidos faturados" });
+    expect(within(table).getByText("1")).toBeInTheDocument();
+    expect(
+      screen.getByText(/incluindo parciais, sem presumir faturamento integral/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("MANUAL-NÃO-SOMAR")).not.toBeInTheDocument();
+    expect(f.transport.mock.calls.every(([b]) => b.operation === "billed-orders-report")).toBe(
+      true,
+    );
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("nota de vários pedidos mantém ambos e valor faturado desconhecido, sem repartir20", async () => {
+    location.hash = "#/relatorios/faturados";
+    const f = billedFixture();
+    f.order(1, "20");
+    f.origin(1, 1001);
+    f.origin(1, 2001);
+    render(
+      <SulApp
+        initialState={createAppState()}
+        online={f.client}
+        persist={vi.fn()}
+        onSignOut={vi.fn()}
+      />,
+    );
+    await screen.findByText("#1001");
+    expect(screen.getByText("#2001")).toBeInTheDocument();
+    expect(screen.queryByText("R$ 20,00")).not.toBeInTheDocument();
+    expect(screen.queryByText("R$ 10,00")).not.toBeInTheDocument();
+  });
+  it("busca é remota e conserva os KPIs do recorte em vez de exibir apenas a página", async () => {
+    const f = mount(true);
+    await screen.findByText("#1065");
+    fireEvent.change(screen.getByPlaceholderText("Filtrar…"), { target: { value: "1001" } });
+    await screen.findByText("#1001");
+    await waitFor(() => expect(f.transport.mock.calls.at(-1)?.[0].query.search).toBe("1001"));
+    expect(screen.queryByText("#1065")).not.toBeInTheDocument();
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("CSV pelos controles originais contém65 pedidos e nove campos, com valores nativos separados", async () => {
+    const create = vi.fn((_b: Blob) => "blob:billed");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const f = mount(true);
+    await screen.findByText("#1065");
+    fireEvent.click(screen.getByRole("button", { name: "Exportar CSV" }));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    const text = await new Promise<string>((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.readAsText(create.mock.calls[0]![0]);
+    });
+    expect(text.split("\r\n")).toHaveLength(66);
+    expect(text).toContain("number;date;customer;seller;delivery;total;cargoStatus;invoiced;nf");
+    expect(text).toContain('"99999";"null";"20";"65"');
+    expect(text).not.toContain("MANUAL");
+    expect(f.persist).not.toHaveBeenCalled();
+  });
+  it("falha remota não converte vendas locais em pedidos faturados", async () => {
+    location.hash = "#/relatorios/faturados";
+    const f = billedFixture();
+    f.transport.mockRejectedValue(Error("Falha sintética"));
+    render(
+      <SulApp
+        initialState={createAppState()}
+        online={f.client}
+        persist={vi.fn()}
+        onSignOut={vi.fn()}
+      />,
+    );
+    await screen.findByText("Consulta ERP indisponível. Tente novamente.");
+    expect(screen.queryByText("R$ 0,00")).not.toBeInTheDocument();
+  });
 });

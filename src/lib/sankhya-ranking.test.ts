@@ -1,30 +1,312 @@
-import{afterEach,describe,expect,it,vi}from'vitest';
-import{billedFixture,closeBilledFixtures}from'../test/billed-orders-fixture';
-import{readRanking}from'../../supabase/functions/sankhya-online/ranking';
-import{createERPClient,ERPOnlineError}from'./erp-online';
-import{rankingPeriod,validRankingQuery,rankingProgress}from'./erp-ranking';
-import{readFileSync}from'node:fs';
-const q={resource:'orders' as const,month:'2026-10',offset:0,limit:50};
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { billedFixture, closeBilledFixtures } from "../test/billed-orders-fixture";
+import { readRanking } from "../../supabase/functions/sankhya-online/ranking";
+import { createERPClient, ERPOnlineError } from "./erp-online";
+import { rankingPeriod, validRankingQuery, rankingProgress } from "./erp-ranking";
+import { readFileSync } from "node:fs";
+const q = { resource: "orders" as const, month: "2026-10", offset: 0, limit: 50 };
 afterEach(closeBilledFixtures);
-function fixture(){const f=billedFixture();const order=(id:number,amount:string|null,options:Record<string,unknown>={})=>f.order(id,amount,{movement:'P',operation:1001,...options});
- const targets=vi.fn(async(month:string,companyCodes:number[]):Promise<any>=>({month,companyCodes,source:'local-canonical-targets',identity:'private-Auth-UUID-to-CODVEND',readOnly:true,targets:[{sellerCode:34,amount:'100.00',reason:null},{sellerCode:12,amount:'0',reason:null}]}));
- const transport=vi.fn(async({query}:any)=>({data:await readRanking(f.g,query,{role:'administrador'},targets),error:null}));return{...f,order,targets,transport,client:createERPClient(transport)};}
-describe('Ranking mensal nativo e metas locais — SQLite adaptado, não Oracle',()=>{
- it('mantém homônimos separados por código e conta clientes distintos, não itens',async()=>{const f=fixture();f.order(1,'30');f.order(2,'20');f.order(3,'10',{seller:12,customer:2});const r=await f.client.rankingReport(q);expect(r.items.map(x=>[x['sellerCode'],x['name'],x['rank'],x['clients'],x['count'],x['total'],x['target'],x['hit']])).toEqual([[34,'Homônimo',1,1,2,'50','100.00','50%'],[12,'Homônimo',2,1,1,'10','0',null]]);expect(r.summary).toMatchObject({documentCount:3,documentAmount:'60',sellerCount:2,targetAmount:'100',targetMissingCount:0});expect(JSON.stringify(r)).not.toMatch(/userId|actor_id|email/);});
- it.each([1107,1108,1162,1102,1101,1134,1130,1125,1171,1122])('inclui TOP adicional %s somente como pedido P comercial',async operation=>{const f=fixture();f.db.prepare("INSERT INTO TGFTOP(CODTIPOPER,DHALTER,TIPMOV,BONIFICACAO,GOLDEV,GOLSINAL) VALUES(?,?,'P','N',1,0)").run(operation,'2026-08-01');f.order(1,'20',{operation,version:'2026-08-01'});expect((await f.client.rankingReport(q)).summary.documentAmount).toBe('20');f.db.exec("UPDATE TGFTOP SET BONIFICACAO='S' WHERE DHALTER='2026-08-01'");expect((await f.client.rankingReport(q)).summary.documentAmount).toBe('0');});
- it('recorta mês/empresa e exclui outras TOP, natureza, situação e documentos fiscais',async()=>{const f=fixture();f.order(1,'10');f.order(2,'999',{date:'2026-09-30'});f.order(3,'999',{date:'2026-11-01'});f.order(4,'999',{status:'A'});f.order(5,'999',{operation:1003});f.order(6,'999',{nature:2});f.order(7,'999',{movement:'V',operation:1101});f.order(8,'20',{company:4});const r=await f.client.rankingReport({...q,companyCode:1});expect(r.summary.documentAmount).toBe('10');expect(f.targets).toHaveBeenCalledWith('2026-10',[1]);});
- it('não usa nome como vínculo nem transforma meta ausente em zero',async()=>{const f=fixture();f.order(1,'10');f.targets.mockImplementation(async(month,companyCodes)=>({month,companyCodes,source:'local-canonical-targets',identity:'private-Auth-UUID-to-CODVEND',readOnly:true,targets:[]}));const r=await f.client.rankingReport(q);expect(r.items[0]).toMatchObject({target:null,targetReason:'ERP_BINDING_UNAVAILABLE',hit:null,progress:null});expect(r.summary.targetAmount).toBeNull();});
- for(const reason of ['AMBIGUOUS_ACTIVE_BINDING','TARGET_SCOPE_MISMATCH','TARGET_NOT_DEFINED'])it('preserva indisponibilidade '+reason,async()=>{const f=fixture();f.order(1,'10');f.targets.mockImplementation(async(month,companyCodes)=>({month,companyCodes,source:'local-canonical-targets',identity:'private-Auth-UUID-to-CODVEND',readOnly:true,targets:[{sellerCode:34,amount:null as any,reason}]}));expect((await f.client.rankingReport(q)).items[0]).toMatchObject({target:null,targetReason:reason,hit:null});});
- it('período parcial não compara com meta do mês inteiro',async()=>{const f=fixture();f.order(1,'10');const r=await f.client.rankingReport({...q,from:'2026-10-15'});expect(r.period.targetsComparable).toBe(false);expect(r.items[0]).toMatchObject({target:null,targetReason:'TARGET_PERIOD_MISMATCH',hit:null});});
- it('filtro de cliente não compara parcela de vendas à meta integral',async()=>{const f=fixture();f.order(1,'10');const r=await f.client.rankingReport({...q,customerId:'sankhya:customer:1'});expect(r.items[0]).toMatchObject({target:null,targetReason:'TARGET_CUSTOMER_SCOPE_MISMATCH'});});
- it('busca por vendedor não corta pedidos por nomes de cliente e preserva posição',async()=>{const f=fixture();f.order(1,'20');f.order(2,'10',{seller:99,customer:3});const r=await f.client.rankingReport({...q,search:'Outro'});expect(r.items[0]).toMatchObject({sellerCode:99,total:'10',rank:2});expect(r.total).toBe(1);expect(r.totalWithoutSearch).toBe(3);expect(r.summary.documentCount).toBe(2);});
- it('saldo não conhecido invalida posição e somas, sem soma parcial',async()=>{const f=fixture();f.order(1,null);f.order(2,'10',{seller:12,customer:2});const r=await f.client.rankingReport(q);expect(r.summary.documentAmount).toBeNull();expect(r.items.every(x=>x['rank']===null)).toBe(true);expect(r.items.find(x=>x['sellerCode']===34)?.['total']).toBeNull();});
- it('respeita escopo privado de vendedor e gestor; não decide pelo nome',async()=>{const f=fixture();f.order(1,'30');f.order(2,'20',{seller:12,customer:2});f.order(3,'10',{seller:99,customer:3});const s=await readRanking(f.g,q,{role:'vendedor',sellerCode:34,companyCodes:[1]},f.targets);expect(s.items.map(x=>x.sellerCode)).toEqual([34]);const g=await readRanking(f.g,q,{role:'gestor',sellerCode:34,companyCodes:[1],teamSellerCodes:[12]},f.targets);expect(g.items.map(x=>x.sellerCode)).toEqual([34,12]);await expect(readRanking(f.g,{...q,sellerCode:99},{role:'vendedor',sellerCode:34,companyCodes:[1]},f.targets)).rejects.toMatchObject({code:'ERP_SCOPE_FORBIDDEN'});});
- it('precisão textual/BigInt sem dinheiro em Number e barra limitada apenas na apresentação',async()=>{const f=fixture();f.order(1,'9007199254740993.123456789');const r=await f.client.rankingReport(q);expect(r.items[0]?.['total']).toBe('9007199254740993.123456789');expect(rankingProgress('9007199254740993.123456789','0.01')).toBe(100);expect(rankingProgress('1','0')).toBeNull();});
- it('não duplica vendedor empatado; posição numérica vem do SQL',async()=>{const f=fixture();f.order(1,'10');f.order(2,'10',{seller:12,customer:2});const r=await f.client.rankingReport(q);expect(r.items.map(x=>[x['sellerCode'],x['rank']])).toEqual([[12,1],[34,2]]);expect(f.g.select.mock.calls.some(([sql])=>sql.includes('ROW_NUMBER() OVER(ORDER BY SUM(C.VLRNOTA) DESC NULLS LAST,C.CODVEND ASC NULLS LAST)'))).toBe(true);});
- it('paginação remota sem sobreposição e busca vazia não ressuscita manuais',async()=>{const f=fixture();f.order(1,'20');f.order(2,'10',{seller:12,customer:2});const a=await f.client.rankingReport({...q,limit:1}),b=await f.client.rankingReport({...q,offset:1,limit:1});expect(a.items[0]?.['id']).not.toBe(b.items[0]?.['id']);expect((await f.client.rankingReport({...q,search:'inexistente'})).items).toEqual([]);});
- it('RPC indisponível falha fechado; metadados privados/monetários incompatíveis são rejeitados',async()=>{const f=fixture();f.order(1,'10');f.targets.mockRejectedValueOnce(new Error('indisponível'));await expect(f.client.rankingReport(q)).rejects.toBeInstanceOf(ERPOnlineError);f.targets.mockImplementation(async(month,companyCodes)=>({month,companyCodes,source:'local-canonical-targets',identity:'private-Auth-UUID-to-CODVEND',readOnly:true,targets:[{sellerCode:34,amount:'10',reason:null,userId:'privado'}]}));await expect(f.client.rankingReport(q)).rejects.toMatchObject({code:'ERP_UNAVAILABLE'});});
- it('inclui metas definidas mesmo sem vendas, sem inventar faturamento',async()=>{const f=fixture();const r=await f.client.rankingReport(q);expect(r.items.map(x=>[x['sellerCode'],x['count'],x['clients'],x['total']])).toEqual([[12,0,0,'0'],[34,0,0,'0']]);expect(r.summary).toMatchObject({documentCount:0,documentAmount:'0',targetAmount:'100'});});
- it('valida datas, chaves e janela antes de qualquer rede',async()=>{const f=fixture();for(const v of [{month:'0000-01'},{month:'2026-13'},{limit:51},{from:'2026-02-30'},{from:'2027-01-01'},{sellerCode:0},{userId:'arbitrário'},{month:'2026-10; DROP'}]){expect(validRankingQuery({...q,...v} as any)).toBe(false);await expect(f.client.rankingReport({...q,...v} as any)).rejects.toMatchObject({code:'INVALID_REQUEST'});}expect(f.transport).not.toHaveBeenCalled();expect(rankingPeriod({...q,month:'2024-02'}).to).toBe('2024-02-29');expect(rankingPeriod({...q,month:'0001-02'}).to).toBe('0001-02-28');});
- it('migração somente de função; não escreve dados ou expõe UUID/nome no resultado',()=>{const s=readFileSync('supabase/migrations/20261026203414_sankhya_target_read.sql','utf8');expect(s).not.toMatch(/\b(?:insert|update|delete|create table|alter table|drop)\b/i);expect(s).toContain('t.seller_id=u.id');expect(s).toContain('u.active');expect(s).toContain('b.seller_code=any(sellers)');expect(s).toContain('security definer set search_path=pg_catalog,public');expect(s).toContain('b.company_codes@>selected and selected@>b.company_codes');});
+function fixture() {
+  const f = billedFixture();
+  const order = (id: number, amount: string | null, options: Record<string, unknown> = {}) =>
+    f.order(id, amount, { movement: "P", operation: 1001, ...options });
+  const targets = vi.fn(
+    async (
+      month: string,
+      companyCodes: number[],
+    ): Promise<{
+      month: string;
+      companyCodes: number[];
+      source: string;
+      identity: string;
+      readOnly: boolean;
+      targets: { sellerCode: number; amount: string | null; reason: string | null }[];
+    }> => ({
+      month,
+      companyCodes,
+      source: "local-canonical-targets",
+      identity: "private-Auth-UUID-to-CODVEND",
+      readOnly: true,
+      targets: [
+        { sellerCode: 34, amount: "100.00", reason: null },
+        { sellerCode: 12, amount: "0", reason: null },
+      ],
+    }),
+  );
+  const transport = vi.fn(
+    async ({ query }: import("../test/erp-fixture-types").FixtureRequest) => ({
+      data: await readRanking(
+        f.g,
+        query as unknown as Parameters<typeof readRanking>[1],
+        { role: "administrador" },
+        targets,
+      ),
+      error: null,
+    }),
+  );
+  return {
+    ...f,
+    order,
+    targets,
+    transport,
+    client: createERPClient(transport as unknown as import("./erp-online").ERPTransport),
+  };
+}
+describe("Ranking mensal nativo e metas locais — SQLite adaptado, não Oracle", () => {
+  it("mantém homônimos separados por código e conta clientes distintos, não itens", async () => {
+    const f = fixture();
+    f.order(1, "30");
+    f.order(2, "20");
+    f.order(3, "10", { seller: 12, customer: 2 });
+    const r = await f.client.rankingReport(q);
+    expect(
+      r.items.map((x) => [
+        x["sellerCode"],
+        x["name"],
+        x["rank"],
+        x["clients"],
+        x["count"],
+        x["total"],
+        x["target"],
+        x["hit"],
+      ]),
+    ).toEqual([
+      [34, "Homônimo", 1, 1, 2, "50", "100.00", "50%"],
+      [12, "Homônimo", 2, 1, 1, "10", "0", null],
+    ]);
+    expect(r.summary).toMatchObject({
+      documentCount: 3,
+      documentAmount: "60",
+      sellerCount: 2,
+      targetAmount: "100",
+      targetMissingCount: 0,
+    });
+    expect(JSON.stringify(r)).not.toMatch(/userId|actor_id|email/);
+  });
+  it.each([1107, 1108, 1162, 1102, 1101, 1134, 1130, 1125, 1171, 1122])(
+    "inclui TOP adicional %s somente como pedido P comercial",
+    async (operation) => {
+      const f = fixture();
+      f.db
+        .prepare(
+          "INSERT INTO TGFTOP(CODTIPOPER,DHALTER,TIPMOV,BONIFICACAO,GOLDEV,GOLSINAL) VALUES(?,?,'P','N',1,0)",
+        )
+        .run(operation, "2026-08-01");
+      f.order(1, "20", { operation, version: "2026-08-01" });
+      expect((await f.client.rankingReport(q)).summary.documentAmount).toBe("20");
+      f.db.exec("UPDATE TGFTOP SET BONIFICACAO='S' WHERE DHALTER='2026-08-01'");
+      expect((await f.client.rankingReport(q)).summary.documentAmount).toBe("0");
+    },
+  );
+  it("recorta mês/empresa e exclui outras TOP, natureza, situação e documentos fiscais", async () => {
+    const f = fixture();
+    f.order(1, "10");
+    f.order(2, "999", { date: "2026-09-30" });
+    f.order(3, "999", { date: "2026-11-01" });
+    f.order(4, "999", { status: "A" });
+    f.order(5, "999", { operation: 1003 });
+    f.order(6, "999", { nature: 2 });
+    f.order(7, "999", { movement: "V", operation: 1101 });
+    f.order(8, "20", { company: 4 });
+    const r = await f.client.rankingReport({ ...q, companyCode: 1 });
+    expect(r.summary.documentAmount).toBe("10");
+    expect(f.targets).toHaveBeenCalledWith("2026-10", [1]);
+  });
+  it("não usa nome como vínculo nem transforma meta ausente em zero", async () => {
+    const f = fixture();
+    f.order(1, "10");
+    f.targets.mockImplementation(async (month, companyCodes) => ({
+      month,
+      companyCodes,
+      source: "local-canonical-targets",
+      identity: "private-Auth-UUID-to-CODVEND",
+      readOnly: true,
+      targets: [],
+    }));
+    const r = await f.client.rankingReport(q);
+    expect(r.items[0]).toMatchObject({
+      target: null,
+      targetReason: "ERP_BINDING_UNAVAILABLE",
+      hit: null,
+      progress: null,
+    });
+    expect(r.summary.targetAmount).toBeNull();
+  });
+  for (const reason of ["AMBIGUOUS_ACTIVE_BINDING", "TARGET_SCOPE_MISMATCH", "TARGET_NOT_DEFINED"])
+    it("preserva indisponibilidade " + reason, async () => {
+      const f = fixture();
+      f.order(1, "10");
+      f.targets.mockImplementation(async (month, companyCodes) => ({
+        month,
+        companyCodes,
+        source: "local-canonical-targets",
+        identity: "private-Auth-UUID-to-CODVEND",
+        readOnly: true,
+        targets: [{ sellerCode: 34, amount: null, reason }],
+      }));
+      expect((await f.client.rankingReport(q)).items[0]).toMatchObject({
+        target: null,
+        targetReason: reason,
+        hit: null,
+      });
+    });
+  it("período parcial não compara com meta do mês inteiro", async () => {
+    const f = fixture();
+    f.order(1, "10");
+    const r = await f.client.rankingReport({ ...q, from: "2026-10-15" });
+    expect(r.period.targetsComparable).toBe(false);
+    expect(r.items[0]).toMatchObject({
+      target: null,
+      targetReason: "TARGET_PERIOD_MISMATCH",
+      hit: null,
+    });
+  });
+  it("filtro de cliente não compara parcela de vendas à meta integral", async () => {
+    const f = fixture();
+    f.order(1, "10");
+    const r = await f.client.rankingReport({ ...q, customerId: "sankhya:customer:1" });
+    expect(r.items[0]).toMatchObject({
+      target: null,
+      targetReason: "TARGET_CUSTOMER_SCOPE_MISMATCH",
+    });
+  });
+  it("busca por vendedor não corta pedidos por nomes de cliente e preserva posição", async () => {
+    const f = fixture();
+    f.order(1, "20");
+    f.order(2, "10", { seller: 99, customer: 3 });
+    const r = await f.client.rankingReport({ ...q, search: "Outro" });
+    expect(r.items[0]).toMatchObject({ sellerCode: 99, total: "10", rank: 2 });
+    expect(r.total).toBe(1);
+    expect(r.totalWithoutSearch).toBe(3);
+    expect(r.summary.documentCount).toBe(2);
+  });
+  it("saldo não conhecido invalida posição e somas, sem soma parcial", async () => {
+    const f = fixture();
+    f.order(1, null);
+    f.order(2, "10", { seller: 12, customer: 2 });
+    const r = await f.client.rankingReport(q);
+    expect(r.summary.documentAmount).toBeNull();
+    expect(r.items.every((x) => x["rank"] === null)).toBe(true);
+    expect(r.items.find((x) => x["sellerCode"] === 34)?.["total"]).toBeNull();
+  });
+  it("respeita escopo privado de vendedor e gestor; não decide pelo nome", async () => {
+    const f = fixture();
+    f.order(1, "30");
+    f.order(2, "20", { seller: 12, customer: 2 });
+    f.order(3, "10", { seller: 99, customer: 3 });
+    const s = await readRanking(
+      f.g,
+      q,
+      { role: "vendedor", sellerCode: 34, companyCodes: [1] },
+      f.targets,
+    );
+    expect(s.items.map((x) => x.sellerCode)).toEqual([34]);
+    const g = await readRanking(
+      f.g,
+      q,
+      { role: "gestor", sellerCode: 34, companyCodes: [1], teamSellerCodes: [12] },
+      f.targets,
+    );
+    expect(g.items.map((x) => x.sellerCode)).toEqual([34, 12]);
+    await expect(
+      readRanking(
+        f.g,
+        { ...q, sellerCode: 99 },
+        { role: "vendedor", sellerCode: 34, companyCodes: [1] },
+        f.targets,
+      ),
+    ).rejects.toMatchObject({ code: "ERP_SCOPE_FORBIDDEN" });
+  });
+  it("precisão textual/BigInt sem dinheiro em Number e barra limitada apenas na apresentação", async () => {
+    const f = fixture();
+    f.order(1, "9007199254740993.123456789");
+    const r = await f.client.rankingReport(q);
+    expect(r.items[0]?.["total"]).toBe("9007199254740993.123456789");
+    expect(rankingProgress("9007199254740993.123456789", "0.01")).toBe(100);
+    expect(rankingProgress("1", "0")).toBeNull();
+  });
+  it("não duplica vendedor empatado; posição numérica vem do SQL", async () => {
+    const f = fixture();
+    f.order(1, "10");
+    f.order(2, "10", { seller: 12, customer: 2 });
+    const r = await f.client.rankingReport(q);
+    expect(r.items.map((x) => [x["sellerCode"], x["rank"]])).toEqual([
+      [12, 1],
+      [34, 2],
+    ]);
+    expect(
+      f.g.select.mock.calls.some(([sql]) =>
+        sql.includes(
+          "ROW_NUMBER() OVER(ORDER BY SUM(C.VLRNOTA) DESC NULLS LAST,C.CODVEND ASC NULLS LAST)",
+        ),
+      ),
+    ).toBe(true);
+  });
+  it("paginação remota sem sobreposição e busca vazia não ressuscita manuais", async () => {
+    const f = fixture();
+    f.order(1, "20");
+    f.order(2, "10", { seller: 12, customer: 2 });
+    const a = await f.client.rankingReport({ ...q, limit: 1 }),
+      b = await f.client.rankingReport({ ...q, offset: 1, limit: 1 });
+    expect(a.items[0]?.["id"]).not.toBe(b.items[0]?.["id"]);
+    expect((await f.client.rankingReport({ ...q, search: "inexistente" })).items).toEqual([]);
+  });
+  it("RPC indisponível falha fechado; metadados privados/monetários incompatíveis são rejeitados", async () => {
+    const f = fixture();
+    f.order(1, "10");
+    f.targets.mockRejectedValueOnce(new Error("indisponível"));
+    await expect(f.client.rankingReport(q)).rejects.toBeInstanceOf(ERPOnlineError);
+    f.targets.mockImplementation(async (month, companyCodes) => ({
+      month,
+      companyCodes,
+      source: "local-canonical-targets",
+      identity: "private-Auth-UUID-to-CODVEND",
+      readOnly: true,
+      targets: [{ sellerCode: 34, amount: "10", reason: null, userId: "privado" }],
+    }));
+    await expect(f.client.rankingReport(q)).rejects.toMatchObject({ code: "ERP_UNAVAILABLE" });
+  });
+  it("inclui metas definidas mesmo sem vendas, sem inventar faturamento", async () => {
+    const f = fixture();
+    const r = await f.client.rankingReport(q);
+    expect(r.items.map((x) => [x["sellerCode"], x["count"], x["clients"], x["total"]])).toEqual([
+      [12, 0, 0, "0"],
+      [34, 0, 0, "0"],
+    ]);
+    expect(r.summary).toMatchObject({ documentCount: 0, documentAmount: "0", targetAmount: "100" });
+  });
+  it("valida datas, chaves e janela antes de qualquer rede", async () => {
+    const f = fixture();
+    for (const v of [
+      { month: "0000-01" },
+      { month: "2026-13" },
+      { limit: 51 },
+      { from: "2026-02-30" },
+      { from: "2027-01-01" },
+      { sellerCode: 0 },
+      { userId: "arbitrário" },
+      { month: "2026-10; DROP" },
+    ]) {
+      expect(validRankingQuery({ ...q, ...v } as import("./erp-ranking").ERPRankingQuery)).toBe(
+        false,
+      );
+      await expect(
+        f.client.rankingReport({ ...q, ...v } as import("./erp-ranking").ERPRankingQuery),
+      ).rejects.toMatchObject({
+        code: "INVALID_REQUEST",
+      });
+    }
+    expect(f.transport).not.toHaveBeenCalled();
+    expect(rankingPeriod({ ...q, month: "2024-02" }).to).toBe("2024-02-29");
+    expect(rankingPeriod({ ...q, month: "0001-02" }).to).toBe("0001-02-28");
+  });
+  it("migração somente de função; não escreve dados ou expõe UUID/nome no resultado", () => {
+    const s = readFileSync("supabase/migrations/20261026203414_sankhya_target_read.sql", "utf8");
+    expect(s).not.toMatch(/\b(?:insert|update|delete|create table|alter table|drop)\b/i);
+    expect(s).toContain("t.seller_id=u.id");
+    expect(s).toContain("u.active");
+    expect(s).toContain("b.seller_code=any(sellers)");
+    expect(s).toContain("security definer set search_path=pg_catalog,public");
+    expect(s).toContain("b.company_codes@>selected and selected@>b.company_codes");
+  });
 });

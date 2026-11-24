@@ -1,29 +1,289 @@
-import {afterEach,describe,expect,it} from 'vitest';
-import {billedFixture,closeBilledFixtures} from '../test/billed-orders-fixture';
-import {readBilledOrdersReport} from '../../supabase/functions/sankhya-online/history';
-import {createERPClient,type ERPSalesQuery} from './erp-online';
-import {exportERPRows} from '../sul/erp-hooks';
-const q:ERPSalesQuery={resource:'orders',offset:0,limit:10},admin={role:'administrador' as const};
+import { afterEach, describe, expect, it } from "vitest";
+import { billedFixture, closeBilledFixtures } from "../test/billed-orders-fixture";
+import { readBilledOrdersReport } from "../../supabase/functions/sankhya-online/history";
+import { createERPClient, type ERPSalesQuery } from "./erp-online";
+import { exportERPRows } from "../sul/erp-hooks";
+const q: ERPSalesQuery = { resource: "orders", offset: 0, limit: 10 },
+  admin = { role: "administrador" as const };
 afterEach(closeBilledFixtures);
-describe('Pedidos com notas qualificadas, incluindo parciais — SQLite adaptado',()=>{
- it('inclui pedido com apenas um de seus itens faturado, sem presumir integralidade',async()=>{const f=billedFixture();f.order(1,'20');f.origin(1,1001);f.db.exec('INSERT INTO TGFITE VALUES(1001,2)');const d=await f.client.billedOrdersReport(q);expect(d).toMatchObject({total:1,summary:{documentCount:1,documentAmount:'99999'},billedOrdersPolicy:{includePartial:true,billingExtent:'not-determined',periodField:'TGFCAB.DTFATUR'},items:[{id:'sankhya:order:1001',total:'99999',invoiced:'20',nf:'1',billingFacts:{invoiceCount:1,sharedInvoiceCount:0}}]});});
- it('duas notas e vários vínculos não repetem o pedido nem os cabeçalhos fiscais',async()=>{const f=billedFixture();f.order(1,'20');f.origin(1,1001);f.link(1,1001,2);f.order(2,'10');f.link(2,1001);const d=await f.client.billedOrdersReport(q);expect(d).toMatchObject({total:1,summary:{documentCount:1,documentAmount:'99999'},billedOrdersSummary:{invoiceLinks:2,unattributedOrders:0,assignedInvoiceAmount:'30'},items:[{nf:'1, 2',invoiced:'30',billingFacts:{invoiceCount:2}}]});});
- it('nota de dois pedidos inclui ambos, mas não reparte nem duplica seu valor faturado',async()=>{const f=billedFixture();f.order(1,'20');f.origin(1,1001);f.origin(1,2001);const d=await f.client.billedOrdersReport(q);expect(d).toMatchObject({total:2,summary:{documentCount:2,documentAmount:'199998'},billedOrdersSummary:{invoiceLinks:2,unattributedOrders:2,assignedInvoiceAmount:null}});expect(d.items.every(r=>r['invoiced']===null&&(r['billingFacts'] as any).sharedInvoiceCount===1)).toBe(true);});
- it('a mesma nota com vários pedidos pode formar um grupo; o KPI conta pedidos, não grupo',async()=>{const f=billedFixture();f.order(1);f.origin(1,1001);f.origin(1,2001);expect(await f.client.billedOrdersReport({...q,groupBy:'seller'})).toMatchObject({total:1,summary:{documentCount:2,documentAmount:'199998'},items:[{count:2,total:'199998'}]});});
- it('DTFATUR seleciona a nota, mantendo DTNEG original do pedido e sem fallback',async()=>{const f=billedFixture();f.order(1,'20',{billingDate:'2026-10-25'});f.origin(1,1001,{date:'2026-01-03'});expect(await f.client.billedOrdersReport({...q,from:'2026-10-25',to:'2026-10-25'})).toMatchObject({total:1,items:[{date:'2026-01-03'}]});f.db.exec('UPDATE TGFCAB SET DTFATUR=NULL WHERE NUNOTA=1');expect(await f.client.billedOrdersReport(q)).toMatchObject({total:0});});
- it('um pedido com nota anterior ao recorte não entra só pela data de emissão do pedido',async()=>{const f=billedFixture();f.order(1,'20',{billingDate:'2026-09-30'});f.origin(1);expect(await f.client.billedOrdersReport({...q,from:'2026-10-01'})).toMatchObject({total:0});});
- it.each([{movement:'P',operation:1001},{status:'P'},{fiscalStatus:'R'},{company:4},{customer:2},{operation:1003},{billingDate:null}])('nota fora da qualificação não comprova faturamento: %j',async patch=>{const f=billedFixture();f.order(1,'20',patch);f.origin(1,1001);expect(await f.client.billedOrdersReport(q)).toMatchObject({total:0});});
- it('origem mista ou item fiscal sem referência não vira nota qualificada',async()=>{const f=billedFixture();f.order(1);f.origin(1);f.db.exec('INSERT INTO TGFITE VALUES(1,2)');expect(await f.client.billedOrdersReport(q)).toMatchObject({total:0});});
- it('nota qualificada já comprovada basta; outra incompleta não cria integralidade nem soma parcial oculta',async()=>{const f=billedFixture();f.order(1,'20');f.origin(1,1001);f.order(2,'900');f.link(2,1001);f.db.exec('INSERT INTO TGFITE VALUES(2,2)');expect(await f.client.billedOrdersReport(q)).toMatchObject({total:1,items:[{invoiced:null,nf:'1',billingFacts:{unqualifiedInvoiceCount:1}}]});});
- it('valor ou número fiscal ausente permanece nulo, não zero/documento inventado',async()=>{const f=billedFixture();f.order(1,null);f.origin(1);f.db.exec('UPDATE TGFCAB SET NUMNOTA=NULL WHERE NUNOTA=1');expect(await f.client.billedOrdersReport(q)).toMatchObject({total:1,items:[{nf:null,invoiced:null,billingFacts:{missingAmountCount:1,missingNumberCount:1}}],billedOrdersSummary:{unattributedOrders:1,assignedInvoiceAmount:null}});});
- it('mantém dinheiro além do inteiro seguro textual sem somar pedido e nota',async()=>{const f=billedFixture();f.order(1,'9007199254740993.01');f.origin(1);expect(await f.client.billedOrdersReport(q)).toMatchObject({summary:{documentAmount:'99999'},items:[{invoiced:'9007199254740993.01'}]});});
- it('carteira/equipe e filial continuam resolvidas no servidor',async()=>{const f=billedFixture();f.order(1);f.origin(1);f.order(2,'20',{customer:2,seller:12});f.origin(2,2001,{customer:2,seller:12});const scope={role:'vendedor' as const,sellerCode:34,companyCodes:[1]};expect(await readBilledOrdersReport(f.g,q,scope)).toMatchObject({total:1});await expect(readBilledOrdersReport(f.g,{...q,sellerCode:12},scope)).rejects.toMatchObject({code:'ERP_SCOPE_FORBIDDEN'});});
- it('CSV65 lê50/15/fechamento1, conserva dinheiro e ignora pedidos manuais',async()=>{const f=billedFixture();for(let n=1;n<=65;n++){f.order(n,'0.1');f.origin(n,n+1000);}const rows=await exportERPRows({client:f.client,resource:'orders',billedOrdersReport:{}},{resource:'orders'},[{id:'manual',total:999}],()=>{});expect(rows).toHaveLength(65);expect(rows.every(r=>r['invoiced']==='0.1')).toBe(true);expect(f.transport.mock.calls.map(([b])=>[b.query.offset,b.query.limit])).toEqual([[0,50],[50,50],[0,1]]);});
- it('CSV rejeita mudança no valor fiscal mesmo com pedidos e valor de pedidos iguais',async()=>{const f=billedFixture();f.order(1);f.origin(1);const d=await f.client.billedOrdersReport(q);let n=0;const c=createERPClient(async()=>({error:null,data:{...d,...(++n>1?{billedOrdersSummary:{...d.billedOrdersSummary,assignedInvoiceAmount:'999'}}:{})}}));await expect(exportERPRows({client:c,resource:'orders',billedOrdersReport:{}},{resource:'orders'},[],()=>{})).rejects.toMatchObject({code:'INVALID_RESPONSE'});});
- it('metadado fiscal ausente falha fechada antes de ler valores',async()=>{const f=billedFixture();f.db.exec("DELETE FROM USER_TAB_COLUMNS WHERE TABLE_NAME='TGFCAB' AND COLUMN_NAME='NUMNOTA'");await expect(f.client.billedOrdersReport(q)).rejects.toMatchObject({code:'ERP_UNAVAILABLE'});expect(f.g.select).toHaveBeenCalledTimes(1);});
- it('nota comprovadamente não comercial não contamina o valor do recorte padrão',async()=>{const f=billedFixture();f.order(1,'20');f.origin(1,1001);f.order(2,'900',{operation:1102});f.link(2,1001);f.db.exec('UPDATE TGFTOP SET GOLSINAL=0 WHERE CODTIPOPER=1102');expect(await f.client.billedOrdersReport(q)).toMatchObject({items:[{invoiced:'20',billingFacts:{unqualifiedInvoiceCount:0}}]});});
- it('TOP desconhecida de outra referência mantém o pedido visível e valor faturado indisponível',async()=>{const f=billedFixture();f.order(1,'20');f.origin(1,1001);f.order(2,'900',{version:'2000-01-01'});f.link(2,1001);expect(await f.client.billedOrdersReport(q)).toMatchObject({total:1,items:[{invoiced:null,billingFacts:{unqualifiedInvoiceCount:1}}]});});
- it('preserva sinal nativo sem inventar comissão, saldo ou pagamento',async()=>{const f=billedFixture();f.order(1,'-20.1234');f.origin(1);expect(await f.client.billedOrdersReport(q)).toMatchObject({items:[{invoiced:'-20.1234'}]});});
- it('SDK recusa falta de política, rateio declarado e valor binário',async()=>{const f=billedFixture();f.order(1);f.origin(1);const d=await f.client.billedOrdersReport(q);for(const patch of [{billedOrdersSummary:{...d.billedOrdersSummary,assignedInvoiceAmount:'999'}},{billedOrdersPolicy:{...d.billedOrdersPolicy,billingExtent:'integral'}},{billedOrdersPolicy:null},{billedOrdersPolicy:{...d.billedOrdersPolicy,quantitiesAllocated:true}},{items:[{...d.items[0],invoiced:10}]},{items:[{...d.items[0],billingFacts:{invoiceCount:0}}]}])await expect(createERPClient(async()=>({data:{...d,...patch},error:null})).billedOrdersReport(q)).rejects.toMatchObject({code:'INVALID_RESPONSE'});});
- it.each([{resource:'invoices'},{limit:51},{sellerCode:0},{companyCode:3},{productMix:true},{sql:'SELECT 1'},{from:'2026-02-30'},{from:'2026-10-26',to:'2026-10-01'},{sort:'__proto__'}])('recusa entrada fora do contrato antes de consultar: %j',async patch=>{const f=billedFixture();await expect(readBilledOrdersReport(f.g,{...q,...patch} as any,admin)).rejects.toBeDefined();expect(f.g.select).not.toHaveBeenCalled();});
+describe("Pedidos com notas qualificadas, incluindo parciais — SQLite adaptado", () => {
+  it("inclui pedido com apenas um de seus itens faturado, sem presumir integralidade", async () => {
+    const f = billedFixture();
+    f.order(1, "20");
+    f.origin(1, 1001);
+    f.db.exec("INSERT INTO TGFITE VALUES(1001,2)");
+    const d = await f.client.billedOrdersReport(q);
+    expect(d).toMatchObject({
+      total: 1,
+      summary: { documentCount: 1, documentAmount: "99999" },
+      billedOrdersPolicy: {
+        includePartial: true,
+        billingExtent: "not-determined",
+        periodField: "TGFCAB.DTFATUR",
+      },
+      items: [
+        {
+          id: "sankhya:order:1001",
+          total: "99999",
+          invoiced: "20",
+          nf: "1",
+          billingFacts: { invoiceCount: 1, sharedInvoiceCount: 0 },
+        },
+      ],
+    });
+  });
+  it("duas notas e vários vínculos não repetem o pedido nem os cabeçalhos fiscais", async () => {
+    const f = billedFixture();
+    f.order(1, "20");
+    f.origin(1, 1001);
+    f.link(1, 1001, 2);
+    f.order(2, "10");
+    f.link(2, 1001);
+    const d = await f.client.billedOrdersReport(q);
+    expect(d).toMatchObject({
+      total: 1,
+      summary: { documentCount: 1, documentAmount: "99999" },
+      billedOrdersSummary: { invoiceLinks: 2, unattributedOrders: 0, assignedInvoiceAmount: "30" },
+      items: [{ nf: "1, 2", invoiced: "30", billingFacts: { invoiceCount: 2 } }],
+    });
+  });
+  it("nota de dois pedidos inclui ambos, mas não reparte nem duplica seu valor faturado", async () => {
+    const f = billedFixture();
+    f.order(1, "20");
+    f.origin(1, 1001);
+    f.origin(1, 2001);
+    const d = await f.client.billedOrdersReport(q);
+    expect(d).toMatchObject({
+      total: 2,
+      summary: { documentCount: 2, documentAmount: "199998" },
+      billedOrdersSummary: { invoiceLinks: 2, unattributedOrders: 2, assignedInvoiceAmount: null },
+    });
+    expect(
+      d.items.every(
+        (r) =>
+          r["invoiced"] === null &&
+          (r["billingFacts"] as { sharedInvoiceCount: number }).sharedInvoiceCount === 1,
+      ),
+    ).toBe(true);
+  });
+  it("a mesma nota com vários pedidos pode formar um grupo; o KPI conta pedidos, não grupo", async () => {
+    const f = billedFixture();
+    f.order(1);
+    f.origin(1, 1001);
+    f.origin(1, 2001);
+    expect(await f.client.billedOrdersReport({ ...q, groupBy: "seller" })).toMatchObject({
+      total: 1,
+      summary: { documentCount: 2, documentAmount: "199998" },
+      items: [{ count: 2, total: "199998" }],
+    });
+  });
+  it("DTFATUR seleciona a nota, mantendo DTNEG original do pedido e sem fallback", async () => {
+    const f = billedFixture();
+    f.order(1, "20", { billingDate: "2026-10-25" });
+    f.origin(1, 1001, { date: "2026-01-03" });
+    expect(
+      await f.client.billedOrdersReport({ ...q, from: "2026-10-25", to: "2026-10-25" }),
+    ).toMatchObject({ total: 1, items: [{ date: "2026-01-03" }] });
+    f.db.exec("UPDATE TGFCAB SET DTFATUR=NULL WHERE NUNOTA=1");
+    expect(await f.client.billedOrdersReport(q)).toMatchObject({ total: 0 });
+  });
+  it("um pedido com nota anterior ao recorte não entra só pela data de emissão do pedido", async () => {
+    const f = billedFixture();
+    f.order(1, "20", { billingDate: "2026-09-30" });
+    f.origin(1);
+    expect(await f.client.billedOrdersReport({ ...q, from: "2026-10-01" })).toMatchObject({
+      total: 0,
+    });
+  });
+  it.each([
+    { movement: "P", operation: 1001 },
+    { status: "P" },
+    { fiscalStatus: "R" },
+    { company: 4 },
+    { customer: 2 },
+    { operation: 1003 },
+    { billingDate: null },
+  ])("nota fora da qualificação não comprova faturamento: %j", async (patch) => {
+    const f = billedFixture();
+    f.order(1, "20", patch);
+    f.origin(1, 1001);
+    expect(await f.client.billedOrdersReport(q)).toMatchObject({ total: 0 });
+  });
+  it("origem mista ou item fiscal sem referência não vira nota qualificada", async () => {
+    const f = billedFixture();
+    f.order(1);
+    f.origin(1);
+    f.db.exec("INSERT INTO TGFITE VALUES(1,2)");
+    expect(await f.client.billedOrdersReport(q)).toMatchObject({ total: 0 });
+  });
+  it("nota qualificada já comprovada basta; outra incompleta não cria integralidade nem soma parcial oculta", async () => {
+    const f = billedFixture();
+    f.order(1, "20");
+    f.origin(1, 1001);
+    f.order(2, "900");
+    f.link(2, 1001);
+    f.db.exec("INSERT INTO TGFITE VALUES(2,2)");
+    expect(await f.client.billedOrdersReport(q)).toMatchObject({
+      total: 1,
+      items: [{ invoiced: null, nf: "1", billingFacts: { unqualifiedInvoiceCount: 1 } }],
+    });
+  });
+  it("valor ou número fiscal ausente permanece nulo, não zero/documento inventado", async () => {
+    const f = billedFixture();
+    f.order(1, null);
+    f.origin(1);
+    f.db.exec("UPDATE TGFCAB SET NUMNOTA=NULL WHERE NUNOTA=1");
+    expect(await f.client.billedOrdersReport(q)).toMatchObject({
+      total: 1,
+      items: [
+        {
+          nf: null,
+          invoiced: null,
+          billingFacts: { missingAmountCount: 1, missingNumberCount: 1 },
+        },
+      ],
+      billedOrdersSummary: { unattributedOrders: 1, assignedInvoiceAmount: null },
+    });
+  });
+  it("mantém dinheiro além do inteiro seguro textual sem somar pedido e nota", async () => {
+    const f = billedFixture();
+    f.order(1, "9007199254740993.01");
+    f.origin(1);
+    expect(await f.client.billedOrdersReport(q)).toMatchObject({
+      summary: { documentAmount: "99999" },
+      items: [{ invoiced: "9007199254740993.01" }],
+    });
+  });
+  it("carteira/equipe e filial continuam resolvidas no servidor", async () => {
+    const f = billedFixture();
+    f.order(1);
+    f.origin(1);
+    f.order(2, "20", { customer: 2, seller: 12 });
+    f.origin(2, 2001, { customer: 2, seller: 12 });
+    const scope = { role: "vendedor" as const, sellerCode: 34, companyCodes: [1] };
+    expect(await readBilledOrdersReport(f.g, q, scope)).toMatchObject({ total: 1 });
+    await expect(
+      readBilledOrdersReport(f.g, { ...q, sellerCode: 12 }, scope),
+    ).rejects.toMatchObject({ code: "ERP_SCOPE_FORBIDDEN" });
+  });
+  it("CSV65 lê50/15/fechamento1, conserva dinheiro e ignora pedidos manuais", async () => {
+    const f = billedFixture();
+    for (let n = 1; n <= 65; n++) {
+      f.order(n, "0.1");
+      f.origin(n, n + 1000);
+    }
+    const rows = await exportERPRows(
+      { client: f.client, resource: "orders", billedOrdersReport: {} },
+      { resource: "orders" },
+      [{ id: "manual", total: 999 }],
+      () => {},
+    );
+    expect(rows).toHaveLength(65);
+    expect(rows.every((r) => r["invoiced"] === "0.1")).toBe(true);
+    expect(f.transport.mock.calls.map(([b]) => [b.query.offset, b.query.limit])).toEqual([
+      [0, 50],
+      [50, 50],
+      [0, 1],
+    ]);
+  });
+  it("CSV rejeita mudança no valor fiscal mesmo com pedidos e valor de pedidos iguais", async () => {
+    const f = billedFixture();
+    f.order(1);
+    f.origin(1);
+    const d = await f.client.billedOrdersReport(q);
+    let n = 0;
+    const c = createERPClient(async () => ({
+      error: null,
+      data: {
+        ...d,
+        ...(++n > 1
+          ? { billedOrdersSummary: { ...d.billedOrdersSummary, assignedInvoiceAmount: "999" } }
+          : {}),
+      },
+    }));
+    await expect(
+      exportERPRows(
+        { client: c, resource: "orders", billedOrdersReport: {} },
+        { resource: "orders" },
+        [],
+        () => {},
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+  it("metadado fiscal ausente falha fechada antes de ler valores", async () => {
+    const f = billedFixture();
+    f.db.exec("DELETE FROM USER_TAB_COLUMNS WHERE TABLE_NAME='TGFCAB' AND COLUMN_NAME='NUMNOTA'");
+    await expect(f.client.billedOrdersReport(q)).rejects.toMatchObject({ code: "ERP_UNAVAILABLE" });
+    expect(f.g.select).toHaveBeenCalledTimes(1);
+  });
+  it("nota comprovadamente não comercial não contamina o valor do recorte padrão", async () => {
+    const f = billedFixture();
+    f.order(1, "20");
+    f.origin(1, 1001);
+    f.order(2, "900", { operation: 1102 });
+    f.link(2, 1001);
+    f.db.exec("UPDATE TGFTOP SET GOLSINAL=0 WHERE CODTIPOPER=1102");
+    expect(await f.client.billedOrdersReport(q)).toMatchObject({
+      items: [{ invoiced: "20", billingFacts: { unqualifiedInvoiceCount: 0 } }],
+    });
+  });
+  it("TOP desconhecida de outra referência mantém o pedido visível e valor faturado indisponível", async () => {
+    const f = billedFixture();
+    f.order(1, "20");
+    f.origin(1, 1001);
+    f.order(2, "900", { version: "2000-01-01" });
+    f.link(2, 1001);
+    expect(await f.client.billedOrdersReport(q)).toMatchObject({
+      total: 1,
+      items: [{ invoiced: null, billingFacts: { unqualifiedInvoiceCount: 1 } }],
+    });
+  });
+  it("preserva sinal nativo sem inventar comissão, saldo ou pagamento", async () => {
+    const f = billedFixture();
+    f.order(1, "-20.1234");
+    f.origin(1);
+    expect(await f.client.billedOrdersReport(q)).toMatchObject({
+      items: [{ invoiced: "-20.1234" }],
+    });
+  });
+  it("SDK recusa falta de política, rateio declarado e valor binário", async () => {
+    const f = billedFixture();
+    f.order(1);
+    f.origin(1);
+    const d = await f.client.billedOrdersReport(q);
+    for (const patch of [
+      { billedOrdersSummary: { ...d.billedOrdersSummary, assignedInvoiceAmount: "999" } },
+      { billedOrdersPolicy: { ...d.billedOrdersPolicy, billingExtent: "integral" } },
+      { billedOrdersPolicy: null },
+      { billedOrdersPolicy: { ...d.billedOrdersPolicy, quantitiesAllocated: true } },
+      { items: [{ ...d.items[0], invoiced: 10 }] },
+      { items: [{ ...d.items[0], billingFacts: { invoiceCount: 0 } }] },
+    ])
+      await expect(
+        createERPClient(async () => ({ data: { ...d, ...patch }, error: null })).billedOrdersReport(
+          q,
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+  it.each([
+    { resource: "invoices" },
+    { limit: 51 },
+    { sellerCode: 0 },
+    { companyCode: 3 },
+    { productMix: true },
+    { sql: "SELECT 1" },
+    { from: "2026-02-30" },
+    { from: "2026-10-26", to: "2026-10-01" },
+    { sort: "__proto__" },
+  ])("recusa entrada fora do contrato antes de consultar: %j", async (patch) => {
+    const f = billedFixture();
+    await expect(
+      readBilledOrdersReport(
+        f.g,
+        { ...q, ...patch } as Parameters<typeof readBilledOrdersReport>[1],
+        admin,
+      ),
+    ).rejects.toBeDefined();
+    expect(f.g.select).not.toHaveBeenCalled();
+  });
 });

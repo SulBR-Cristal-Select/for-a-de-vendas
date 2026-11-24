@@ -200,7 +200,9 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
         totalWithoutSearch: 1,
       },
     }));
-    const { result } = renderHook(() => useERPOrderLookups(client, "sankhya:customer:1", [], "sankhya:seller:901"));
+    const { result } = renderHook(() =>
+      useERPOrderLookups(client, "sankhya:customer:1", [], "sankhya:seller:901"),
+    );
     // O cliente aponta900; somente o vínculo da sessão901 deve ficar retido.
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.sellers).toHaveLength(51);
@@ -326,28 +328,57 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
   });
 });
 
-describe('Regressões do contexto comercial do pedido', () => {
-  it('filtra a carteira pelo vendedor antes da seleção do cliente e refaz a consulta na troca', async () => {
-    const {client,transporte}=preparar();
-    const hook=renderHook(({seller})=>useERPOrderLookups(client,'',[],seller),{initialProps:{seller:'sankhya:seller:8'}});
-    await waitFor(()=>expect(hook.result.current.loading).toBe(false));
-    expect(transporte).toHaveBeenCalledWith(expect.objectContaining({operation:'window',query:expect.objectContaining({resource:'customers',filters:{sellerCode:8}})}));
-    hook.rerender({seller:'sankhya:seller:12'});
-    await waitFor(()=>expect(transporte).toHaveBeenCalledWith(expect.objectContaining({operation:'window',query:expect.objectContaining({resource:'customers',filters:{sellerCode:12},search:'',offset:0})})));
+describe("Regressões do contexto comercial do pedido", () => {
+  it("filtra a carteira pelo vendedor antes da seleção do cliente e refaz a consulta na troca", async () => {
+    const { client, transporte } = preparar();
+    const hook = renderHook(({ seller }) => useERPOrderLookups(client, "", [], seller), {
+      initialProps: { seller: "sankhya:seller:8" },
+    });
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    expect(transporte).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "window",
+        query: expect.objectContaining({ resource: "customers", filters: { sellerCode: 8 } }),
+      }),
+    );
+    hook.rerender({ seller: "sankhya:seller:12" });
+    await waitFor(() =>
+      expect(transporte).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: "window",
+          query: expect.objectContaining({
+            resource: "customers",
+            filters: { sellerCode: 12 },
+            search: "",
+            offset: 0,
+          }),
+        }),
+      ),
+    );
   });
-  it('não publica produtos da tabela anterior enquanto a nova consulta está pendente', async () => {
-    const {client,transporte}=preparar();const original=transporte.getMockImplementation()!;
-    let release: (()=>void)|undefined;
-    transporte.mockImplementation(async body=>{
-      if(body.operation==='window' && body.query.resource==='products' && body.query.filters?.customerCode===2)await new Promise<void>(resolve=>{release=resolve;});
+  it("não publica produtos da tabela anterior enquanto a nova consulta está pendente", async () => {
+    const { client, transporte } = preparar();
+    const original = transporte.getMockImplementation()!;
+    let release: (() => void) | undefined;
+    transporte.mockImplementation(async (body) => {
+      if (
+        body.operation === "window" &&
+        body.query.resource === "products" &&
+        body.query.filters?.customerCode === 2
+      )
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
       return original(body);
     });
-    const hook=renderHook(({customer})=>useERPOrderLookups(client,customer,[]),{initialProps:{customer:'sankhya:customer:1'}});
-    await waitFor(()=>expect(hook.result.current.products).toHaveLength(50));
-    hook.rerender({customer:'sankhya:customer:2'});
+    const hook = renderHook(({ customer }) => useERPOrderLookups(client, customer, []), {
+      initialProps: { customer: "sankhya:customer:1" },
+    });
+    await waitFor(() => expect(hook.result.current.products).toHaveLength(50));
+    hook.rerender({ customer: "sankhya:customer:2" });
     expect(hook.result.current.products).toEqual([]);
     expect(hook.result.current.loading).toBe(true);
-    await act(async()=>release?.());
-    await waitFor(()=>expect(hook.result.current.products).toHaveLength(50));
+    await act(async () => release?.());
+    await waitFor(() => expect(hook.result.current.products).toHaveLength(50));
   });
 });

@@ -1,26 +1,230 @@
-import{afterEach,describe,expect,it}from'vitest';
-import{indicatorFixture}from'../test/indicator-series-fixture';
-import{closeBilledFixtures}from'../test/billed-orders-fixture';
-import{readIndicatorSeries}from'../../supabase/functions/sankhya-online/indicator-series';
-import{createERPClient}from'./erp-online';
-import{validIndicatorQuery}from'./erp-indicator-series';
-const q={resource:'orders' as const,month:'2026-10',series:'items-day' as const,offset:0,limit:50};
+import { afterEach, describe, expect, it } from "vitest";
+import { indicatorFixture } from "../test/indicator-series-fixture";
+import { closeBilledFixtures } from "../test/billed-orders-fixture";
+import { readIndicatorSeries } from "../../supabase/functions/sankhya-online/indicator-series";
+import { createERPClient } from "./erp-online";
+import { validIndicatorQuery } from "./erp-indicator-series";
+const q = {
+  resource: "orders" as const,
+  month: "2026-10",
+  series: "items-day" as const,
+  offset: 0,
+  limit: 50,
+};
 afterEach(closeBilledFixtures);
-describe('Séries de indicadores — SQLite adaptado, não Oracle',()=>{
- it('valor diário usa VLRTOT nativo, nunca preço vezes quantidade nem cabeçalho',async()=>{const f=indicatorFixture();f.order(1,'99999',{date:'2026-10-25'});f.item(1,'9.123456789');f.order(2,'99999',{date:'2026-10-26'});f.item(2,'10.987654321');const r=await f.client.indicatorSeries(q);expect(r.summary).toMatchObject({recordCount:2,value:'20.11111111'});expect(r.items.map(x=>[x.groupCode,x.label,x.value])).toEqual([[20261025,'2026-10-25','9.123456789'],[20261026,'2026-10-26','10.987654321']]);expect(r.indicatorPolicy).toMatchObject({amountField:'TGFITE.VLRTOT',dateField:'TGFCAB.DTNEG',headerAndItemsAdded:false});});
- it('vendedores homônimos continuam grupos distintos por código',async()=>{const f=indicatorFixture();f.order(1);f.item(1,'10');f.order(2,'10',{seller:12,customer:2});f.item(2,'20');const r=await f.client.indicatorSeries({...q,series:'items-seller'});expect(new Set(r.items.map(x=>x.groupCode)).size).toBe(2);expect(r.items.map(x=>x.label)).toEqual(['Homônimo','Homônimo']);expect(r.summary.value).toBe('30');});
- it('categoria preserva unidades heterogêneas: quantidade NULL, não soma',async()=>{const f=indicatorFixture();f.order(1);f.item(1,'9');f.item(1,'11',{sequence:2,product:101,unit:'KG'});const r=await f.client.indicatorSeries({...q,series:'items-category'});expect(r.items[0]).toMatchObject({groupCode:1,label:'Categoria nativa',quantity:null,unit:null,value:'20'});});
- it('categoria com unidade única preserva quantidade textual exata',async()=>{const f=indicatorFixture();f.order(1);f.item(1,'9',{quantity:'0.12345'});f.item(1,'11',{sequence:2,product:101,quantity:'0.23456'});expect((await f.client.indicatorSeries({...q,series:'items-category'})).items[0]).toMatchObject({quantity:'0.35801',unit:'UN'});});
- it('produto sem categoria não vira categoria0 nem desaparece da soma',async()=>{const f=indicatorFixture();f.db.exec('UPDATE TGFPRO SET CODGRUPOPROD=NULL');f.order(1);f.item(1,'9');const r=await f.client.indicatorSeries({...q,series:'items-category'});expect(r.items[0]).toMatchObject({groupCode:null,label:null,value:'9'});expect(r.summary.value).toBe('9');});
- it('valor ausente não vira zero nem soma parcial',async()=>{const f=indicatorFixture();f.order(1);f.item(1,null);f.item(1,'9',{sequence:2});const r=await f.client.indicatorSeries(q);expect(r.summary).toMatchObject({value:null,missingValueCount:1});expect(r.items[0]?.value).toBeNull();});
- it('corta mês e outras operações, com escopo de filiais e vendedor privado',async()=>{const f=indicatorFixture();f.order(1);f.item(1,'10');f.order(2,'999',{seller:12,customer:2});f.item(2,'999');f.order(3,'999',{date:'2026-09-30'});f.item(3,'999');f.order(4,'999',{operation:1003});f.item(4,'999');const r=await readIndicatorSeries(f.g,q,{role:'vendedor',sellerCode:34,companyCodes:[1]});expect(r.summary.value).toBe('10');await expect(readIndicatorSeries(f.g,{...q,sellerCode:12},{role:'vendedor',sellerCode:34,companyCodes:[1]})).rejects.toMatchObject({code:'ERP_SCOPE_FORBIDDEN'});});
- it('faturamento diário usa DTFATUR e cabeçalho único, sem juntar P/V',async()=>{const f=indicatorFixture();f.order(100,'50',{movement:'V',operation:1101,date:'2026-09-30',billingDate:'2026-10-25'});f.order(200,'99999',{date:'2026-09-25'});f.item(200);f.item(100);f.db.exec('INSERT INTO TGFVAR VALUES(100,200,1,1)');const r=await f.client.indicatorSeries({...q,series:'billing-day'});expect(r.summary).toMatchObject({recordCount:1,value:'50'});expect(r.items[0]).toMatchObject({label:'2026-10-25',value:'50',count:1});expect(r.indicatorPolicy.dateField).toBe('TGFCAB.DTFATUR');});
- it('carteira compartilhada é lida uma vez, não somada por filial',async()=>{const f=indicatorFixture();f.order(9000,'10',{customer:3,seller:99,date:'2025-09-30'});f.order(9001,'10',{customer:2,seller:12,company:4,date:'2025-09-30'});f.order(1,'10',{customer:2,seller:12});f.item(1);const r=await f.client.indicatorSeries({...q,series:'wallet-seller'});expect(r.summary).toMatchObject({recordCount:2,activeCount:2,buyerCount:1,value:null});expect(r.items.find(x=>x.groupCode===12)).toMatchObject({buyerCount:1});});
- it('clientes globais não somam carteiras compartilhadas e primeira compra precede período',async()=>{const f=indicatorFixture();f.order(9000,'10',{customer:1,date:'2025-09-30'});f.order(9001,'10',{customer:3,seller:99,date:'2025-09-30'});f.order(1,'10',{customer:2,seller:12,date:'2026-09-30'});f.order(2,'10',{customer:2,seller:12,date:'2026-10-25'});const r=await f.client.indicatorSeries({...q,series:'customers-seller'});expect(r.summary).toMatchObject({recordCount:3,activeCount:2,newCount:0});const year=await f.client.indicatorSeries({...q,series:'customers-seller-year'});expect(year.summary.newCount).toBe(1);expect(year.period).toEqual({from:'2026-01-01',to:'2026-12-31'});});
- it('filtro de vendedor de clientes é CODVEND atual, não nome',async()=>{const f=indicatorFixture();f.order(1,'10',{seller:12,customer:2});const r=await f.client.indicatorSeries({...q,series:'customers-seller',sellerCode:12});expect(r.items.map(x=>x.groupCode)).toEqual([12]);expect(r.summary).toMatchObject({recordCount:1,activeCount:1,newCount:1});});
- it('janelas remotas de série diária não se sobrepõem',async()=>{const f=indicatorFixture();f.order(1);f.item(1);f.order(2,'10',{date:'2026-10-26'});f.item(2);const a=await f.client.indicatorSeries({...q,limit:1}),b=await f.client.indicatorSeries({...q,limit:1,offset:1});expect(a.items[0]?.id).not.toBe(b.items[0]?.id);});
- it('vazio é observado; falha nunca substitui por dados locais',async()=>{const f=indicatorFixture();expect((await f.client.indicatorSeries(q)).summary).toMatchObject({value:'0',recordCount:0});f.g.select.mockRejectedValueOnce(Error('Falha sintética'));await expect(f.client.indicatorSeries(q)).rejects.toMatchObject({code:'ERP_UNAVAILABLE'});});
- it('valida grupo, mês, janela e campos antes de consultar',async()=>{const f=indicatorFixture();for(const change of [{series:'qualquer'},{month:'2026-13'},{limit:51},{sellerCode:0},{sql:'select'},{from:'2026-01-01'}]){expect(validIndicatorQuery({...q,...change} as any)).toBe(false);await expect(f.client.indicatorSeries({...q,...change} as any)).rejects.toMatchObject({code:'INVALID_REQUEST'});}expect(f.transport).not.toHaveBeenCalled();});
- it('agrupamento consolida carteira mensal, diária e clientes antes das contagens',async()=>{const f=indicatorFixture();f.db.exec("UPDATE TGFPAR SET ATIVO='S';");const group={id:'00000000-0000-4000-8000-000000000001',name:'Grupo',version:1,editable:true,memberIds:['sankhya:customer:1','sankhya:customer:2'],members:[]};f.order(9000,'10',{customer:3,seller:99,date:'2025-09-30'});f.order(1,'10',{customer:1,date:'2026-10-25'});f.order(2,'10',{customer:2,seller:12,date:'2026-10-25'});const c=createERPClient(async({query}:any)=>({data:await readIndicatorSeries(f.g,query,{role:'administrador'},[group]),error:null}));const monthly=await c.indicatorSeries({...q,series:'wallet-seller'});expect(monthly.summary).toMatchObject({recordCount:2,buyerCount:1,activeCount:2});const daily=await c.indicatorSeries({...q,series:'wallet-day'});expect(daily.items.find(x=>x.label==='2026-10-25')).toMatchObject({count:2,buyerCount:1});const customers=await c.indicatorSeries({...q,series:'customers-seller'});expect(customers.summary).toMatchObject({recordCount:2,activeCount:2,newCount:1});});
-
+describe("Séries de indicadores — SQLite adaptado, não Oracle", () => {
+  it("valor diário usa VLRTOT nativo, nunca preço vezes quantidade nem cabeçalho", async () => {
+    const f = indicatorFixture();
+    f.order(1, "99999", { date: "2026-10-25" });
+    f.item(1, "9.123456789");
+    f.order(2, "99999", { date: "2026-10-26" });
+    f.item(2, "10.987654321");
+    const r = await f.client.indicatorSeries(q);
+    expect(r.summary).toMatchObject({ recordCount: 2, value: "20.11111111" });
+    expect(r.items.map((x) => [x.groupCode, x.label, x.value])).toEqual([
+      [20261025, "2026-10-25", "9.123456789"],
+      [20261026, "2026-10-26", "10.987654321"],
+    ]);
+    expect(r.indicatorPolicy).toMatchObject({
+      amountField: "TGFITE.VLRTOT",
+      dateField: "TGFCAB.DTNEG",
+      headerAndItemsAdded: false,
+    });
+  });
+  it("vendedores homônimos continuam grupos distintos por código", async () => {
+    const f = indicatorFixture();
+    f.order(1);
+    f.item(1, "10");
+    f.order(2, "10", { seller: 12, customer: 2 });
+    f.item(2, "20");
+    const r = await f.client.indicatorSeries({ ...q, series: "items-seller" });
+    expect(new Set(r.items.map((x) => x.groupCode)).size).toBe(2);
+    expect(r.items.map((x) => x.label)).toEqual(["Homônimo", "Homônimo"]);
+    expect(r.summary.value).toBe("30");
+  });
+  it("categoria preserva unidades heterogêneas: quantidade NULL, não soma", async () => {
+    const f = indicatorFixture();
+    f.order(1);
+    f.item(1, "9");
+    f.item(1, "11", { sequence: 2, product: 101, unit: "KG" });
+    const r = await f.client.indicatorSeries({ ...q, series: "items-category" });
+    expect(r.items[0]).toMatchObject({
+      groupCode: 1,
+      label: "Categoria nativa",
+      quantity: null,
+      unit: null,
+      value: "20",
+    });
+  });
+  it("categoria com unidade única preserva quantidade textual exata", async () => {
+    const f = indicatorFixture();
+    f.order(1);
+    f.item(1, "9", { quantity: "0.12345" });
+    f.item(1, "11", { sequence: 2, product: 101, quantity: "0.23456" });
+    expect(
+      (await f.client.indicatorSeries({ ...q, series: "items-category" })).items[0],
+    ).toMatchObject({ quantity: "0.35801", unit: "UN" });
+  });
+  it("produto sem categoria não vira categoria0 nem desaparece da soma", async () => {
+    const f = indicatorFixture();
+    f.db.exec("UPDATE TGFPRO SET CODGRUPOPROD=NULL");
+    f.order(1);
+    f.item(1, "9");
+    const r = await f.client.indicatorSeries({ ...q, series: "items-category" });
+    expect(r.items[0]).toMatchObject({ groupCode: null, label: null, value: "9" });
+    expect(r.summary.value).toBe("9");
+  });
+  it("valor ausente não vira zero nem soma parcial", async () => {
+    const f = indicatorFixture();
+    f.order(1);
+    f.item(1, null);
+    f.item(1, "9", { sequence: 2 });
+    const r = await f.client.indicatorSeries(q);
+    expect(r.summary).toMatchObject({ value: null, missingValueCount: 1 });
+    expect(r.items[0]?.value).toBeNull();
+  });
+  it("corta mês e outras operações, com escopo de filiais e vendedor privado", async () => {
+    const f = indicatorFixture();
+    f.order(1);
+    f.item(1, "10");
+    f.order(2, "999", { seller: 12, customer: 2 });
+    f.item(2, "999");
+    f.order(3, "999", { date: "2026-09-30" });
+    f.item(3, "999");
+    f.order(4, "999", { operation: 1003 });
+    f.item(4, "999");
+    const r = await readIndicatorSeries(f.g, q, {
+      role: "vendedor",
+      sellerCode: 34,
+      companyCodes: [1],
+    });
+    expect(r.summary.value).toBe("10");
+    await expect(
+      readIndicatorSeries(
+        f.g,
+        { ...q, sellerCode: 12 },
+        { role: "vendedor", sellerCode: 34, companyCodes: [1] },
+      ),
+    ).rejects.toMatchObject({ code: "ERP_SCOPE_FORBIDDEN" });
+  });
+  it("faturamento diário usa DTFATUR e cabeçalho único, sem juntar P/V", async () => {
+    const f = indicatorFixture();
+    f.order(100, "50", {
+      movement: "V",
+      operation: 1101,
+      date: "2026-09-30",
+      billingDate: "2026-10-25",
+    });
+    f.order(200, "99999", { date: "2026-09-25" });
+    f.item(200);
+    f.item(100);
+    f.db.exec("INSERT INTO TGFVAR VALUES(100,200,1,1)");
+    const r = await f.client.indicatorSeries({ ...q, series: "billing-day" });
+    expect(r.summary).toMatchObject({ recordCount: 1, value: "50" });
+    expect(r.items[0]).toMatchObject({ label: "2026-10-25", value: "50", count: 1 });
+    expect(r.indicatorPolicy.dateField).toBe("TGFCAB.DTFATUR");
+  });
+  it("carteira compartilhada é lida uma vez, não somada por filial", async () => {
+    const f = indicatorFixture();
+    f.order(9000, "10", { customer: 3, seller: 99, date: "2025-09-30" });
+    f.order(9001, "10", { customer: 2, seller: 12, company: 4, date: "2025-09-30" });
+    f.order(1, "10", { customer: 2, seller: 12 });
+    f.item(1);
+    const r = await f.client.indicatorSeries({ ...q, series: "wallet-seller" });
+    expect(r.summary).toMatchObject({ recordCount: 2, activeCount: 2, buyerCount: 1, value: null });
+    expect(r.items.find((x) => x.groupCode === 12)).toMatchObject({ buyerCount: 1 });
+  });
+  it("clientes globais não somam carteiras compartilhadas e primeira compra precede período", async () => {
+    const f = indicatorFixture();
+    f.order(9000, "10", { customer: 1, date: "2025-09-30" });
+    f.order(9001, "10", { customer: 3, seller: 99, date: "2025-09-30" });
+    f.order(1, "10", { customer: 2, seller: 12, date: "2026-09-30" });
+    f.order(2, "10", { customer: 2, seller: 12, date: "2026-10-25" });
+    const r = await f.client.indicatorSeries({ ...q, series: "customers-seller" });
+    expect(r.summary).toMatchObject({ recordCount: 3, activeCount: 2, newCount: 0 });
+    const year = await f.client.indicatorSeries({ ...q, series: "customers-seller-year" });
+    expect(year.summary.newCount).toBe(1);
+    expect(year.period).toEqual({ from: "2026-01-01", to: "2026-12-31" });
+  });
+  it("filtro de vendedor de clientes é CODVEND atual, não nome", async () => {
+    const f = indicatorFixture();
+    f.order(1, "10", { seller: 12, customer: 2 });
+    const r = await f.client.indicatorSeries({ ...q, series: "customers-seller", sellerCode: 12 });
+    expect(r.items.map((x) => x.groupCode)).toEqual([12]);
+    expect(r.summary).toMatchObject({ recordCount: 1, activeCount: 1, newCount: 1 });
+  });
+  it("janelas remotas de série diária não se sobrepõem", async () => {
+    const f = indicatorFixture();
+    f.order(1);
+    f.item(1);
+    f.order(2, "10", { date: "2026-10-26" });
+    f.item(2);
+    const a = await f.client.indicatorSeries({ ...q, limit: 1 }),
+      b = await f.client.indicatorSeries({ ...q, limit: 1, offset: 1 });
+    expect(a.items[0]?.id).not.toBe(b.items[0]?.id);
+  });
+  it("vazio é observado; falha nunca substitui por dados locais", async () => {
+    const f = indicatorFixture();
+    expect((await f.client.indicatorSeries(q)).summary).toMatchObject({
+      value: "0",
+      recordCount: 0,
+    });
+    f.g.select.mockRejectedValueOnce(Error("Falha sintética"));
+    await expect(f.client.indicatorSeries(q)).rejects.toMatchObject({ code: "ERP_UNAVAILABLE" });
+  });
+  it("valida grupo, mês, janela e campos antes de consultar", async () => {
+    const f = indicatorFixture();
+    for (const change of [
+      { series: "qualquer" },
+      { month: "2026-13" },
+      { limit: 51 },
+      { sellerCode: 0 },
+      { sql: "select" },
+      { from: "2026-01-01" },
+    ]) {
+      expect(
+        validIndicatorQuery({
+          ...q,
+          ...change,
+        } as import("./erp-indicator-series").ERPIndicatorQuery),
+      ).toBe(false);
+      await expect(
+        f.client.indicatorSeries({
+          ...q,
+          ...change,
+        } as import("./erp-indicator-series").ERPIndicatorQuery),
+      ).rejects.toMatchObject({
+        code: "INVALID_REQUEST",
+      });
+    }
+    expect(f.transport).not.toHaveBeenCalled();
+  });
+  it("agrupamento consolida carteira mensal, diária e clientes antes das contagens", async () => {
+    const f = indicatorFixture();
+    f.db.exec("UPDATE TGFPAR SET ATIVO='S';");
+    const group = {
+      id: "00000000-0000-4000-8000-000000000001",
+      name: "Grupo",
+      version: 1,
+      editable: true,
+      memberIds: ["sankhya:customer:1", "sankhya:customer:2"],
+      members: [],
+    };
+    f.order(9000, "10", { customer: 3, seller: 99, date: "2025-09-30" });
+    f.order(1, "10", { customer: 1, date: "2026-10-25" });
+    f.order(2, "10", { customer: 2, seller: 12, date: "2026-10-25" });
+    const c = createERPClient(async ({ query }) => ({
+      data: await readIndicatorSeries(f.g, query, { role: "administrador" }, [group]),
+      error: null,
+    }));
+    const monthly = await c.indicatorSeries({ ...q, series: "wallet-seller" });
+    expect(monthly.summary).toMatchObject({ recordCount: 2, buyerCount: 1, activeCount: 2 });
+    const daily = await c.indicatorSeries({ ...q, series: "wallet-day" });
+    expect(daily.items.find((x) => x.label === "2026-10-25")).toMatchObject({
+      count: 2,
+      buyerCount: 1,
+    });
+    const customers = await c.indicatorSeries({ ...q, series: "customers-seller" });
+    expect(customers.summary).toMatchObject({ recordCount: 2, activeCount: 2, newCount: 1 });
+  });
 });

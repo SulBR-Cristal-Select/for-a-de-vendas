@@ -1,50 +1,421 @@
-import {decimalUnits,erpDecimal,sumERPDecimals} from './erp-decimal';
-import {rankingPeriod,validRankingQuery} from './erp-ranking';
-export const INDICATOR_SERIES={
- 'items-selected':{family:'items',dimension:'product',amountField:'TGFITE.VLRTOT',dateField:'TGFCAB.DTNEG',sellerField:'TGFCAB.CODVEND',selection:'product-or-category'},
- 'items-selected-day':{family:'items',dimension:'day',amountField:'TGFITE.VLRTOT',dateField:'TGFCAB.DTNEG',sellerField:'TGFCAB.CODVEND',selection:'product-or-category'},
- 'billing-customer':{family:'billing',dimension:'seller',amountField:'TGFCAB.VLRNOTA',dateField:'TGFCAB.DTFATUR',sellerField:'TGFCAB.CODVEND',selection:'customer'},
- 'wallet-customer':{family:'wallet',dimension:'seller',amountField:null,dateField:'TGFCAB.DTNEG',sellerField:'TGFPAR.CODVEND',selection:'customer'},
- 'wallet-selected-seller':{family:'wallet',dimension:'seller',amountField:null,dateField:'TGFCAB.DTNEG',sellerField:'TGFPAR.CODVEND',selection:'product-or-category'},
- 'wallet-selected-day':{family:'wallet',dimension:'day',amountField:null,dateField:'TGFCAB.DTNEG',sellerField:'TGFPAR.CODVEND',countsAdditive:false,selection:'product-or-category'},
- 'items-day':{family:'items',dimension:'day',amountField:'TGFITE.VLRTOT',dateField:'TGFCAB.DTNEG',sellerField:'TGFCAB.CODVEND'},
- 'items-seller':{family:'items',dimension:'seller',amountField:'TGFITE.VLRTOT',dateField:'TGFCAB.DTNEG',sellerField:'TGFCAB.CODVEND'},
- 'items-category':{family:'items',dimension:'category',amountField:'TGFITE.VLRTOT',dateField:'TGFCAB.DTNEG',sellerField:'TGFCAB.CODVEND'},
- 'sales-day':{family:'sales',dimension:'day',amountField:'TGFCAB.VLRNOTA',dateField:'TGFCAB.DTNEG',sellerField:'TGFCAB.CODVEND'},
- 'billing-day':{family:'billing',dimension:'day',amountField:'TGFCAB.VLRNOTA',dateField:'TGFCAB.DTFATUR',sellerField:'TGFCAB.CODVEND'},
- 'billing-seller':{family:'billing',dimension:'seller',amountField:'TGFCAB.VLRNOTA',dateField:'TGFCAB.DTFATUR',sellerField:'TGFCAB.CODVEND'},
- 'wallet-day':{family:'wallet',dimension:'day',amountField:null,dateField:'TGFCAB.DTNEG',sellerField:'TGFPAR.CODVEND',countsAdditive:false},
- 'wallet-seller':{family:'wallet',dimension:'seller',amountField:null,dateField:'TGFCAB.DTNEG',sellerField:'TGFPAR.CODVEND'},
- 'commissions-seller':{family:'commissions',dimension:'seller',amountField:'TGFCOM.VLRCOM',dateField:'TGFCAB.DTNEG',sellerField:'TGFCOM.CODVEND'},
- 'customers-seller':{family:'customers',dimension:'seller',amountField:null,dateField:'first-standard-purchase',sellerField:'TGFPAR.CODVEND'},
- 'customers-seller-year':{family:'customers',dimension:'seller',amountField:null,dateField:'first-standard-purchase',sellerField:'TGFPAR.CODVEND'},
+import { decimalUnits, erpDecimal, sumERPDecimals } from "./erp-decimal";
+import { rankingPeriod, validRankingQuery } from "./erp-ranking";
+export const INDICATOR_SERIES = {
+  "items-selected": {
+    family: "items",
+    dimension: "product",
+    amountField: "TGFITE.VLRTOT",
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFCAB.CODVEND",
+    selection: "product-or-category",
+  },
+  "items-selected-day": {
+    family: "items",
+    dimension: "day",
+    amountField: "TGFITE.VLRTOT",
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFCAB.CODVEND",
+    selection: "product-or-category",
+  },
+  "billing-customer": {
+    family: "billing",
+    dimension: "seller",
+    amountField: "TGFCAB.VLRNOTA",
+    dateField: "TGFCAB.DTFATUR",
+    sellerField: "TGFCAB.CODVEND",
+    selection: "customer",
+  },
+  "wallet-customer": {
+    family: "wallet",
+    dimension: "seller",
+    amountField: null,
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFPAR.CODVEND",
+    selection: "customer",
+  },
+  "wallet-selected-seller": {
+    family: "wallet",
+    dimension: "seller",
+    amountField: null,
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFPAR.CODVEND",
+    selection: "product-or-category",
+  },
+  "wallet-selected-day": {
+    family: "wallet",
+    dimension: "day",
+    amountField: null,
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFPAR.CODVEND",
+    countsAdditive: false,
+    selection: "product-or-category",
+  },
+  "items-day": {
+    family: "items",
+    dimension: "day",
+    amountField: "TGFITE.VLRTOT",
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFCAB.CODVEND",
+  },
+  "items-seller": {
+    family: "items",
+    dimension: "seller",
+    amountField: "TGFITE.VLRTOT",
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFCAB.CODVEND",
+  },
+  "items-category": {
+    family: "items",
+    dimension: "category",
+    amountField: "TGFITE.VLRTOT",
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFCAB.CODVEND",
+  },
+  "sales-day": {
+    family: "sales",
+    dimension: "day",
+    amountField: "TGFCAB.VLRNOTA",
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFCAB.CODVEND",
+  },
+  "billing-day": {
+    family: "billing",
+    dimension: "day",
+    amountField: "TGFCAB.VLRNOTA",
+    dateField: "TGFCAB.DTFATUR",
+    sellerField: "TGFCAB.CODVEND",
+  },
+  "billing-seller": {
+    family: "billing",
+    dimension: "seller",
+    amountField: "TGFCAB.VLRNOTA",
+    dateField: "TGFCAB.DTFATUR",
+    sellerField: "TGFCAB.CODVEND",
+  },
+  "wallet-day": {
+    family: "wallet",
+    dimension: "day",
+    amountField: null,
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFPAR.CODVEND",
+    countsAdditive: false,
+  },
+  "wallet-seller": {
+    family: "wallet",
+    dimension: "seller",
+    amountField: null,
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFPAR.CODVEND",
+  },
+  "commissions-seller": {
+    family: "commissions",
+    dimension: "seller",
+    amountField: "TGFCOM.VLRCOM",
+    dateField: "TGFCAB.DTNEG",
+    sellerField: "TGFCOM.CODVEND",
+  },
+  "customers-seller": {
+    family: "customers",
+    dimension: "seller",
+    amountField: null,
+    dateField: "first-standard-purchase",
+    sellerField: "TGFPAR.CODVEND",
+  },
+  "customers-seller-year": {
+    family: "customers",
+    dimension: "seller",
+    amountField: null,
+    dateField: "first-standard-purchase",
+    sellerField: "TGFPAR.CODVEND",
+  },
 } as const;
-export type IndicatorSeries=keyof typeof INDICATOR_SERIES;
-export type IndicatorSelection={productId?:string;categoryCode?:number;customerId?:string};
-export function indicatorSelection(q:IndicatorSelection):IndicatorSelection{return{...(q.productId===undefined?{}:{productId:q.productId}),...(q.categoryCode===undefined?{}:{categoryCode:q.categoryCode}),...(q.customerId===undefined?{}:{customerId:q.customerId})};}
-export function validIndicatorSelection(s:IndicatorSelection){const entries=Object.entries(s);return entries.length<=1&&entries.every(([k,v])=>k==='productId'?typeof v==='string'&&/^sankhya:product:[1-9]\d{0,9}$/.test(v)&&Number(v.slice(16))<=2147483647:k==='customerId'?typeof v==='string'&&/^sankhya:customer:[1-9]\d{0,9}$/.test(v)&&Number(v.slice(17))<=2147483647:k==='categoryCode'&&typeof v==='number'&&Number.isSafeInteger(v)&&v>0&&v<=2147483647);}
-export type ERPIndicatorQuery=IndicatorSelection & {resource:'orders';series:IndicatorSeries;month:string;offset:number;limit:number;sellerCode?:number};
-export type IndicatorPoint={id:string;groupCode:number|null;label:string|null;value:string|null;quantity:string|null;unit:string|null;count:number;missingValueCount:number;buyerCount:number|null;activeCount:number|null;newCount:number|null};
-export type IndicatorSummary={value:string|null;recordCount:number;missingValueCount:number;buyerCount:number|null;activeCount:number|null;newCount:number|null};
-export type ERPIndicatorWindow={selection?:IndicatorSelection;source:'sankhya';readOnly:true;readAt:string;series:IndicatorSeries;month:string;period:{from:string;to:string};companyCodes:(1|4)[];items:IndicatorPoint[];total:number;totalWithoutSearch:number;offset:number;summary:IndicatorSummary;indicatorPolicy:typeof INDICATOR_SERIES[IndicatorSeries]&{atomicSnapshot:false;quantitiesConverted:false;headerAndItemsAdded:false}};
-const obj=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
-const natural=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
-const money=(v:unknown)=>typeof v==='string'&&erpDecimal(v)===v;
-export function indicatorPeriod(q:Pick<ERPIndicatorQuery,'month'|'series'>){const p=rankingPeriod({month:q.month});return q.series==='customers-seller-year'?{from:q.month.slice(0,4)+'-01-01',to:q.month.slice(0,4)+'-12-31'}:{from:p.from,to:p.to};}
-export function validIndicatorQuery(q:ERPIndicatorQuery){const{series,productId,categoryCode,customerId,...base}=q;if(typeof series!=='string'||!Object.hasOwn(INDICATOR_SERIES,series)||!Object.keys(q).every(k=>['resource','series','month','offset','limit','sellerCode','productId','categoryCode','customerId'].includes(k))||q.offset>2147483597||!validRankingQuery(base))return false;const spec=INDICATOR_SERIES[series],selection=indicatorSelection(q);if(!validIndicatorSelection(selection))return false;return 'selection'in spec?spec.selection==='customer'?!!customerId:!!productId||categoryCode!==undefined:Object.keys(selection).length===0;}
+export type IndicatorSeries = keyof typeof INDICATOR_SERIES;
+export type IndicatorSelection = { productId?: string; categoryCode?: number; customerId?: string };
+export function indicatorSelection(q: IndicatorSelection): IndicatorSelection {
+  return {
+    ...(q.productId === undefined ? {} : { productId: q.productId }),
+    ...(q.categoryCode === undefined ? {} : { categoryCode: q.categoryCode }),
+    ...(q.customerId === undefined ? {} : { customerId: q.customerId }),
+  };
+}
+export function validIndicatorSelection(s: IndicatorSelection) {
+  const entries = Object.entries(s);
+  return (
+    entries.length <= 1 &&
+    entries.every(([k, v]) =>
+      k === "productId"
+        ? typeof v === "string" &&
+          /^sankhya:product:[1-9]\d{0,9}$/.test(v) &&
+          Number(v.slice(16)) <= 2147483647
+        : k === "customerId"
+          ? typeof v === "string" &&
+            /^sankhya:customer:[1-9]\d{0,9}$/.test(v) &&
+            Number(v.slice(17)) <= 2147483647
+          : k === "categoryCode" &&
+            typeof v === "number" &&
+            Number.isSafeInteger(v) &&
+            v > 0 &&
+            v <= 2147483647,
+    )
+  );
+}
+export type ERPIndicatorQuery = IndicatorSelection & {
+  resource: "orders";
+  series: IndicatorSeries;
+  month: string;
+  offset: number;
+  limit: number;
+  sellerCode?: number;
+};
+export type IndicatorPoint = {
+  id: string;
+  groupCode: number | null;
+  label: string | null;
+  value: string | null;
+  quantity: string | null;
+  unit: string | null;
+  count: number;
+  missingValueCount: number;
+  buyerCount: number | null;
+  activeCount: number | null;
+  newCount: number | null;
+};
+export type IndicatorSummary = {
+  value: string | null;
+  recordCount: number;
+  missingValueCount: number;
+  buyerCount: number | null;
+  activeCount: number | null;
+  newCount: number | null;
+};
+export type ERPIndicatorWindow = {
+  selection?: IndicatorSelection;
+  source: "sankhya";
+  readOnly: true;
+  readAt: string;
+  series: IndicatorSeries;
+  month: string;
+  period: { from: string; to: string };
+  companyCodes: (1 | 4)[];
+  items: IndicatorPoint[];
+  total: number;
+  totalWithoutSearch: number;
+  offset: number;
+  summary: IndicatorSummary;
+  indicatorPolicy: (typeof INDICATOR_SERIES)[IndicatorSeries] & {
+    atomicSnapshot: false;
+    quantitiesConverted: false;
+    headerAndItemsAdded: false;
+  };
+};
+const obj = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === "object" && !Array.isArray(v);
+const natural = (v: unknown): v is number =>
+  typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+const money = (v: unknown) => typeof v === "string" && erpDecimal(v) === v;
+export function indicatorPeriod(q: Pick<ERPIndicatorQuery, "month" | "series">) {
+  const p = rankingPeriod({ month: q.month });
+  return q.series === "customers-seller-year"
+    ? { from: q.month.slice(0, 4) + "-01-01", to: q.month.slice(0, 4) + "-12-31" }
+    : { from: p.from, to: p.to };
+}
+export function validIndicatorQuery(q: ERPIndicatorQuery) {
+  const { series, productId, categoryCode, customerId, ...base } = q;
+  if (
+    typeof series !== "string" ||
+    !Object.hasOwn(INDICATOR_SERIES, series) ||
+    !Object.keys(q).every((k) =>
+      [
+        "resource",
+        "series",
+        "month",
+        "offset",
+        "limit",
+        "sellerCode",
+        "productId",
+        "categoryCode",
+        "customerId",
+      ].includes(k),
+    ) ||
+    q.offset > 2147483597 ||
+    !validRankingQuery(base)
+  )
+    return false;
+  const spec = INDICATOR_SERIES[series],
+    selection = indicatorSelection(q);
+  if (!validIndicatorSelection(selection)) return false;
+  return "selection" in spec
+    ? spec.selection === "customer"
+      ? !!customerId
+      : !!productId || categoryCode !== undefined
+    : Object.keys(selection).length === 0;
+}
 
-export function decodeIndicatorSeries(d:Record<string,unknown>,q:ERPIndicatorQuery,fail:()=>never){const p=d['indicatorPolicy'],spec=INDICATOR_SERIES[q.series],s=d['summary'],cs=d['companyCodes'],items=d['items'],daily=spec.family==='wallet'&&spec.dimension==='day',counts=spec.family==='wallet'||spec.family==='customers';if(d['series']!==q.series||d['month']!==q.month||JSON.stringify(d['period'])!==JSON.stringify(indicatorPeriod(q))||!obj(p)||Object.entries(spec).some(([k,v])=>p[k]!==v)||p['atomicSnapshot']!==false||p['quantitiesConverted']!==false||p['headerAndItemsAdded']!==false||!Array.isArray(cs)||cs.length<1||cs.length>2||new Set(cs).size!==cs.length||cs.some(c=>c!==1&&c!==4)||!obj(s)||!natural(s['recordCount'])||!natural(s['missingValueCount'])||s['missingValueCount']>s['recordCount']||!Array.isArray(items))return fail();
- if('selection'in spec){const selected=indicatorSelection(q);if(!obj(d['selection'])||JSON.stringify(Object.entries(d['selection']).sort())!==JSON.stringify(Object.entries(selected).sort()))return fail();}
- if(counts?s['value']!==null||s['missingValueCount']!==0:s['value']!==null&&!money(s['value'])||s['missingValueCount']>0&&s['value']!==null||s['missingValueCount']===0&&s['recordCount']>0&&s['value']===null)return fail();
- const nullableCount=(v:unknown)=>v===null||natural(v);for(const k of ['buyerCount','activeCount','newCount'])if(!nullableCount(s[k])||typeof s[k]==='number'&&s[k]>s['recordCount']||!counts&&s[k]!==null)return fail();
- if(spec.family==='wallet'&&(s['activeCount']!==s['recordCount']||!natural(s['buyerCount'])||s['newCount']!==null))return fail();
- const ids=new Set<string>();for(const r of items){if(!obj(r)||typeof r['id']!=='string'||r['id']!==`sankhya:indicator:${q.series}:${r['groupCode']??'unknown'}`||ids.has(r['id'])||r['groupCode']!==null&&(!natural(r['groupCode'])||r['groupCode']>2147483647)||r['label']!==null&&typeof r['label']!=='string'||!natural(r['count'])||r['count']<(daily?0:1)||!natural(r['missingValueCount'])||r['missingValueCount']>r['count']||r['count']>s['recordCount'])return fail();ids.add(r['id']);
- if(spec.dimension==='day'&&(typeof r['label']!=='string'||r['label']<indicatorPeriod(q).from||r['label']>indicatorPeriod(q).to||!/^\d{4}-\d{2}-\d{2}$/.test(r['label'])||Number(r['label'].replaceAll('-',''))!==r['groupCode']||!Number.isFinite(Date.parse(r['label']+'T00:00:00Z'))||new Date(r['label']+'T00:00:00Z').toISOString().slice(0,10)!==r['label']))return fail();
- if(counts?r['value']!==null||r['missingValueCount']!==0:r['value']!==null&&!money(r['value'])||(r['missingValueCount']>0)!==(r['value']===null))return fail();
- if(r['quantity']!==null&&(!money(r['quantity'])||typeof r['unit']!=='string'||!r['unit'].trim())||r['unit']!==null&&(typeof r['unit']!=='string'||!r['unit'].trim())||spec.family!=='items'&&(r['quantity']!==null||r['unit']!==null))return fail();
- for(const k of ['buyerCount','activeCount','newCount'])if(!nullableCount(r[k])||typeof r[k]==='number'&&r[k]>r['count']||!counts&&r[k]!==null)return fail();if(spec.family==='wallet'&&(r['activeCount']!==r['count']||!natural(r['buyerCount'])||r['newCount']!==null))return fail();
- if(q.productId&&spec.dimension==='product'&&r['groupCode']!==Number(q.productId.slice(16)))return fail();
- if(q.sellerCode!==undefined&&spec.dimension==='seller'&&r['groupCode']!==q.sellerCode)return fail();}
- if(daily){const end=new Date(indicatorPeriod(q).to+'T00:00:00Z').getUTCDate();if(d['total']!==end)return fail();for(const [i,r]of items.entries()){const label=q.month+'-'+String(q.offset+i+1).padStart(2,'0');if(r['label']!==label||r['count']!==s['recordCount']||r['activeCount']!==s['activeCount']||Number(r['buyerCount'])>Number(s['buyerCount']))return fail();}if(q.offset===0&&items.length===end&&items.reduce((n,r)=>n+Number(r['buyerCount']),0)<Number(s['buyerCount']))return fail();}
- if(!daily&&q.offset===0&&items.length===d['total']){if(items.reduce((n,r)=>n+Number(r['count']),0)!==s['recordCount']||items.reduce((n,r)=>n+Number(r['missingValueCount']),0)!==s['missingValueCount']||s['value']!==null&&(items.some(r=>r['value']===null)||decimalUnits(sumERPDecimals(items.map(r=>String(r['value']))))!==decimalUnits(s['value'] as string)))return fail();for(const k of ['buyerCount','activeCount','newCount'])if(s[k]!==null&&(items.some(r=>r[k]===null)||items.reduce((n,r)=>n+Number(r[k]),0)!==s[k]))return fail();}
+export function decodeIndicatorSeries(
+  d: Record<string, unknown>,
+  q: ERPIndicatorQuery,
+  fail: () => never,
+) {
+  const p = d["indicatorPolicy"],
+    spec = INDICATOR_SERIES[q.series],
+    s = d["summary"],
+    cs = d["companyCodes"],
+    items = d["items"],
+    daily = spec.family === "wallet" && spec.dimension === "day",
+    counts = spec.family === "wallet" || spec.family === "customers";
+  if (
+    d["series"] !== q.series ||
+    d["month"] !== q.month ||
+    JSON.stringify(d["period"]) !== JSON.stringify(indicatorPeriod(q)) ||
+    !obj(p) ||
+    Object.entries(spec).some(([k, v]) => p[k] !== v) ||
+    p["atomicSnapshot"] !== false ||
+    p["quantitiesConverted"] !== false ||
+    p["headerAndItemsAdded"] !== false ||
+    !Array.isArray(cs) ||
+    cs.length < 1 ||
+    cs.length > 2 ||
+    new Set(cs).size !== cs.length ||
+    cs.some((c) => c !== 1 && c !== 4) ||
+    !obj(s) ||
+    !natural(s["recordCount"]) ||
+    !natural(s["missingValueCount"]) ||
+    s["missingValueCount"] > s["recordCount"] ||
+    !Array.isArray(items)
+  )
+    return fail();
+  if ("selection" in spec) {
+    const selected = indicatorSelection(q);
+    if (
+      !obj(d["selection"]) ||
+      JSON.stringify(Object.entries(d["selection"]).sort()) !==
+        JSON.stringify(Object.entries(selected).sort())
+    )
+      return fail();
+  }
+  if (
+    counts
+      ? s["value"] !== null || s["missingValueCount"] !== 0
+      : (s["value"] !== null && !money(s["value"])) ||
+        (s["missingValueCount"] > 0 && s["value"] !== null) ||
+        (s["missingValueCount"] === 0 && s["recordCount"] > 0 && s["value"] === null)
+  )
+    return fail();
+  const nullableCount = (v: unknown) => v === null || natural(v);
+  for (const k of ["buyerCount", "activeCount", "newCount"])
+    if (
+      !nullableCount(s[k]) ||
+      (typeof s[k] === "number" && s[k] > s["recordCount"]) ||
+      (!counts && s[k] !== null)
+    )
+      return fail();
+  if (
+    spec.family === "wallet" &&
+    (s["activeCount"] !== s["recordCount"] || !natural(s["buyerCount"]) || s["newCount"] !== null)
+  )
+    return fail();
+  const ids = new Set<string>();
+  for (const r of items) {
+    if (
+      !obj(r) ||
+      typeof r["id"] !== "string" ||
+      r["id"] !== `sankhya:indicator:${q.series}:${r["groupCode"] ?? "unknown"}` ||
+      ids.has(r["id"]) ||
+      (r["groupCode"] !== null && (!natural(r["groupCode"]) || r["groupCode"] > 2147483647)) ||
+      (r["label"] !== null && typeof r["label"] !== "string") ||
+      !natural(r["count"]) ||
+      r["count"] < (daily ? 0 : 1) ||
+      !natural(r["missingValueCount"]) ||
+      r["missingValueCount"] > r["count"] ||
+      r["count"] > s["recordCount"]
+    )
+      return fail();
+    ids.add(r["id"]);
+    if (
+      spec.dimension === "day" &&
+      (typeof r["label"] !== "string" ||
+        r["label"] < indicatorPeriod(q).from ||
+        r["label"] > indicatorPeriod(q).to ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(r["label"]) ||
+        Number(r["label"].replaceAll("-", "")) !== r["groupCode"] ||
+        !Number.isFinite(Date.parse(r["label"] + "T00:00:00Z")) ||
+        new Date(r["label"] + "T00:00:00Z").toISOString().slice(0, 10) !== r["label"])
+    )
+      return fail();
+    if (
+      counts
+        ? r["value"] !== null || r["missingValueCount"] !== 0
+        : (r["value"] !== null && !money(r["value"])) ||
+          r["missingValueCount"] > 0 !== (r["value"] === null)
+    )
+      return fail();
+    if (
+      (r["quantity"] !== null &&
+        (!money(r["quantity"]) || typeof r["unit"] !== "string" || !r["unit"].trim())) ||
+      (r["unit"] !== null && (typeof r["unit"] !== "string" || !r["unit"].trim())) ||
+      (spec.family !== "items" && (r["quantity"] !== null || r["unit"] !== null))
+    )
+      return fail();
+    for (const k of ["buyerCount", "activeCount", "newCount"])
+      if (
+        !nullableCount(r[k]) ||
+        (typeof r[k] === "number" && r[k] > r["count"]) ||
+        (!counts && r[k] !== null)
+      )
+        return fail();
+    if (
+      spec.family === "wallet" &&
+      (r["activeCount"] !== r["count"] || !natural(r["buyerCount"]) || r["newCount"] !== null)
+    )
+      return fail();
+    if (
+      q.productId &&
+      spec.dimension === "product" &&
+      r["groupCode"] !== Number(q.productId.slice(16))
+    )
+      return fail();
+    if (
+      q.sellerCode !== undefined &&
+      spec.dimension === "seller" &&
+      r["groupCode"] !== q.sellerCode
+    )
+      return fail();
+  }
+  if (daily) {
+    const end = new Date(indicatorPeriod(q).to + "T00:00:00Z").getUTCDate();
+    if (d["total"] !== end) return fail();
+    for (const [i, r] of items.entries()) {
+      const label = q.month + "-" + String(q.offset + i + 1).padStart(2, "0");
+      if (
+        r["label"] !== label ||
+        r["count"] !== s["recordCount"] ||
+        r["activeCount"] !== s["activeCount"] ||
+        Number(r["buyerCount"]) > Number(s["buyerCount"])
+      )
+        return fail();
+    }
+    if (
+      q.offset === 0 &&
+      items.length === end &&
+      items.reduce((n, r) => n + Number(r["buyerCount"]), 0) < Number(s["buyerCount"])
+    )
+      return fail();
+  }
+  if (!daily && q.offset === 0 && items.length === d["total"]) {
+    if (
+      items.reduce((n, r) => n + Number(r["count"]), 0) !== s["recordCount"] ||
+      items.reduce((n, r) => n + Number(r["missingValueCount"]), 0) !== s["missingValueCount"] ||
+      (s["value"] !== null &&
+        (items.some((r) => r["value"] === null) ||
+          decimalUnits(sumERPDecimals(items.map((r) => String(r["value"])))) !==
+            decimalUnits(s["value"] as string)))
+    )
+      return fail();
+    for (const k of ["buyerCount", "activeCount", "newCount"])
+      if (
+        s[k] !== null &&
+        (items.some((r) => r[k] === null) || items.reduce((n, r) => n + Number(r[k]), 0) !== s[k])
+      )
+        return fail();
+  }
 }

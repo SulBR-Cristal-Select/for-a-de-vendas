@@ -1,17 +1,138 @@
-import{describe,it,expect,vi}from'vitest';
-import{readSellerAccessInventory}from'../../supabase/functions/sankhya-online/seller-access-inventory';
-import{readCommercialDictionary}from'../../supabase/functions/sankhya-online/dictionary';
-const q={kind:'seller-access-inventory',offset:0,limit:50},scope={role:'administrador' as const};
-function fixture(rows:any[]=[row(1)]){const meta=['CODVEND','CODEMP','CODGER','CODUSU','CODPARC'].map(COLUMN_NAME=>({COLUMN_NAME,DATA_TYPE:'NUMBER'})).concat(['APELIDO','EMAIL','ATIVO','TIPVEND'].map(COLUMN_NAME=>({COLUMN_NAME,DATA_TYPE:'VARCHAR2'})));const select=vi.fn(async(sql:string)=>sql.includes('USER_TAB_COLUMNS')?meta:sql.includes('COUNT(*)')?[{TOTAL:rows.length,DISTINCT_CODES:rows.length}]:rows);return{select,meta};}
-function row(code:number,patch:Record<string,unknown>={}){return{CODVEND:code,APELIDO:'Mesmo nome',EMAIL:'pessoa@empresa.test',ATIVO:'S',TIPVEND:'V',CODEMP:1,CODGER:0,CODUSU:null,CODPARC:null,...patch};}
-describe('Inventário administrativo de vendedores, sem Oracle real',()=>{
- it('inclui inativos e compartilhados sem transformar CODEMP nulo em autorização',async()=>{const f=fixture([row(1),row(2,{ATIVO:'N',CODEMP:null,EMAIL:null})]);const r=await readCommercialDictionary(f,q,scope);expect(r).toMatchObject({total:2,includesInactive:true,sharedCompanyIsAuthorization:false,emailField:'TGFVEN.EMAIL'});expect((r as any).items[1]).toMatchObject({code:2,active:'N',companyCode:null,email:null,emailValid:false});const sql=f.select.mock.calls.at(-1)![0];expect(sql).not.toMatch(/ATIVO\s*=|SENHA|INTERNO|TSIUSU|INSERT|UPDATE|DELETE/i);expect(sql).toContain('FETCH NEXT 50 ROWS ONLY');});
- it('mantém homônimos e e-mails repetidos como códigos distintos, sem inventar UUID',async()=>{const r=await readSellerAccessInventory(fixture([row(2),row(34)]),q,scope);expect(r.items.map(x=>x.code)).toEqual([2,34]);expect(r.items[0]!.email).toBe(r.items[1]!.email);expect(r.items[0]).not.toHaveProperty('authId');});
- it('e-mails múltiplos ou inválidos permanecem inválidos, sem escolher destinatário',async()=>{const r=await readSellerAccessInventory(fixture([row(1,{EMAIL:'a@b.test;c@d.test'}),row(2,{EMAIL:'nome'})]),q,scope);expect(r.items.every(x=>!x.emailValid)).toBe(true);expect(r.items[0]!.email).toBe('a@b.test;c@d.test');});
- it.each(['vendedor','gestor'] as const)('nega %s antes de consultar',async role=>{const f=fixture();await expect(readSellerAccessInventory(f,q,{role,sellerCode:12,companyCodes:[1]})).rejects.toMatchObject({code:'FORBIDDEN'});expect(f.select).not.toHaveBeenCalled();});
- it.each([{offset:-1},{offset:'0'},{offset:10001},{limit:51},{email:'x'},{sql:'SELECT 1'},{kind:'outro'}])('rejeita argumentos fora do contrato: %j',async patch=>{const f=fixture();await expect(readSellerAccessInventory(f,{...q,...patch},scope)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(f.select).not.toHaveBeenCalled();});
- it('nega cadastro sem coluna obrigatória',async()=>{const f=fixture();f.meta.pop();await expect(readSellerAccessInventory(f,q,scope)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});expect(f.select).toHaveBeenCalledTimes(1);});
- it('não entrega página parcial ou códigos duplicados',async()=>{const f=fixture();f.select.mockImplementation(async sql=>sql.includes('USER_TAB_COLUMNS')?f.meta:sql.includes('COUNT(*)')?[{TOTAL:2,DISTINCT_CODES:2}]:[row(1)]);await expect(readSellerAccessInventory(f,q,scope)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});await expect(readSellerAccessInventory(fixture([row(1),row(1)]),q,scope)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});});
- it('não entrega filial externa nem código inválido',async()=>{for(const r of[row(1,{CODEMP:2}),row(0)])await expect(readSellerAccessInventory(fixture([r]),q,scope)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});});
- it('página vazia além do total não vira vendedor inexistente criado localmente',async()=>{const f=fixture();f.select.mockImplementation(async sql=>sql.includes('USER_TAB_COLUMNS')?f.meta:sql.includes('COUNT(*)')?[{TOTAL:1,DISTINCT_CODES:1}]:[]);const r=await readSellerAccessInventory(f,{...q,offset:50},scope);expect(r).toMatchObject({items:[],total:1,offset:50,hasMore:false});});
+import { describe, it, expect, vi } from "vitest";
+import { readSellerAccessInventory } from "../../supabase/functions/sankhya-online/seller-access-inventory";
+import { readCommercialDictionary } from "../../supabase/functions/sankhya-online/dictionary";
+const q = { kind: "seller-access-inventory", offset: 0, limit: 50 },
+  scope = { role: "administrador" as const };
+function fixture(rows: Record<string, unknown>[] = [row(1)]) {
+  const meta = ["CODVEND", "CODEMP", "CODGER", "CODUSU", "CODPARC"]
+    .map((COLUMN_NAME) => ({ COLUMN_NAME, DATA_TYPE: "NUMBER" }))
+    .concat(
+      ["APELIDO", "EMAIL", "ATIVO", "TIPVEND"].map((COLUMN_NAME) => ({
+        COLUMN_NAME,
+        DATA_TYPE: "VARCHAR2",
+      })),
+    );
+  const select = vi.fn(async (sql: string) =>
+    sql.includes("USER_TAB_COLUMNS")
+      ? meta
+      : sql.includes("COUNT(*)")
+        ? [{ TOTAL: rows.length, DISTINCT_CODES: rows.length }]
+        : rows,
+  );
+  return { select, meta };
+}
+function row(code: number, patch: Record<string, unknown> = {}) {
+  return {
+    CODVEND: code,
+    APELIDO: "Mesmo nome",
+    EMAIL: "pessoa@empresa.test",
+    ATIVO: "S",
+    TIPVEND: "V",
+    CODEMP: 1,
+    CODGER: 0,
+    CODUSU: null,
+    CODPARC: null,
+    ...patch,
+  };
+}
+describe("Inventário administrativo de vendedores, sem Oracle real", () => {
+  it("inclui inativos e compartilhados sem transformar CODEMP nulo em autorização", async () => {
+    const f = fixture([row(1), row(2, { ATIVO: "N", CODEMP: null, EMAIL: null })]);
+    const r = await readCommercialDictionary(f, q, scope);
+    expect(r).toMatchObject({
+      total: 2,
+      includesInactive: true,
+      sharedCompanyIsAuthorization: false,
+      emailField: "TGFVEN.EMAIL",
+    });
+    expect((r as { items: Record<string, unknown>[] }).items[1]).toMatchObject({
+      code: 2,
+      active: "N",
+      companyCode: null,
+      email: null,
+      emailValid: false,
+    });
+    const sql = f.select.mock.calls.at(-1)![0];
+    expect(sql).not.toMatch(/ATIVO\s*=|SENHA|INTERNO|TSIUSU|INSERT|UPDATE|DELETE/i);
+    expect(sql).toContain("FETCH NEXT 50 ROWS ONLY");
+  });
+  it("mantém homônimos e e-mails repetidos como códigos distintos, sem inventar UUID", async () => {
+    const r = await readSellerAccessInventory(fixture([row(2), row(34)]), q, scope);
+    expect(r.items.map((x) => x.code)).toEqual([2, 34]);
+    expect(r.items[0]!.email).toBe(r.items[1]!.email);
+    expect(r.items[0]).not.toHaveProperty("authId");
+  });
+  it("e-mails múltiplos ou inválidos permanecem inválidos, sem escolher destinatário", async () => {
+    const r = await readSellerAccessInventory(
+      fixture([row(1, { EMAIL: "a@b.test;c@d.test" }), row(2, { EMAIL: "nome" })]),
+      q,
+      scope,
+    );
+    expect(r.items.every((x) => !x.emailValid)).toBe(true);
+    expect(r.items[0]!.email).toBe("a@b.test;c@d.test");
+  });
+  it.each(["vendedor", "gestor"] as const)("nega %s antes de consultar", async (role) => {
+    const f = fixture();
+    await expect(
+      readSellerAccessInventory(f, q, { role, sellerCode: 12, companyCodes: [1] }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(f.select).not.toHaveBeenCalled();
+  });
+  it.each([
+    { offset: -1 },
+    { offset: "0" },
+    { offset: 10001 },
+    { limit: 51 },
+    { email: "x" },
+    { sql: "SELECT 1" },
+    { kind: "outro" },
+  ])("rejeita argumentos fora do contrato: %j", async (patch) => {
+    const f = fixture();
+    await expect(readSellerAccessInventory(f, { ...q, ...patch }, scope)).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+    });
+    expect(f.select).not.toHaveBeenCalled();
+  });
+  it("nega cadastro sem coluna obrigatória", async () => {
+    const f = fixture();
+    f.meta.pop();
+    await expect(readSellerAccessInventory(f, q, scope)).rejects.toMatchObject({
+      code: "ERP_CONTEXT_REQUIRED",
+    });
+    expect(f.select).toHaveBeenCalledTimes(1);
+  });
+  it("não entrega página parcial ou códigos duplicados", async () => {
+    const f = fixture();
+    f.select.mockImplementation(async (sql) =>
+      sql.includes("USER_TAB_COLUMNS")
+        ? f.meta
+        : sql.includes("COUNT(*)")
+          ? [{ TOTAL: 2, DISTINCT_CODES: 2 }]
+          : [row(1)],
+    );
+    await expect(readSellerAccessInventory(f, q, scope)).rejects.toMatchObject({
+      code: "ERP_CONTEXT_REQUIRED",
+    });
+    await expect(
+      readSellerAccessInventory(fixture([row(1), row(1)]), q, scope),
+    ).rejects.toMatchObject({ code: "ERP_CONTEXT_REQUIRED" });
+  });
+  it("não entrega filial externa nem código inválido", async () => {
+    for (const r of [row(1, { CODEMP: 2 }), row(0)])
+      await expect(readSellerAccessInventory(fixture([r]), q, scope)).rejects.toMatchObject({
+        code: "ERP_CONTEXT_REQUIRED",
+      });
+  });
+  it("página vazia além do total não vira vendedor inexistente criado localmente", async () => {
+    const f = fixture();
+    f.select.mockImplementation(async (sql) =>
+      sql.includes("USER_TAB_COLUMNS")
+        ? f.meta
+        : sql.includes("COUNT(*)")
+          ? [{ TOTAL: 1, DISTINCT_CODES: 1 }]
+          : [],
+    );
+    const r = await readSellerAccessInventory(f, { ...q, offset: 50 }, scope);
+    expect(r).toMatchObject({ items: [], total: 1, offset: 50, hasMore: false });
+  });
 });

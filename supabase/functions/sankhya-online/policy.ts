@@ -1,5 +1,5 @@
-import { SALES_OPERATION_CODES } from '../../../src/lib/sales-operations.ts';
-import { SankhyaError } from './gateway.ts';
+import { SALES_OPERATION_CODES } from "../../../src/lib/sales-operations.ts";
+import { SankhyaError } from "./gateway.ts";
 
 // Definições expressas pelo usuário em 23/10/2026, 19h19 (America/Sao_Paulo).
 // Aplicam-se ao contexto do pedido; não alteram cadastro, carteira ou identidade.
@@ -11,44 +11,64 @@ export const COMMERCIAL_POLICY = Object.freeze({
 // Recorte dos relatórios confirmado em24/10/2026 às18h42 (America/Sao_Paulo).
 // Não altera a política de criação/cotação de pedidos acima.
 export const STANDARD_SALES_REPORT_POLICY = Object.freeze({
-  movement: 'P' as const,
+  movement: "P" as const,
   operationCode: 1001 as const,
   operationCodes: SALES_OPERATION_CODES,
   natureCode: 10100000 as const,
-  statusCode: 'L' as const,
-  bonification: 'N' as const,
+  statusCode: "L" as const,
+  bonification: "N" as const,
   devolution: 1 as const,
-  dateField: 'DTNEG' as const,
+  dateField: "DTNEG" as const,
 });
 
 // Faturamento confirmado em25/10/2026 às05h57 (America/Sao_Paulo).
 // Notas V e pedidos P permanecem bases separadas; vínculo não soma os documentos.
 export const STANDARD_BILLING_REPORT_POLICY = Object.freeze({
-  movement: 'V' as const,
-  dateField: 'DTFATUR' as const,
-  statusCode: 'L' as const,
-  fiscalStatusCode: 'A' as const,
+  movement: "V" as const,
+  dateField: "DTFATUR" as const,
+  statusCode: "L" as const,
+  fiscalStatusCode: "A" as const,
   salesSignal: -1 as const,
-  bonification: 'N' as const,
+  bonification: "N" as const,
   devolution: 1 as const,
   origin: STANDARD_SALES_REPORT_POLICY,
 });
 
 // Conceitos confirmados em25/10/2026 às07h25 (America/Sao_Paulo).
 export const CUSTOMER_INDICATOR_POLICY = Object.freeze({
-  newCustomer: Object.freeze({ event: 'first-recorded-standard-purchase' as const, dateField: 'DTNEG' as const, origin: STANDARD_SALES_REPORT_POLICY }),
-  activeCustomer: Object.freeze({ field: 'TGFPAR.ATIVO' as const, value: 'S' as const, ownership: 'current-CODVEND' as const, purchaseRequired: false }),
-  coverage: Object.freeze({ source: 'workspace_records' as const, kind: 'activities' as const, status: 'Realizada' as const, dateField: 'data.date' as const, distinctCustomers: true, denominator: 'active-current-wallet' as const }),
+  newCustomer: Object.freeze({
+    event: "first-recorded-standard-purchase" as const,
+    dateField: "DTNEG" as const,
+    origin: STANDARD_SALES_REPORT_POLICY,
+  }),
+  activeCustomer: Object.freeze({
+    field: "TGFPAR.ATIVO" as const,
+    value: "S" as const,
+    ownership: "current-CODVEND" as const,
+    purchaseRequired: false,
+  }),
+  coverage: Object.freeze({
+    source: "workspace_records" as const,
+    kind: "activities" as const,
+    status: "Realizada" as const,
+    dateField: "data.date" as const,
+    distinctCustomers: true,
+    denominator: "active-current-wallet" as const,
+  }),
 });
 
 export function partnerCompany(code: unknown): 1 | 4 {
   if (code === null) return COMMERCIAL_POLICY.sharedPartnerCompany;
   if (code === 1) return code;
-  throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
+  throw new SankhyaError("ERP_SCOPE_FORBIDDEN", "Filial fora do escopo autorizado.", 403);
 }
 export function saleOperation(company: unknown, type: unknown): number {
-  if (type !== 'Venda' || company !== 1) {
-    throw new SankhyaError('ERP_CONTEXT_REQUIRED', 'Tipo de pedido sem contexto comercial ERP definido.', 400);
+  if (type !== "Venda" || company !== 1) {
+    throw new SankhyaError(
+      "ERP_CONTEXT_REQUIRED",
+      "Tipo de pedido sem contexto comercial ERP definido.",
+      400,
+    );
   }
   return COMMERCIAL_POLICY.saleOperationByCompany[company];
 }

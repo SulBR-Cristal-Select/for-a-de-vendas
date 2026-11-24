@@ -1,42 +1,354 @@
-import {DatabaseSync} from 'node:sqlite';
-import {afterEach,describe,expect,it,vi} from 'vitest';
-import {COMMISSION_COLUMNS,readCommissions} from '../../supabase/functions/sankhya-online/commissions';
-import {createERPClient} from './erp-online';
-import {COMMISSION_POLICY,type ERPCommissionQuery} from './erp-commission';
-import {exportERPRows} from '../sul/erp-hooks';
-const admin={role:'administrador' as const},q:ERPCommissionQuery={resource:'orders',view:'sellers',offset:0,limit:50},opened:DatabaseSync[]=[];
-function fixture(){
- const db=new DatabaseSync(':memory:');opened.push(db);
- db.function('TO_CHAR',{varargs:true},v=>v===null?null:String(v));db.function('ROWIDTOCHAR',v=>String(v));db.function('TO_DATE',{varargs:true},v=>v);db.function('NLSSORT',{varargs:true},v=>v);db.function('ASCIISTR',v=>v);db.function('TRANSLATE',{varargs:true},v=>v);
- db.exec('CREATE TABLE USER_TAB_COLUMNS(TABLE_NAME TEXT,COLUMN_NAME TEXT,DATA_TYPE TEXT)');
- for(const[t,cols]of Object.entries(COMMISSION_COLUMNS)){
-  db.exec(`CREATE TABLE ${t}(${Object.entries(cols).map(([k,type])=>k+' '+(type==='NUMBER'?'INTEGER':type==='money'?'REAL':'TEXT')).join(',')})`);
-  for(const[k,type]of Object.entries(cols))db.prepare('INSERT INTO USER_TAB_COLUMNS VALUES(?,?,?)').run(t,k,type==='text'?'VARCHAR2':type==='money'?'FLOAT':type);
- }
- const insert=(t:string,r:Record<string,unknown>)=>db.prepare(`INSERT INTO ${t}(${Object.keys(r).join(',')}) VALUES(${Object.keys(r).map(()=>'?').join(',')})`).run(...Object.values(r) as any[]);
- insert('TGFPAR',{CODPARC:1,RAZAOSOCIAL:'Cliente histórico'});for(const n of [12,34,42])insert('TGFVEN',{CODVEND:n,APELIDO:'Homônimo'});
- for(const[n,m,g]of [[1001,'P',1],[1101,'V',1],[1201,'D',-1]] as const)insert('TGFTOP',{CODTIPOPER:n,DHALTER:'2026-01-01',TIPMOV:m,BONIFICACAO:'N',GOLDEV:g,GOLSINAL:-1});
- const doc=(n:number,patch:Record<string,unknown>={})=>insert('TGFCAB',{NUNOTA:n,CODEMP:1,CODPARC:1,DTNEG:'2026-10-20',VLRNOTA:100,TIPMOV:'P',STATUSNOTA:'L',STATUSNFE:null,CODTIPOPER:1001,DHTIPOPER:'2026-01-01',CODNAT:10100000,...patch});
- const commission=(origin:number,seller=12,amount:string|null='0.125',company:number|null=null)=>insert('TGFCOM',{CODEMP:company,CODVEND:seller,NUNOTAORIG:origin,VLRCOM:amount});
- const link=(dest:number,origin:number,sequence=1)=>{insert('TGFVAR',{NUNOTA:dest,NUNOTAORIG:origin,SEQUENCIA:sequence,SEQUENCIAORIG:1});insert('TGFITE',{NUNOTA:dest,SEQUENCIA:sequence});if(!db.prepare('SELECT 1 FROM TGFITE WHERE NUNOTA=? AND SEQUENCIA=1').get(origin))insert('TGFITE',{NUNOTA:origin,SEQUENCIA:1});};
- const g={select:vi.fn(async(sql:string,limit:number)=>{expect(limit).toBeLessThanOrEqual(50);expect(sql).toMatch(/^(SELECT|WITH) /);const converted=sql.replace(/\bROWNUM\b/g,'1').replace(/TO_DATE\('([^']+)','YYYY-MM-DD'\)\+1/g,"DATE('$1','+1 day')").replace(/OFFSET (\d+) ROWS FETCH NEXT (\d+) ROWS ONLY/g,(_m,o,n)=>`LIMIT ${n} OFFSET ${o}`).replace(/FETCH FIRST (\d+) ROWS ONLY/g,'LIMIT $1');return db.prepare(converted).all() as Record<string,unknown>[];})};
- return{db,g,insert,doc,commission,link,client:createERPClient(async({operation,query})=>{if(operation!=='commission-report')throw Error('Consulta inesperada');return{data:await readCommissions(g,query,admin),error:null};})};
+import { DatabaseSync } from "node:sqlite";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  COMMISSION_COLUMNS,
+  readCommissions,
+} from "../../supabase/functions/sankhya-online/commissions";
+import { createERPClient } from "./erp-online";
+import { COMMISSION_POLICY, type ERPCommissionQuery } from "./erp-commission";
+import { exportERPRows } from "../sul/erp-hooks";
+const admin = { role: "administrador" as const },
+  q: ERPCommissionQuery = { resource: "orders", view: "sellers", offset: 0, limit: 50 },
+  opened: DatabaseSync[] = [];
+function fixture() {
+  const db = new DatabaseSync(":memory:");
+  opened.push(db);
+  db.function("TO_CHAR", { varargs: true }, (v) => (v === null ? null : String(v)));
+  db.function("ROWIDTOCHAR", (v) => String(v));
+  db.function("TO_DATE", { varargs: true }, (v) => v);
+  db.function("NLSSORT", { varargs: true }, (v) => v);
+  db.function("ASCIISTR", (v) => v);
+  db.function("TRANSLATE", { varargs: true }, (v) => v);
+  db.exec("CREATE TABLE USER_TAB_COLUMNS(TABLE_NAME TEXT,COLUMN_NAME TEXT,DATA_TYPE TEXT)");
+  for (const [t, cols] of Object.entries(COMMISSION_COLUMNS)) {
+    db.exec(
+      `CREATE TABLE ${t}(${Object.entries(cols)
+        .map(
+          ([k, type]) =>
+            k + " " + (type === "NUMBER" ? "INTEGER" : type === "money" ? "REAL" : "TEXT"),
+        )
+        .join(",")})`,
+    );
+    for (const [k, type] of Object.entries(cols))
+      db.prepare("INSERT INTO USER_TAB_COLUMNS VALUES(?,?,?)").run(
+        t,
+        k,
+        type === "text" ? "VARCHAR2" : type === "money" ? "FLOAT" : type,
+      );
+  }
+  const insert = (t: string, r: Record<string, unknown>) =>
+    db
+      .prepare(
+        `INSERT INTO ${t}(${Object.keys(r).join(",")}) VALUES(${Object.keys(r)
+          .map(() => "?")
+          .join(",")})`,
+      )
+      .run(...(Object.values(r) as import("node:sqlite").SQLInputValue[]));
+  insert("TGFPAR", { CODPARC: 1, RAZAOSOCIAL: "Cliente histórico" });
+  for (const n of [12, 34, 42]) insert("TGFVEN", { CODVEND: n, APELIDO: "Homônimo" });
+  for (const [n, m, g] of [
+    [1001, "P", 1],
+    [1101, "V", 1],
+    [1201, "D", -1],
+  ] as const)
+    insert("TGFTOP", {
+      CODTIPOPER: n,
+      DHALTER: "2026-01-01",
+      TIPMOV: m,
+      BONIFICACAO: "N",
+      GOLDEV: g,
+      GOLSINAL: -1,
+    });
+  const doc = (n: number, patch: Record<string, unknown> = {}) =>
+    insert("TGFCAB", {
+      NUNOTA: n,
+      CODEMP: 1,
+      CODPARC: 1,
+      DTNEG: "2026-10-20",
+      VLRNOTA: 100,
+      TIPMOV: "P",
+      STATUSNOTA: "L",
+      STATUSNFE: null,
+      CODTIPOPER: 1001,
+      DHTIPOPER: "2026-01-01",
+      CODNAT: 10100000,
+      ...patch,
+    });
+  const commission = (
+    origin: number,
+    seller = 12,
+    amount: string | null = "0.125",
+    company: number | null = null,
+  ) => insert("TGFCOM", { CODEMP: company, CODVEND: seller, NUNOTAORIG: origin, VLRCOM: amount });
+  const link = (dest: number, origin: number, sequence = 1) => {
+    insert("TGFVAR", { NUNOTA: dest, NUNOTAORIG: origin, SEQUENCIA: sequence, SEQUENCIAORIG: 1 });
+    insert("TGFITE", { NUNOTA: dest, SEQUENCIA: sequence });
+    if (!db.prepare("SELECT 1 FROM TGFITE WHERE NUNOTA=? AND SEQUENCIA=1").get(origin))
+      insert("TGFITE", { NUNOTA: origin, SEQUENCIA: 1 });
+  };
+  const g = {
+    select: vi.fn(async (sql: string, limit: number) => {
+      expect(limit).toBeLessThanOrEqual(50);
+      expect(sql).toMatch(/^(SELECT|WITH) /);
+      const converted = sql
+        .replace(/\bROWNUM\b/g, "1")
+        .replace(/TO_DATE\('([^']+)','YYYY-MM-DD'\)\+1/g, "DATE('$1','+1 day')")
+        .replace(
+          /OFFSET (\d+) ROWS FETCH NEXT (\d+) ROWS ONLY/g,
+          (_m, o, n) => `LIMIT ${n} OFFSET ${o}`,
+        )
+        .replace(/FETCH FIRST (\d+) ROWS ONLY/g, "LIMIT $1");
+      return db.prepare(converted).all() as Record<string, unknown>[];
+    }),
+  };
+  return {
+    db,
+    g,
+    insert,
+    doc,
+    commission,
+    link,
+    client: createERPClient(async ({ operation, query }) => {
+      if (operation !== "commission-report") throw Error("Consulta inesperada");
+      return { data: await readCommissions(g, query, admin), error: null };
+    }),
+  };
 }
-afterEach(()=>{for(const d of opened.splice(0))d.close();});
-describe('Comissão nativa e atribuição sem rateio — SQL adaptado a SQLite, não runtime Oracle',()=>{
- it('usa o beneficiário nativo e mantém homônimos separados por código',async()=>{const f=fixture();f.doc(101);f.commission(101,12);f.commission(101,34,'0.25');const d=await f.client.commissionReport(q);expect(d).toMatchObject({total:2,commissionPolicy:COMMISSION_POLICY,summary:{entryCount:2,amount:'0.375'},items:[{sellerCode:12,value:'0.125'},{sellerCode:34,value:'0.25'}]});expect(f.g.select.mock.calls.at(1)?.[0]).toContain('COUNT(DISTINCT ENTRY_KEY)');});
- it('devoluções e outras origens fora da venda padrão não entram no recorte aprovado',async()=>{const f=fixture();f.doc(401,{TIPMOV:'D',CODTIPOPER:1201});f.commission(401,12,'-0.125');expect(await f.client.commissionReport({...q,view:'orders'})).toMatchObject({total:0,summary:{entryCount:0,amount:null},items:[]});});
- it('valor negativo nativo dentro do recorte continua negativo, sem percentual aplicado',async()=>{const f=fixture();f.doc(101);f.commission(101,12,'-0.125');expect(await f.client.commissionReport({...q,view:'orders'})).toMatchObject({summary:{amount:'-0.125'},items:[{assigned:true,commission:'-0.125'}]});});
- it('nota de um pedido atribui só o valor nativo; total do pedido entra uma vez',async()=>{const f=fixture();f.doc(101);f.doc(301,{TIPMOV:'V',STATUSNFE:'A',CODTIPOPER:1101,VLRNOTA:25});f.link(301,101);f.commission(301);f.commission(301,34);expect(await f.client.commissionReport({...q,view:'orders'})).toMatchObject({total:1,summary:{entryCount:2,amount:'0.25',unassignedEntryCount:0},items:[{assigned:true,documentCode:101,number:'101',total:'100',commission:'0.25',entryCount:2}]});});
- it('nota de dois pedidos fica não atribuída, sem multiplicar ou repartir dinheiro',async()=>{const f=fixture();f.doc(101);f.doc(102);f.doc(301,{TIPMOV:'V',STATUSNFE:'A',CODTIPOPER:1101});f.link(301,101);f.link(301,102,2);f.commission(301);expect(await f.client.commissionReport({...q,view:'orders'})).toMatchObject({total:1,items:[{assigned:false,documentCode:301,commission:'0.125',total:null}],summary:{amount:'0.125',entryCount:1,unassignedEntryCount:1}});});
- it('item sem origem, natureza não padrão ou ausência do pedido não produzem atribuição',async()=>{const f=fixture();f.doc(101,{CODNAT:999});f.doc(301,{TIPMOV:'V',STATUSNFE:'A',CODTIPOPER:1101});f.link(301,101);f.commission(301);expect(await f.client.commissionReport({...q,view:'orders'})).toMatchObject({total:0,items:[]});});
- it('estrutura ou join duplicado falha em vez de dobrar a comissão',async()=>{const f=fixture();f.doc(101);f.commission(101);f.insert('TGFVEN',{CODVEND:12,APELIDO:'Outro nome'});await expect(readCommissions(f.g,q,admin)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});});
- it('empresa divergente e origem sem data sob filtro falham sem valores presumidos',async()=>{const f=fixture();f.doc(101);f.commission(101,12,'0.125',4);await expect(readCommissions(f.g,q,admin)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});f.db.exec('UPDATE TGFCOM SET CODEMP=NULL;UPDATE TGFCAB SET DTNEG=NULL');await expect(readCommissions(f.g,{...q,from:'2026-10-01'},admin)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});});
- it('nulo não vira zero e ausência de lançamentos não significa comissão zero',async()=>{const f=fixture();expect(await f.client.commissionReport(q)).toMatchObject({total:0,summary:{entryCount:0,amount:null},items:[]});f.doc(101);f.commission(101,12,null);expect(await f.client.commissionReport(q)).toMatchObject({summary:{entryCount:1,missingAmountCount:1,amount:null},items:[{value:null}]});});
- it('escopo privado usa TGFCOM.CODVEND e não dá acesso ao beneficiário alheio',async()=>{const f=fixture();f.doc(101);f.doc(104,{CODEMP:4});f.doc(103,{CODEMP:3});f.commission(101,12);f.commission(101,34);f.commission(104,12);f.commission(103,12);const scope={role:'gestor' as const,sellerCode:12,companyCodes:[1],teamSellerCodes:[34]};expect(await readCommissions(f.g,q,scope)).toMatchObject({total:2,summary:{entryCount:2,amount:'0.25'}});expect(f.g.select.mock.calls[1]?.[0]).toContain('M.CODVEND IN (12,34)');await expect(readCommissions(f.g,{...q,sellerCode:42},scope)).rejects.toMatchObject({code:'ERP_SCOPE_FORBIDDEN'});});
- it('período é emissão da origem, inclusive o último dia, sem exigir referência inexistente',async()=>{const f=fixture();f.doc(101,{DTNEG:'2026-10-26'});f.commission(101);expect(await f.client.commissionReport({...q,from:'2026-10-26',to:'2026-10-26'})).toMatchObject({total:1});expect(await f.client.commissionReport({...q,from:'2026-10-27'})).toMatchObject({total:0,summary:{amount:null}});});
- it('situação é aplicada na origem; estrutura incompleta não vira relatório vazio',async()=>{const f=fixture();f.doc(101);f.doc(102,{STATUSNOTA:'P'});f.commission(101);f.commission(102);expect(await f.client.commissionReport({...q,status:'confirmado'})).toMatchObject({summary:{entryCount:1}});f.db.exec("DELETE FROM USER_TAB_COLUMNS WHERE TABLE_NAME='TGFCOM' AND COLUMN_NAME='VLRCOM'");await expect(readCommissions(f.g,q,admin)).rejects.toMatchObject({code:'ERP_CONTEXT_REQUIRED'});});
- it('consulta e CSV integrais não mesclam manuais; busca acontece no agrupamento',async()=>{const f=fixture();for(let n=1;n<=61;n++){f.insert('TGFVEN',{CODVEND:n+100,APELIDO:'Vendedor '+n});f.doc(n);f.commission(n,n+100);}expect((await f.client.commissionReport({...q,search:'Vendedor 61'})).items[0]?.['sellerCode']).toBe(161);const rows=await exportERPRows({client:f.client,resource:'orders',commissionReport:{view:'sellers'}},{resource:'orders',view:'sellers'},[{id:'manual'}],()=>{});expect(rows).toHaveLength(61);});
- it('SDK rejeita política, dinheiro binário ou falso vínculo e CSV rejeita mudança do escopo',async()=>{const f=fixture();f.doc(101);f.commission(101);const d=await f.client.commissionReport({...q,view:'orders'});for(const patch of [{commissionPolicy:{...COMMISSION_POLICY,paid:true}},{items:[{...d.items[0],commission:0.125}]},{items:[{...d.items[0],assigned:false}]}])await expect(createERPClient(async()=>({data:{...d,...patch},error:null})).commissionReport({...q,view:'orders'})).rejects.toMatchObject({code:'INVALID_RESPONSE'});let calls=0;const c=createERPClient(async()=>({data:{...d,...(++calls>1?{companyCodes:[4]}:{})},error:null}));await expect(exportERPRows({client:c,resource:'orders',commissionReport:{view:'orders'}},{resource:'orders',view:'orders'},[],()=>{})).rejects.toMatchObject({code:'INVALID_RESPONSE'});});
- it.each([{sql:'SELECT 1'},{view:'raw'},{sellerCode:0},{from:'2026-02-30'},{from:'2026-10-26',to:'2026-10-01'},{offset:-1},{limit:51},{sort:'DROP'},{resource:'customers'}])('entrada inválida não consulta: %j',async patch=>{const f=fixture();await expect(readCommissions(f.g,{...q,...patch},admin)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(f.g.select).not.toHaveBeenCalled();});
+afterEach(() => {
+  for (const d of opened.splice(0)) d.close();
+});
+describe("Comissão nativa e atribuição sem rateio — SQL adaptado a SQLite, não runtime Oracle", () => {
+  it("usa o beneficiário nativo e mantém homônimos separados por código", async () => {
+    const f = fixture();
+    f.doc(101);
+    f.commission(101, 12);
+    f.commission(101, 34, "0.25");
+    const d = await f.client.commissionReport(q);
+    expect(d).toMatchObject({
+      total: 2,
+      commissionPolicy: COMMISSION_POLICY,
+      summary: { entryCount: 2, amount: "0.375" },
+      items: [
+        { sellerCode: 12, value: "0.125" },
+        { sellerCode: 34, value: "0.25" },
+      ],
+    });
+    expect(f.g.select.mock.calls.at(1)?.[0]).toContain("COUNT(DISTINCT ENTRY_KEY)");
+  });
+  it("devoluções e outras origens fora da venda padrão não entram no recorte aprovado", async () => {
+    const f = fixture();
+    f.doc(401, { TIPMOV: "D", CODTIPOPER: 1201 });
+    f.commission(401, 12, "-0.125");
+    expect(await f.client.commissionReport({ ...q, view: "orders" })).toMatchObject({
+      total: 0,
+      summary: { entryCount: 0, amount: null },
+      items: [],
+    });
+  });
+  it("valor negativo nativo dentro do recorte continua negativo, sem percentual aplicado", async () => {
+    const f = fixture();
+    f.doc(101);
+    f.commission(101, 12, "-0.125");
+    expect(await f.client.commissionReport({ ...q, view: "orders" })).toMatchObject({
+      summary: { amount: "-0.125" },
+      items: [{ assigned: true, commission: "-0.125" }],
+    });
+  });
+  it("nota de um pedido atribui só o valor nativo; total do pedido entra uma vez", async () => {
+    const f = fixture();
+    f.doc(101);
+    f.doc(301, { TIPMOV: "V", STATUSNFE: "A", CODTIPOPER: 1101, VLRNOTA: 25 });
+    f.link(301, 101);
+    f.commission(301);
+    f.commission(301, 34);
+    expect(await f.client.commissionReport({ ...q, view: "orders" })).toMatchObject({
+      total: 1,
+      summary: { entryCount: 2, amount: "0.25", unassignedEntryCount: 0 },
+      items: [
+        {
+          assigned: true,
+          documentCode: 101,
+          number: "101",
+          total: "100",
+          commission: "0.25",
+          entryCount: 2,
+        },
+      ],
+    });
+  });
+  it("nota de dois pedidos fica não atribuída, sem multiplicar ou repartir dinheiro", async () => {
+    const f = fixture();
+    f.doc(101);
+    f.doc(102);
+    f.doc(301, { TIPMOV: "V", STATUSNFE: "A", CODTIPOPER: 1101 });
+    f.link(301, 101);
+    f.link(301, 102, 2);
+    f.commission(301);
+    expect(await f.client.commissionReport({ ...q, view: "orders" })).toMatchObject({
+      total: 1,
+      items: [{ assigned: false, documentCode: 301, commission: "0.125", total: null }],
+      summary: { amount: "0.125", entryCount: 1, unassignedEntryCount: 1 },
+    });
+  });
+  it("item sem origem, natureza não padrão ou ausência do pedido não produzem atribuição", async () => {
+    const f = fixture();
+    f.doc(101, { CODNAT: 999 });
+    f.doc(301, { TIPMOV: "V", STATUSNFE: "A", CODTIPOPER: 1101 });
+    f.link(301, 101);
+    f.commission(301);
+    expect(await f.client.commissionReport({ ...q, view: "orders" })).toMatchObject({
+      total: 0,
+      items: [],
+    });
+  });
+  it("estrutura ou join duplicado falha em vez de dobrar a comissão", async () => {
+    const f = fixture();
+    f.doc(101);
+    f.commission(101);
+    f.insert("TGFVEN", { CODVEND: 12, APELIDO: "Outro nome" });
+    await expect(readCommissions(f.g, q, admin)).rejects.toMatchObject({
+      code: "ERP_CONTEXT_REQUIRED",
+    });
+  });
+  it("empresa divergente e origem sem data sob filtro falham sem valores presumidos", async () => {
+    const f = fixture();
+    f.doc(101);
+    f.commission(101, 12, "0.125", 4);
+    await expect(readCommissions(f.g, q, admin)).rejects.toMatchObject({
+      code: "ERP_CONTEXT_REQUIRED",
+    });
+    f.db.exec("UPDATE TGFCOM SET CODEMP=NULL;UPDATE TGFCAB SET DTNEG=NULL");
+    await expect(readCommissions(f.g, { ...q, from: "2026-10-01" }, admin)).rejects.toMatchObject({
+      code: "ERP_CONTEXT_REQUIRED",
+    });
+  });
+  it("nulo não vira zero e ausência de lançamentos não significa comissão zero", async () => {
+    const f = fixture();
+    expect(await f.client.commissionReport(q)).toMatchObject({
+      total: 0,
+      summary: { entryCount: 0, amount: null },
+      items: [],
+    });
+    f.doc(101);
+    f.commission(101, 12, null);
+    expect(await f.client.commissionReport(q)).toMatchObject({
+      summary: { entryCount: 1, missingAmountCount: 1, amount: null },
+      items: [{ value: null }],
+    });
+  });
+  it("escopo privado usa TGFCOM.CODVEND e não dá acesso ao beneficiário alheio", async () => {
+    const f = fixture();
+    f.doc(101);
+    f.doc(104, { CODEMP: 4 });
+    f.doc(103, { CODEMP: 3 });
+    f.commission(101, 12);
+    f.commission(101, 34);
+    f.commission(104, 12);
+    f.commission(103, 12);
+    const scope = {
+      role: "gestor" as const,
+      sellerCode: 12,
+      companyCodes: [1],
+      teamSellerCodes: [34],
+    };
+    expect(await readCommissions(f.g, q, scope)).toMatchObject({
+      total: 2,
+      summary: { entryCount: 2, amount: "0.25" },
+    });
+    expect(f.g.select.mock.calls[1]?.[0]).toContain("M.CODVEND IN (12,34)");
+    await expect(readCommissions(f.g, { ...q, sellerCode: 42 }, scope)).rejects.toMatchObject({
+      code: "ERP_SCOPE_FORBIDDEN",
+    });
+  });
+  it("período é emissão da origem, inclusive o último dia, sem exigir referência inexistente", async () => {
+    const f = fixture();
+    f.doc(101, { DTNEG: "2026-10-26" });
+    f.commission(101);
+    expect(
+      await f.client.commissionReport({ ...q, from: "2026-10-26", to: "2026-10-26" }),
+    ).toMatchObject({ total: 1 });
+    expect(await f.client.commissionReport({ ...q, from: "2026-10-27" })).toMatchObject({
+      total: 0,
+      summary: { amount: null },
+    });
+  });
+  it("situação é aplicada na origem; estrutura incompleta não vira relatório vazio", async () => {
+    const f = fixture();
+    f.doc(101);
+    f.doc(102, { STATUSNOTA: "P" });
+    f.commission(101);
+    f.commission(102);
+    expect(await f.client.commissionReport({ ...q, status: "confirmado" })).toMatchObject({
+      summary: { entryCount: 1 },
+    });
+    f.db.exec("DELETE FROM USER_TAB_COLUMNS WHERE TABLE_NAME='TGFCOM' AND COLUMN_NAME='VLRCOM'");
+    await expect(readCommissions(f.g, q, admin)).rejects.toMatchObject({
+      code: "ERP_CONTEXT_REQUIRED",
+    });
+  });
+  it("consulta e CSV integrais não mesclam manuais; busca acontece no agrupamento", async () => {
+    const f = fixture();
+    for (let n = 1; n <= 61; n++) {
+      f.insert("TGFVEN", { CODVEND: n + 100, APELIDO: "Vendedor " + n });
+      f.doc(n);
+      f.commission(n, n + 100);
+    }
+    expect(
+      (await f.client.commissionReport({ ...q, search: "Vendedor 61" })).items[0]?.["sellerCode"],
+    ).toBe(161);
+    const rows = await exportERPRows(
+      { client: f.client, resource: "orders", commissionReport: { view: "sellers" } },
+      { resource: "orders", view: "sellers" },
+      [{ id: "manual" }],
+      () => {},
+    );
+    expect(rows).toHaveLength(61);
+  });
+  it("SDK rejeita política, dinheiro binário ou falso vínculo e CSV rejeita mudança do escopo", async () => {
+    const f = fixture();
+    f.doc(101);
+    f.commission(101);
+    const d = await f.client.commissionReport({ ...q, view: "orders" });
+    for (const patch of [
+      { commissionPolicy: { ...COMMISSION_POLICY, paid: true } },
+      { items: [{ ...d.items[0], commission: 0.125 }] },
+      { items: [{ ...d.items[0], assigned: false }] },
+    ])
+      await expect(
+        createERPClient(async () => ({ data: { ...d, ...patch }, error: null })).commissionReport({
+          ...q,
+          view: "orders",
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    let calls = 0;
+    const c = createERPClient(async () => ({
+      data: { ...d, ...(++calls > 1 ? { companyCodes: [4] } : {}) },
+      error: null,
+    }));
+    await expect(
+      exportERPRows(
+        { client: c, resource: "orders", commissionReport: { view: "orders" } },
+        { resource: "orders", view: "orders" },
+        [],
+        () => {},
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+  it.each([
+    { sql: "SELECT 1" },
+    { view: "raw" },
+    { sellerCode: 0 },
+    { from: "2026-02-30" },
+    { from: "2026-10-26", to: "2026-10-01" },
+    { offset: -1 },
+    { limit: 51 },
+    { sort: "DROP" },
+    { resource: "customers" },
+  ])("entrada inválida não consulta: %j", async (patch) => {
+    const f = fixture();
+    await expect(readCommissions(f.g, { ...q, ...patch }, admin)).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+    });
+    expect(f.g.select).not.toHaveBeenCalled();
+  });
 });

@@ -1,1 +1,14 @@
-export const BILLED_ORDERS_POLICY={selection:'at-least-one-qualified-invoice',includePartial:true,billingExtent:'not-determined',periodField:'TGFCAB.DTFATUR',orderDateField:'TGFCAB.DTNEG',invoiceAmountField:'TGFCAB.VLRNOTA',invoiceAmount:'only-unique-order-or-null',incompleteReference:'unavailable-not-partial-sum',quantitiesAllocated:false,ordersAddedToBilling:false,undatedTreatment:'excluded-without-date-fallback',atomicSnapshot:false} as const;
+export const BILLED_ORDERS_POLICY = {
+  selection: "at-least-one-qualified-invoice",
+  includePartial: true,
+  billingExtent: "not-determined",
+  periodField: "TGFCAB.DTFATUR",
+  orderDateField: "TGFCAB.DTNEG",
+  invoiceAmountField: "TGFCAB.VLRNOTA",
+  invoiceAmount: "only-unique-order-or-null",
+  incompleteReference: "unavailable-not-partial-sum",
+  quantitiesAllocated: false,
+  ordersAddedToBilling: false,
+  undatedTreatment: "excluded-without-date-fallback",
+  atomicSnapshot: false,
+} as const;

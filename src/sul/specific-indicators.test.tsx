@@ -1,23 +1,235 @@
-import React from 'react';
-import{cleanup,fireEvent,render,screen,waitFor}from'@testing-library/react';
-import{afterEach,beforeEach,describe,expect,it,vi}from'vitest';
-import{SpecificIndicator}from'./SpecificIndicator';
-import{SelectedIndicators}from'./SelectedIndicators';
-import{INDICATOR_BINDINGS,requiredIndicatorSeries}from'./indicator-bindings';
-import{indicatorFixture}from'../test/indicator-series-fixture';
-import{closeBilledFixtures}from'../test/billed-orders-fixture';
-import catalogo from './catalogo.json';
-const name=catalogo.indicators.Vendas[0]!,month='2026-10',empty={activities:[],tasks:[],customers:[],users:[],company:{userId:'titular'}};
-beforeEach(()=>{vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});});
-afterEach(()=>{cleanup();closeBilledFixtures();vi.restoreAllMocks();vi.unstubAllGlobals();});
-function setup(){const f=indicatorFixture();f.db.exec("UPDATE TGFPAR SET ATIVO='S',CODEMP=1");f.order(1);f.item(1,'9');f.item(1,'77',{sequence:2,product:101});const window=vi.fn(async(_query:any)=>({items:[{id:'sankhya:product:100',code:'100',name:'Produto nativo'},{id:'sankhya:product:101',code:'101',name:'Outro produto'}],total:2,hasMore:false})),facets=vi.fn(async()=>({items:[{code:1,name:'Categoria nativa'}],total:1,hasMore:false}));return{...f,client:{...f.client,window,facets} as any,window,facets};}
-async function pick(label:string,option:string){fireEvent.click(screen.getByRole('combobox',{name:label}));fireEvent.click(await screen.findByRole('option',{name:option}));}
-describe('Filtros mínimos autorizados dos indicadores',()=>{
- it('oito específicos não executam consulta sem seleção nem entram no carregamento global',()=>{const f=setup();const names=Object.keys(INDICATOR_BINDINGS).filter(n=>{const b=INDICATOR_BINDINGS[n];return b&&'series'in b&&!!b.specific;});expect(names).toHaveLength(8);expect(requiredIndicatorSeries(names)).toEqual(requiredIndicatorSeries([]));render(<SelectedIndicators names={[name]} data={undefined} db={empty} month={month} seller="" client={f.client}/>);expect(screen.getByText(/nenhum produto, categoria ou cliente foi presumido/)).toBeInTheDocument();expect(f.transport).not.toHaveBeenCalled();expect(f.window).not.toHaveBeenCalled();});
- it('escolha de produto consulta por código e não mistura o outro SKU',async()=>{const f=setup();render(<SelectedIndicators names={[name]} data={undefined} db={empty} month={month} seller="" client={f.client}/>);await pick('Produto — '+name,'Produto nativo [100]');await screen.findByText('R$ 9,00');expect(screen.queryByText('R$ 77,00')).not.toBeInTheDocument();expect(f.window.mock.calls[0]![0].filters).toBeUndefined();expect(f.transport.mock.calls[0]![0]).toMatchObject({operation:'indicator-series',query:{series:'items-selected',productId:'sankhya:product:100'}});});
- it('troca para categoria limpa SKU e só consulta quando o usuário escolhe o código',async()=>{const f=setup();render(<SelectedIndicators names={[name]} data={undefined} db={empty} month={month} seller="" client={f.client}/>);await pick('Tipo de recorte — '+name,'Categoria');expect(f.transport).not.toHaveBeenCalled();await pick('Categoria — '+name,'Categoria nativa [1]');await screen.findByText('R$ 77,00');expect(f.transport.mock.calls[0]![0].query).toMatchObject({series:'items-selected',categoryCode:1});expect(f.transport.mock.calls[0]![0].query.productId).toBeUndefined();expect(f.facets).toHaveBeenCalledWith(expect.objectContaining({resource:'products',facet:'category',pageSize:50}));});
- it('faturamento específico oferece cliente e não propõe rateio de nota por produto',()=>{const f=setup(),n=catalogo.indicators.Faturamento[0]!;render(<SelectedIndicators names={[n]} data={undefined} db={empty} month={month} seller="" client={f.client}/>);expect(screen.getByRole('combobox',{name:'Cliente — '+n})).toBeInTheDocument();expect(screen.queryByRole('combobox',{name:/Produto/})).not.toBeInTheDocument();expect(f.transport).not.toHaveBeenCalled();});
- it('positivação por categoria não aceita seleção de produto nem nome como código',()=>{const f=setup(),n=catalogo.indicators['Positivação'][7]!;render(<SelectedIndicators names={[n]} data={undefined} db={empty} month={month} seller="" client={f.client}/>);expect(screen.getByRole('combobox',{name:'Categoria — '+n})).toBeInTheDocument();expect(screen.queryByRole('combobox',{name:/Tipo de recorte/})).not.toBeInTheDocument();expect(f.transport).not.toHaveBeenCalled();});
- it('resultado de seleção anterior não substitui seleção nova que respondeu primeiro',async()=>{const f=setup();const a=await f.client.indicatorSeries({resource:'orders',series:'items-selected',month,productId:'sankhya:product:100',offset:0,limit:50}),b=await f.client.indicatorSeries({resource:'orders',series:'items-selected',month,productId:'sankhya:product:101',offset:0,limit:50});let release!:(v:any)=>void;const read=vi.fn().mockImplementationOnce(()=>new Promise(r=>{release=r;})).mockResolvedValue(b);const client={...f.client,indicatorSeries:read};render(<SpecificIndicator name={name} series="items-selected" kind="product-or-category" client={client} month={month} seller="" identity="titular" render={r=><p>{r?.summary.value??'Sem resultado'}</p>}/>);await pick('Produto — '+name,'Produto nativo [100]');await waitFor(()=>expect(read).toHaveBeenCalledTimes(1));await pick('Produto — '+name,'Outro produto [101]');await screen.findByText('77');release(a);await waitFor(()=>expect(screen.getByText('77')).toBeInTheDocument());expect(screen.queryByText('9')).not.toBeInTheDocument();});
- it('alteração de mês remove imediatamente o resultado antigo e consulta novo período',async()=>{const f=setup();const p={name,series:'items-selected' as const,kind:'product-or-category' as const,client:f.client,month,seller:'',identity:'titular',render:(r:any)=><p>{r?String(r.summary.value):'Sem resultado'}</p>};const x=render(<SpecificIndicator {...p}/>);await pick('Produto — '+name,'Produto nativo [100]');await screen.findByText('9');x.rerender(<SpecificIndicator {...p} month="2026-09"/>);expect(screen.queryByText('9')).not.toBeInTheDocument();await screen.findByText('0');expect(f.transport.mock.calls.at(-1)![0].query.month).toBe('2026-09');});
+import React from "react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SpecificIndicator } from "./SpecificIndicator";
+import { SelectedIndicators } from "./SelectedIndicators";
+import { INDICATOR_BINDINGS, requiredIndicatorSeries } from "./indicator-bindings";
+import { indicatorFixture } from "../test/indicator-series-fixture";
+import { closeBilledFixtures } from "../test/billed-orders-fixture";
+import catalogo from "./catalogo.json";
+const name = catalogo.indicators.Vendas[0]!,
+  month = "2026-10",
+  empty = { activities: [], tasks: [], customers: [], users: [], company: { userId: "titular" } };
+beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
+afterEach(() => {
+  cleanup();
+  closeBilledFixtures();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+function setup() {
+  const f = indicatorFixture();
+  f.db.exec("UPDATE TGFPAR SET ATIVO='S',CODEMP=1");
+  f.order(1);
+  f.item(1, "9");
+  f.item(1, "77", { sequence: 2, product: 101 });
+  const window = vi.fn(async (_query: Parameters<typeof f.client.window>[0]) => ({
+      items: [
+        { id: "sankhya:product:100", code: "100", name: "Produto nativo" },
+        { id: "sankhya:product:101", code: "101", name: "Outro produto" },
+      ],
+      total: 2,
+      hasMore: false,
+    })),
+    facets = vi.fn(async () => ({
+      items: [{ code: 1, name: "Categoria nativa" }],
+      total: 1,
+      hasMore: false,
+    }));
+  return {
+    ...f,
+    client: { ...f.client, window, facets } as unknown as typeof f.client,
+    window,
+    facets,
+  };
+}
+async function pick(label: string, option: string) {
+  fireEvent.click(screen.getByRole("combobox", { name: label }));
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+describe("Filtros mínimos autorizados dos indicadores", () => {
+  it("oito específicos não executam consulta sem seleção nem entram no carregamento global", () => {
+    const f = setup();
+    const names = Object.keys(INDICATOR_BINDINGS).filter((n) => {
+      const b = INDICATOR_BINDINGS[n];
+      return b && "series" in b && !!b.specific;
+    });
+    expect(names).toHaveLength(8);
+    expect(requiredIndicatorSeries(names)).toEqual(requiredIndicatorSeries([]));
+    render(
+      <SelectedIndicators
+        names={[name]}
+        data={undefined}
+        db={empty}
+        month={month}
+        seller=""
+        client={f.client}
+      />,
+    );
+    expect(
+      screen.getByText(/nenhum produto, categoria ou cliente foi presumido/),
+    ).toBeInTheDocument();
+    expect(f.transport).not.toHaveBeenCalled();
+    expect(f.window).not.toHaveBeenCalled();
+  });
+  it("escolha de produto consulta por código e não mistura o outro SKU", async () => {
+    const f = setup();
+    render(
+      <SelectedIndicators
+        names={[name]}
+        data={undefined}
+        db={empty}
+        month={month}
+        seller=""
+        client={f.client}
+      />,
+    );
+    await pick("Produto — " + name, "Produto nativo [100]");
+    await screen.findByText("R$ 9,00");
+    expect(screen.queryByText("R$ 77,00")).not.toBeInTheDocument();
+    expect(f.window.mock.calls[0]![0].filters).toBeUndefined();
+    expect(f.transport.mock.calls[0]![0]).toMatchObject({
+      operation: "indicator-series",
+      query: { series: "items-selected", productId: "sankhya:product:100" },
+    });
+  });
+  it("troca para categoria limpa SKU e só consulta quando o usuário escolhe o código", async () => {
+    const f = setup();
+    render(
+      <SelectedIndicators
+        names={[name]}
+        data={undefined}
+        db={empty}
+        month={month}
+        seller=""
+        client={f.client}
+      />,
+    );
+    await pick("Tipo de recorte — " + name, "Categoria");
+    expect(f.transport).not.toHaveBeenCalled();
+    await pick("Categoria — " + name, "Categoria nativa [1]");
+    await screen.findByText("R$ 77,00");
+    expect(f.transport.mock.calls[0]![0].query).toMatchObject({
+      series: "items-selected",
+      categoryCode: 1,
+    });
+    expect(f.transport.mock.calls[0]![0].query.productId).toBeUndefined();
+    expect(f.facets).toHaveBeenCalledWith(
+      expect.objectContaining({ resource: "products", facet: "category", pageSize: 50 }),
+    );
+  });
+  it("faturamento específico oferece cliente e não propõe rateio de nota por produto", () => {
+    const f = setup(),
+      n = catalogo.indicators.Faturamento[0]!;
+    render(
+      <SelectedIndicators
+        names={[n]}
+        data={undefined}
+        db={empty}
+        month={month}
+        seller=""
+        client={f.client}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Cliente — " + n })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /Produto/ })).not.toBeInTheDocument();
+    expect(f.transport).not.toHaveBeenCalled();
+  });
+  it("positivação por categoria não aceita seleção de produto nem nome como código", () => {
+    const f = setup(),
+      n = catalogo.indicators["Positivação"][7]!;
+    render(
+      <SelectedIndicators
+        names={[n]}
+        data={undefined}
+        db={empty}
+        month={month}
+        seller=""
+        client={f.client}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Categoria — " + n })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /Tipo de recorte/ })).not.toBeInTheDocument();
+    expect(f.transport).not.toHaveBeenCalled();
+  });
+  it("resultado de seleção anterior não substitui seleção nova que respondeu primeiro", async () => {
+    const f = setup();
+    const a = await f.client.indicatorSeries({
+        resource: "orders",
+        series: "items-selected",
+        month,
+        productId: "sankhya:product:100",
+        offset: 0,
+        limit: 50,
+      }),
+      b = await f.client.indicatorSeries({
+        resource: "orders",
+        series: "items-selected",
+        month,
+        productId: "sankhya:product:101",
+        offset: 0,
+        limit: 50,
+      });
+    let release!: (v: unknown) => void;
+    const read = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            release = r;
+          }),
+      )
+      .mockResolvedValue(b);
+    const client = { ...f.client, indicatorSeries: read };
+    render(
+      <SpecificIndicator
+        name={name}
+        series="items-selected"
+        kind="product-or-category"
+        client={client}
+        month={month}
+        seller=""
+        identity="titular"
+        render={(r) => <p>{r?.summary.value ?? "Sem resultado"}</p>}
+      />,
+    );
+    await pick("Produto — " + name, "Produto nativo [100]");
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    await pick("Produto — " + name, "Outro produto [101]");
+    await screen.findByText("77");
+    release(a);
+    await waitFor(() => expect(screen.getByText("77")).toBeInTheDocument());
+    expect(screen.queryByText("9")).not.toBeInTheDocument();
+  });
+  it("alteração de mês remove imediatamente o resultado antigo e consulta novo período", async () => {
+    const f = setup();
+    const p = {
+      name,
+      series: "items-selected" as const,
+      kind: "product-or-category" as const,
+      client: f.client,
+      month,
+      seller: "",
+      identity: "titular",
+      render: (r: import("../lib/erp-indicator-series").ERPIndicatorWindow | undefined) => (
+        <p>{r ? String(r.summary.value) : "Sem resultado"}</p>
+      ),
+    };
+    const x = render(<SpecificIndicator {...p} />);
+    await pick("Produto — " + name, "Produto nativo [100]");
+    await screen.findByText("9");
+    x.rerender(<SpecificIndicator {...p} month="2026-09" />);
+    expect(screen.queryByText("9")).not.toBeInTheDocument();
+    await screen.findByText("0");
+    expect(f.transport.mock.calls.at(-1)![0].query.month).toBe("2026-09");
+  });
 });
