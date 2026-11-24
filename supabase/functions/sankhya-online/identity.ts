@@ -13,7 +13,7 @@ export function actorScope(actor: CommercialActor, value: unknown = actor.bindin
   if (team !== undefined && (!Array.isArray(team) || team.length > 49 || new Set(team).size !== team.length ||
     team.some(c => typeof c !== 'number' || !Number.isSafeInteger(c) || c < 1 || c > 2147483647 || c === binding.sellerCode)))
     throw new SankhyaError('ERP_IDENTITY_REQUIRED', 'Vínculo explícito de vendedor e filial ERP necessário.', 403);
-  return { role, sellerCode: binding.sellerCode, companyCodes: binding.companyCodes,
+  return { role, sellerCode: binding.sellerCode, companyCodes: binding.companyCodes.filter(c => c === 1),
     ...(role === 'gestor' && team !== undefined ? { teamSellerCodes: [...team as number[]] } : {}) };
 }
 export function loggedSeller(scope: ReadScope, requested?: unknown): number {

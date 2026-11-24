@@ -18,7 +18,7 @@ export type ERPWindowQuery = Omit<ERPPageQuery, 'page' | 'pageSize'> & { offset:
 export type ERPRecordQuery = { resource: ERPResource; id: number | string };
 export type ERPFacetQuery = ERPPageQuery & { facet: 'category' | 'seller' | 'company' | 'city' };
 export type ERPObservation = { source: 'sankhya'; readOnly: true; readAt: string };
-export type ERPWindow<T = ERPRow> = ERPObservation & { items: T[]; total: number; totalWithoutSearch: number; offset: number };
+export type ERPWindow<T = ERPRow> = ERPObservation & { items: T[]; total: number; totalWithoutSearch: number; offset: number; priceTableState?: 'missing' | 'unavailable' | 'empty' };
 export type ERPPage<T = ERPRow> = ERPObservation & { items: T[]; total: number; totalWithoutSearch: number; page: number; pageSize: 10 | 20 | 50; hasMore: boolean };
 export type ERPRecord<T = ERPRow> = ERPObservation & { record: T | null };
 export type ERPHistoryQuery = { resource: 'orders' | 'invoices'; offset: number; limit: number; customerId?: string; search?: string; sort?: string; direction?: 'asc' | 'desc'; from?: string; to?: string; companyCode?: 1 | 4 };
@@ -57,6 +57,8 @@ const messages = {
   FORBIDDEN: 'Consulta não autorizada.',
   ERP_UNAVAILABLE: 'Consulta ERP indisponível. Tente novamente.',
   ERP_CONTEXT_REQUIRED: 'Contexto comercial ERP incompleto ou não confirmado.',
+  ERP_CUSTOMER_SELLER_MISMATCH: 'O vendedor do pedido deve ser o vendedor cadastrado no cliente.',
+  ERP_PRODUCT_PRICE_UNAVAILABLE: 'Produto sem preço vigente na tabela associada.',
   ERP_PRICE_AMBIGUOUS: 'Preço ERP sem contexto único confirmado.',
   ERP_PRICE_TABLE_MISSING: 'Cliente sem tabela de preço associada; cotação indisponível.',
   ERP_INVALID_RESPONSE: 'Resposta ERP inválida ou incompleta.',
@@ -122,6 +124,7 @@ function decode(operation: ERPOperation, data: unknown, query: ERPQuery): ERPRow
     if (data['record'] !== null && !object(data['record'])) invalid();
     return data;
   }
+  if (data['priceTableState'] !== undefined && (!['missing','unavailable','empty'].includes(String(data['priceTableState'])) || operation !== 'window' || (query as ERPWindowQuery).resource !== 'products' || !(query as ERPWindowQuery).filters?.customerCode || data['totalWithoutSearch'] !== 0)) invalid();
   const items = data['items'], total = data['total'], unfiltered = data['totalWithoutSearch'];
   if (!Array.isArray(items) || !items.every(object) || !natural(total) || !natural(unfiltered) || total > unfiltered) invalid();
   let offset: number, limit: number;

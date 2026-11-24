@@ -51,6 +51,8 @@ export async function readPrice(gateway: Transport, input: PriceInput, scope: Re
   const customer = observedCustomer.record;
   if (!customer || customer.active !== true) return fail('ERP_CONTEXT_REQUIRED', 'Cliente ativo não confirmado no ERP.');
   const customerERP = object(customer.erp), companyCode = partnerCompany(customerERP['companyCode']);
+  if (scope.role === 'gestor' && customerERP['sellerCode'] !== sellerCode)
+    return fail('ERP_CUSTOMER_SELLER_MISMATCH', 'O vendedor do pedido deve ser o vendedor cadastrado no cliente.', 400);
   if (!scope.companyCodes?.includes(companyCode)) return fail('ERP_SCOPE_FORBIDDEN', 'Filial fora do escopo autorizado.', 403);
   const sellerResult = await readRecord(gateway, { resource: 'sellers', id: sellerCode }, scope);
   if (!sellerResult.record || sellerResult.record.active !== true || sellerResult.record.id !== `sankhya:seller:${sellerCode}` || object(sellerResult.record.erp)['sellerCode'] !== sellerCode) return fail('ERP_CONTEXT_REQUIRED', 'Vendedor ativo não confirmado no ERP.');
@@ -73,6 +75,7 @@ export async function readPrice(gateway: Transport, input: PriceInput, scope: Re
   // Sem tabela de preço associada (cliente e condição), a cotação não é ambiguidade: é ausência de negócio.
   if (!tables.length) return fail('ERP_PRICE_TABLE_MISSING', 'Cliente sem tabela de preço associada.', 400);
   const variants = await gateway.select(`WITH V AS (SELECT T.NUTAB,ROW_NUMBER() OVER (PARTITION BY T.CODTAB ORDER BY T.DTVIGOR DESC,T.DTALTER DESC,T.NUTAB DESC) AS RN FROM TGFTAB T JOIN TGFNTA N ON N.CODTAB=T.CODTAB WHERE T.CODTAB IN (${tables.join(',')}) AND N.ATIVO='S' AND T.DTVIGOR<=${asOf} AND (T.DTALTER IS NULL OR T.DTALTER<=${asOf})) SELECT DISTINCT E.CODLOCAL,E.CONTROLE FROM TGFEXC E JOIN V ON V.NUTAB=E.NUTAB AND V.RN=1 WHERE E.CODPROD=${productCode} AND E.TIPO='V' ORDER BY E.CODLOCAL,E.CONTROLE FETCH FIRST 2 ROWS ONLY`, 2);
+  if (variants.length === 0) return fail('ERP_PRODUCT_PRICE_UNAVAILABLE', 'Produto sem preço vigente na tabela associada.', 400);
   if (variants.length !== 1) return fail('ERP_PRICE_AMBIGUOUS', 'Local e controle sem contexto único de preço.', 502);
   const rawLocal = variants[0]!['CODLOCAL'], localCode = Number(rawLocal), control = variants[0]!['CONTROLE'];
   if (!(typeof rawLocal === 'number' || typeof rawLocal === 'string' && /^\d+$/.test(rawLocal)) || !Number.isSafeInteger(localCode) || localCode < 0 || typeof control !== 'string' || control.length > 17) return fail('ERP_CONTEXT_REQUIRED', 'Local ou controle ERP não confirmado.');

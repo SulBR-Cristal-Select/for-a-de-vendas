@@ -29,16 +29,17 @@ async function load(d:SubmissionDeps,id:string) {
   const result=record(response.data),order=record(result['order']),erp=record(order['erp']);
   if(order['id']!==id||order['sellerId']!==d.actor.id||!digest(result['fingerprint']))return fail('ERP_INVALID_RESPONSE','Pedido do servidor incompatível.',502);
   operationSeller(scope,erp['sellerCode']);
-  if(!scope.companyCodes?.includes(erp['companyCode'] as 1|4))return fail('ERP_SCOPE_FORBIDDEN','Filial fora do acesso do titular.',403);
+  if(erp['companyCode']!==1||!scope.companyCodes?.includes(erp['companyCode'] as 1|4))return fail('ERP_SCOPE_FORBIDDEN','Filial fora do acesso do titular.',403);
   return {order,fingerprint:result['fingerprint'],receipt:(order['receipt']??null) as SubmissionReceipt|null};
 }
 /** O cadastro é revalidado antes de incluir e de confirmar, como na skill. */
 async function checkRegistry(d:SubmissionDeps,p:CanonicalOrder):Promise<void> {
-  const rows=await d.gateway.select(`SELECT P.CODPARC,P.CLIENTE,P.ATIVO,P.AD_STATUS_PEDIDO,C.SUGTIPNEGSAID,T.CODTIPVENDA CONDICAO_VALIDADA,N.CODNAT,N.ATIVA,N.ANALITICA
+  const rows=await d.gateway.select(`SELECT P.CODPARC,P.CODVEND,P.CLIENTE,P.ATIVO,P.AD_STATUS_PEDIDO,C.SUGTIPNEGSAID,T.CODTIPVENDA CONDICAO_VALIDADA,N.CODNAT,N.ATIVA,N.ANALITICA
 FROM TGFPAR P LEFT JOIN TGFCPL C ON C.CODPARC=P.CODPARC
 LEFT JOIN TGFTPV T ON T.CODTIPVENDA=C.SUGTIPNEGSAID AND T.DHALTER=(SELECT MAX(X.DHALTER) FROM TGFTPV X WHERE X.CODTIPVENDA=T.CODTIPVENDA AND X.DHALTER<=SYSDATE)
 LEFT JOIN TGFNAT N ON N.CODNAT=10100000 WHERE P.CODPARC=${p.codigo_parceiro} AND ROWNUM<=2`,2);
   const r=rows[0];
+  if(d.actor.role==='gestor'&&Number(r?.['CODVEND'])!==p.codigo_vendedor)return fail('ERP_CUSTOMER_SELLER_MISMATCH','O vendedor do pedido deve ser o vendedor cadastrado no cliente.',400);
   if(rows.length!==1||!r||r['CLIENTE']!=='S'||r['ATIVO']!=='S'||Number(r['CODPARC'])!==p.codigo_parceiro||Number(r['SUGTIPNEGSAID'])!==p.codigo_condicao||Number(r['CONDICAO_VALIDADA'])!==p.codigo_condicao||String(r['AD_STATUS_PEDIDO'])!==p.tipo_agenda||Number(r['CODNAT'])!==10100000||r['ATIVA']!=='S'||r['ANALITICA']!=='S')return fail('ERP_ORDER_CONTEXT_CHANGED','Condição, agenda ou natureza divergem do cadastro. Atualize a conferência; nenhum envio novo foi feito.');
 }
 async function prepare(d:SubmissionDeps,order:Row,freight:FreightType,reprice:boolean):Promise<Canonical> {

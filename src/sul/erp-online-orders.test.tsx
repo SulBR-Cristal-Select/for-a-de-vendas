@@ -360,7 +360,7 @@ describe('Feedbacks de cliente, tabela e inclusão de produto',()=>{
   });
   it('cliente sem tabela de preço não lista produtos e mostra o aviso na própria lista',async()=>{
     location.hash='#/pedidos/novo';const client=fakeClient(),persist=vi.fn();
-    vi.mocked(client.window).mockImplementation(async({resource,filters}:any)=>({items:resource==='customers'?[customer]:resource==='sellers'?[seller]:filters?.customerCode?[]:[product],total:resource==='customers'||resource==='sellers'?1:filters?.customerCode?0:1}) as any);
+    vi.mocked(client.window).mockImplementation(async({resource,filters}:any)=>({priceTableState:resource==='products'&&filters?.customerCode?'missing':undefined,items:resource==='customers'?[customer]:resource==='sellers'?[seller]:filters?.customerCode?[]:[product],total:resource==='customers'||resource==='sellers'?1:filters?.customerCode?0:1}) as any);
     const state=createAppState({company:{userId:'00000000-0000-4000-8000-000000000001',erpSeller:{userId:'00000000-0000-4000-8000-000000000001',sellerId:seller.id,sellerCode:8,companyCodes:[4]}},customers:[],products:[],orders:[]});
     render(<SulApp initialState={state} online={client} persist={persist} onSignOut={vi.fn()}/>);
     expect(screen.queryByText(/Cliente sem tabela de preço associada/)).not.toBeInTheDocument();

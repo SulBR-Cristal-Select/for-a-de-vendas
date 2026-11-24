@@ -60,8 +60,8 @@ describe('clientes novos, ativos e cobertura definidos pelo usuário',()=>{
  it('incerteza dentro do mesmo período não altera a primeira compra do período já comprovada',async()=>{
   const f=fixture();f.customer(1);f.order(1,'2026-10-02',{version:'2025-01-01'});f.order(1,'2026-10-10');expect(await readCustomerMetrics(f.g,query,admin)).toMatchObject({totals:{newUnknown:0,newCustomerCount:1}});
  });
- it('considera o histórico1/4 autorizado antes de filtrar o período da carteira selecionada',async()=>{
-  const f=fixture();f.customer(1,34,'S',null);f.order(1,'2026-10-05',{company:4});f.order(1,'2026-10-09');expect(await readCustomerMetrics(f.g,{...query,from:'2026-10-08'},admin)).toMatchObject({historyCompanyCodes:[1,4],totals:{newCustomerCount:0}});
+ it('desconsidera compra na filial4 ao determinar primeira compra da filial1',async()=>{
+  const f=fixture();f.customer(1,34,'S',null);f.order(1,'2026-10-05',{company:4});f.order(1,'2026-10-09');expect(await readCustomerMetrics(f.g,{...query,from:'2026-10-08'},admin)).toMatchObject({historyCompanyCodes:[1],totals:{newCustomerCount:1}});
  });
  it('não amplia a filial ou a carteira de um vendedor pelo histórico',async()=>{
   const f=fixture();f.customer(1,12);f.order(1,'2026-10-09');f.customer(2,34);f.order(2,'2026-10-10');f.customer(3,12,'S',4);f.order(3,'2026-10-11',{company:4});

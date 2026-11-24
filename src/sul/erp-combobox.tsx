@@ -30,7 +30,7 @@ import {
 import { Check, ChevronsUpDown, Search } from 'lucide-react';
 import type { ComponentProps } from 'react';
 
-export type ERPMatches = { query: string; ids: ReadonlySet<string>; onSearchChange?: (query: string) => void };
+export type ERPMatches = { query: string; ids: ReadonlySet<string>; onSearchChange?: (query: string) => void; loading?: boolean; error?: string | undefined; onOpenChange?: (open: boolean) => void };
 type Props = ComponentProps<typeof Combobox> & { remote?: ERPMatches | undefined };
 type SingleProps = Extract<Props, { multiple?: false }> & { remote: ERPMatches };
 
@@ -57,6 +57,7 @@ function RemoteSingle(props: SingleProps) {
   return field.wrap(
     <BaseCombobox.Root<ComboboxOption>
       items={options}
+      onOpenChange={open => remote.onOpenChange?.(open)}
       onInputValueChange={(query, details) => {
         if (['input', 'change', 'compositionend'].includes(details.event.type)) remote.onSearchChange?.(query);
       }}
@@ -95,7 +96,7 @@ function RemoteSingle(props: SingleProps) {
               <Search aria-hidden className="h-4 w-4 shrink-0 text-muted" />
               <BaseCombobox.Input aria-label={`Buscar em ${label.toLocaleLowerCase('pt-BR')}`} placeholder="Buscar…" className="h-11 w-full min-w-0 border-0 bg-transparent text-[14px] outline-none placeholder:text-muted" />
             </div>
-            <BaseCombobox.Empty><div className="p-5 text-center text-[13px] text-muted">Nenhum resultado encontrado.</div></BaseCombobox.Empty>
+            <BaseCombobox.Empty><div className="p-5 text-center text-[13px] text-muted">{remote.loading ? 'Carregando…' : remote.error || 'Nenhum resultado encontrado.'}</div></BaseCombobox.Empty>
             <BaseCombobox.List className="min-h-0 overflow-y-auto overscroll-contain p-1.5 outline-none empty:p-0">
               {(option: ComboboxOption) => (
                 <BaseCombobox.Item key={option.value} value={option} disabled={option.disabled} className="flex cursor-default items-center gap-3 rounded-lg px-2.5 py-2 text-[14px] outline-none data-highlighted:bg-soft data-disabled:cursor-not-allowed data-disabled:text-muted max-sm:min-h-11">

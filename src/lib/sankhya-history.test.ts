@@ -4,7 +4,7 @@ import type { ReadScope } from '../../supabase/functions/sankhya-online/read-mod
 
 const admin: ReadScope = { role: 'administrador' };
 const query: HistoryInput = { resource: 'orders', offset: 0, limit: 20 };
-const header = { NUNOTA: 72, NUMNOTA: 0, CODEMP: 4, CODPARC: 10, CODVEND: 9, APELIDO: 'Vendedor ERP', RAZAOSOCIAL: 'Cliente inativo', TIPMOV: 'P', STATUSNOTA: 'L', DOCUMENT_DATE: '2026-10-23', VLRNOTA: '1234.56', CODTIPOPER: 1001, DESCROPER: 'Descrição ERP', OPERATION_VERSION: '2025-01-01T01:02:03', CODTIPVENDA: 17, PAYMENT_VERSION: '2024-01-01T01:02:03', HAS_ORIGINS: 1, HAS_DESTINATIONS: 0 };
+const header = { NUNOTA: 72, NUMNOTA: 0, CODEMP: 1, CODPARC: 10, CODVEND: 9, APELIDO: 'Vendedor ERP', RAZAOSOCIAL: 'Cliente inativo', TIPMOV: 'P', STATUSNOTA: 'L', DOCUMENT_DATE: '2026-10-23', VLRNOTA: '1234.56', CODTIPOPER: 1001, DESCROPER: 'Descrição ERP', OPERATION_VERSION: '2025-01-01T01:02:03', CODTIPVENDA: 17, PAYMENT_VERSION: '2024-01-01T01:02:03', HAS_ORIGINS: 1, HAS_DESTINATIONS: 0 };
 function transport(rows: Record<string, unknown>[] = [header], total = rows.length, without = total) {
   let calls = 0;
   return { select: vi.fn(async (sql: string, _limit: number) => sql.startsWith('SELECT COUNT(*) AS TOTAL') ? [{ TOTAL: calls++ === 0 ? total : without }] : rows) };
@@ -15,7 +15,7 @@ describe('histórico Sankhya segregado e somente leitura', () => {
     const g = transport();
     const result = await readHistory(g, query, admin);
     expect(result).toMatchObject({ source: 'sankhya', readOnly: true, offset: 0, total: 1, totalWithoutSearch: 1 });
-    expect(result.items[0]).toEqual({ source: 'observado', readOnly: true, id: 'sankhya:order:72', number: '0', date: '2026-10-23', customerId: 'sankhya:customer:10', customerName: 'Cliente inativo', sellerCode: 9, sellerName: 'Vendedor ERP', total: 1234.56, status: 'confirmado', operationName: 'Venda normal', erp: { source: 'sankhya', companyCode: 4, documentCode: 72, movement: 'P', operationCode: 1001, operationVersion: header.OPERATION_VERSION, paymentCode: 17, paymentVersion: header.PAYMENT_VERSION, statusCode: 'L', hasOrigins: true, hasDestinations: false } });
+    expect(result.items[0]).toEqual({ source: 'observado', readOnly: true, id: 'sankhya:order:72', number: '0', date: '2026-10-23', customerId: 'sankhya:customer:10', customerName: 'Cliente inativo', sellerCode: 9, sellerName: 'Vendedor ERP', total: 1234.56, status: 'confirmado', operationName: 'Venda normal', erp: { source: 'sankhya', companyCode: 1, documentCode: 72, movement: 'P', operationCode: 1001, operationVersion: header.OPERATION_VERSION, paymentCode: 17, paymentVersion: header.PAYMENT_VERSION, statusCode: 'L', hasOrigins: true, hasDestinations: false } });
     expect(result.items[0]).not.toHaveProperty('sellerId');
     expect(result.items[0]).not.toHaveProperty('freight');
     expect(result.items[0]).not.toHaveProperty('discount');
@@ -36,36 +36,36 @@ describe('histórico Sankhya segregado e somente leitura', () => {
     expect(result.items[0]?.id).toBe(`sankhya:${resource === 'orders' ? 'order' : 'invoice'}:72`);
     for (const [sql] of g.select.mock.calls) {
       expect(sql).toContain(`C.TIPMOV='${movement}'`);
-      expect(sql).toContain('C.CODEMP IN (1,4)');
+      expect(sql).toContain('C.CODEMP IN (1)');
       expect(sql).toContain("P.CLIENTE='S'");
-      expect(sql).toContain('P.CODEMP IN (1,4) OR (P.CODEMP IS NULL AND EXISTS');
-      expect(sql).toContain("H.CODEMP IN (1,4) AND H.TIPMOV IN ('P','V')");
+      expect(sql).toContain('P.CODEMP IN (1) OR (P.CODEMP IS NULL AND EXISTS');
+      expect(sql).toContain("H.CODEMP IN (1) AND H.TIPMOV IN ('P','V')");
       expect(sql).not.toContain('ATIVO');
     }
   });
   it('usa carteira atual e vínculo servidor inclusive para gestor; não CODVEND do documento', async () => {
     for (const role of ['gestor', 'vendedor'] as const) {
       const g = transport();
-      await readHistory(g, query, { role, sellerCode: 12, companyCodes: [4] });
+      await readHistory(g, query, { role, sellerCode: 12, companyCodes: [1] });
       for (const [sql] of g.select.mock.calls) {
         expect(sql).toContain('P.CODVEND=12');
         expect(sql).not.toContain('C.CODVEND=12');
         expect(sql).not.toContain('CODGER');
-        expect(sql).toContain('C.CODEMP IN (4)');
+        expect(sql).toContain('C.CODEMP IN (1)');
       }
-      for (const bad of [{ role }, { role, sellerCode: 0, companyCodes: [4] }, { role, sellerCode: 12, companyCodes: [3] }, { role, sellerCode: 12, companyCodes: [] }]) {
+      for (const bad of [{ role }, { role, sellerCode: 0, companyCodes: [1] }, { role, sellerCode: 12, companyCodes: [3] }, { role, sellerCode: 12, companyCodes: [] }]) {
         const blocked = transport();
         await expect(readHistory(blocked, query, bad as ReadScope)).rejects.toMatchObject({ code: 'ERP_IDENTITY_REQUIRED' });
         expect(blocked.select).not.toHaveBeenCalled();
       }
       const blocked = transport();
-      await expect(readHistory(blocked, { ...query, companyCode: 1 }, { role, sellerCode: 12, companyCodes: [4] })).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
+      await expect(readHistory(blocked, { ...query, companyCode: 4 }, { role, sellerCode: 12, companyCodes: [1] })).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
       expect(blocked.select).not.toHaveBeenCalled();
     }
   });
   it('pagina arbitrariamente e conta ambos universos com desempate NUNOTA e datas inclusivas', async () => {
     const g = transport([header], 101, 203);
-    const result = await readHistory(g, { ...query, offset: 100, limit: 1, customerId: 'sankhya:customer:10', companyCode: 4, search: "D'Água_50%", sort: 'customer', direction: 'asc', from: '2026-10-01', to: '2026-10-23' }, admin);
+    const result = await readHistory(g, { ...query, offset: 100, limit: 1, customerId: 'sankhya:customer:10', companyCode: 1, search: "D'Água_50%", sort: 'customer', direction: 'asc', from: '2026-10-01', to: '2026-10-23' }, admin);
     expect(result).toMatchObject({ total: 101, totalWithoutSearch: 203, offset: 100 });
     const [filtered, all, data] = g.select.mock.calls.map(c => c[0]);
     expect(filtered).toContain("D''AGUA!_50!%");
@@ -73,7 +73,7 @@ describe('histórico Sankhya segregado e somente leitura', () => {
     expect(all).not.toContain('FETCH');
     for (const sql of [filtered, all, data]) {
       expect(sql).toContain('P.CODPARC=10');
-      expect(sql).toContain('C.CODEMP IN (4)');
+      expect(sql).toContain('C.CODEMP IN (1)');
       expect(sql).toContain("C.DTNEG>=TO_DATE('2026-10-01','YYYY-MM-DD')");
       expect(sql).toContain("C.DTNEG<TO_DATE('2026-10-23','YYYY-MM-DD')+1");
     }
@@ -118,13 +118,13 @@ describe('documento ERP com itens realmente paginados', () => {
   }
   it('mantém cabeçalho e conta todos os itens sem fingir completude', async () => {
     const g = detailTransport();
-    const result = await readDocument(g, { id: 'sankhya:order:72', offset: 50, limit: 1 }, { role: 'gestor', sellerCode: 12, companyCodes: [4] });
+    const result = await readDocument(g, { id: 'sankhya:order:72', offset: 50, limit: 1 }, { role: 'gestor', sellerCode: 12, companyCodes: [1] });
     expect(result).toMatchObject({ record: { id: 'sankhya:order:72', number: '0', total: 1234.56 }, total: 51, totalWithoutSearch: 51, offset: 50, limit: 1, hasMore: false });
     expect(result.items).toEqual([{ source: 'observado', readOnly: true, id: 'sankhya:order:72:item:51', sequence: 51, productId: 'sankhya:product:8', productCode: 8, productName: 'Produto', unit: 'CX', quantity: 2.5, unitPrice: 10.4, total: 26 }]);
     for (const [sql] of g.select.mock.calls) {
       expect(sql).toContain('C.NUNOTA=72');
       expect(sql).toContain('P.CODVEND=12');
-      expect(sql).toContain('C.CODEMP IN (4)');
+      expect(sql).toContain('C.CODEMP IN (1)');
       expect(sql).toContain("C.TIPMOV='P'");
     }
     expect(g.select.mock.calls[2]![0]).toContain('ORDER BY I.SEQUENCIA ASC OFFSET 50 ROWS FETCH NEXT 1 ROWS ONLY');
@@ -141,7 +141,7 @@ describe('documento ERP com itens realmente paginados', () => {
     expect(g.select).toHaveBeenCalledTimes(1);
     expect(g.select.mock.calls[0]![0]).toContain("C.TIPMOV='V'");
   });
-  it.each([{ id: 'sankhya:customer:72' }, { id: 'sankhya:order:0' }, { id: 'sankhya:order:2147483648' }, { id: 'sankhya:order:1 OR 1=1' }, { limit: 51 }, { offset: -1 }, { companyCode: 4 }])('recusa documento inválido: %j', async bad => {
+  it.each([{ id: 'sankhya:customer:72' }, { id: 'sankhya:order:0' }, { id: 'sankhya:order:2147483648' }, { id: 'sankhya:order:1 OR 1=1' }, { limit: 51 }, { offset: -1 }, { companyCode: 1 }])('recusa documento inválido: %j', async bad => {
     const g = detailTransport();
     await expect(readDocument(g, { id: 'sankhya:order:72', ...bad } as DocumentInput, admin)).rejects.toBeDefined();
     expect(g.select).not.toHaveBeenCalled();

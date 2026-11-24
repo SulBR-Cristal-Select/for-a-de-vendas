@@ -5,14 +5,14 @@ describe('Definições comerciais expressas, sem remapear cadastro ou carteira',
   it('usa filial 1 apenas para CODEMP explicitamente nulo', () => {
     expect(partnerCompany(null)).toBe(1);
     expect(partnerCompany(1)).toBe(1);
-    expect(partnerCompany(4)).toBe(4);
+    expect(() => partnerCompany(4)).toThrow('escopo');
   });
   it.each([3, 2, 0, undefined, '1', false])('não transforma %s em compartilhado', value => {
     expect(() => partnerCompany(value)).toThrow('escopo');
   });
-  it('usa TOP1001 para Venda nas duas filiais por escolha explícita, não por frequência', () => {
+  it('usa TOP1001 para Venda apenas na filial1', () => {
     expect(saleOperation(1, 'Venda')).toBe(1001);
-    expect(saleOperation(4, 'Venda')).toBe(1001);
+    expect(() => saleOperation(4, 'Venda')).toThrow('contexto');
     expect(Object.isFrozen(COMMERCIAL_POLICY.saleOperationByCompany)).toBe(true);
   });
   it.each(['Bonificação', 'Venda - Cupom Fiscal', 'Venda - Raslog', '', undefined])('não amplia a autorização para %s', type => {

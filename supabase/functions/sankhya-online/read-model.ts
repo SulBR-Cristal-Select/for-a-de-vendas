@@ -19,7 +19,7 @@ function keys(value: unknown, allowed: readonly string[]): asserts value is Row 
 }
 export function scopeOf(scope: ReadScope): { companies: number[]; seller: number | null; sellers: readonly number[] | null } {
   if (!scope || !['administrador', 'gestor', 'vendedor'].includes(scope.role)) return identity();
-  if (scope.role === 'administrador') return { companies: [1, 4], seller: null, sellers: null };
+  if (scope.role === 'administrador') return { companies: [1], seller: null, sellers: null };
   if (!Number.isSafeInteger(scope.sellerCode) || scope.sellerCode! <= 0 || scope.sellerCode! > 2147483647 ||
     !Array.isArray(scope.companyCodes) || scope.companyCodes.length < 1 || scope.companyCodes.length > 2 ||
     scope.companyCodes.some(c => c !== 1 && c !== 4) || new Set(scope.companyCodes).size !== scope.companyCodes.length) return identity();
@@ -28,7 +28,8 @@ export function scopeOf(scope: ReadScope): { companies: number[]; seller: number
     team.some(c => !Number.isSafeInteger(c) || c < 1 || c > 2147483647 || c === scope.sellerCode) ||
     scope.role !== 'gestor' && team.length > 0) return identity();
   // Somente o vínculo privado pode fornecer equipe; CODGER/histórico não concedem acesso automaticamente.
-  return { companies: [...scope.companyCodes], seller: scope.sellerCode!, sellers: [scope.sellerCode!, ...team] };
+  if (!scope.companyCodes.includes(1)) throw new SankhyaError('ERP_SCOPE_FORBIDDEN', 'Somente a filial 1 está habilitada no Força de Vendas.', 403);
+  return { companies: [1], seller: scope.sellerCode!, sellers: [scope.sellerCode!, ...team] };
 }
 export function sellerAllowed(scope: ReturnType<typeof scopeOf>, code: number): boolean {
   return scope.sellers === null || scope.sellers.includes(code);
@@ -184,12 +185,24 @@ export async function readPage(gateway: Transport, input: PageInput, scope: Read
   const rows = await gateway.select(`SELECT ${q.c.fields},${q.sortValue} AS SORT_VALUE FROM ${q.c.from} WHERE ${q.where.join(' AND ')} ORDER BY ${q.order} OFFSET ${q.offset} ROWS FETCH NEXT ${q.size} ROWS ONLY`, q.size);
   return { ...observed(), items: rows.map(row => ({ ...dto(q.r, row), _sortValue: q.numeric ? num(row['SORT_VALUE']) : text(row['SORT_VALUE']) })), page: q.page, pageSize: q.size, total: filteredTotal, totalWithoutSearch, hasMore: q.offset + rows.length < filteredTotal };
 }
+async function emptyCatalogState(gateway: Transport, customerCode: number, scope: ReadScope): Promise<'missing' | 'unavailable' | 'empty'> {
+  const customer = await readRecord(gateway, {resource:'customers', id:customerCode}, scope);
+  if (!customer.record || customer.record['active'] !== true)
+    throw new SankhyaError('ERP_CONTEXT_REQUIRED', 'Cliente ERP ativo necessário.', 400);
+  const rows = await gateway.select(`WITH C AS (SELECT PA.CODTAB FROM TGFPAR PA WHERE PA.CODPARC=${customerCode} UNION SELECT TP.CODTAB FROM TGFCPL L JOIN TGFTPV TP ON TP.CODTIPVENDA=L.SUGTIPNEGSAID AND TP.DHALTER=(SELECT MAX(V.DHALTER) FROM TGFTPV V WHERE V.CODTIPVENDA=TP.CODTIPVENDA AND V.DHALTER<=SYSDATE) WHERE L.CODPARC=${customerCode}) , V AS (SELECT DISTINCT T.CODTAB FROM TGFTAB T JOIN TGFNTA N ON N.CODTAB=T.CODTAB WHERE N.ATIVO='S' AND T.DTVIGOR<=SYSDATE AND (T.DTALTER IS NULL OR T.DTALTER<=SYSDATE)) SELECT COUNT(*) AS ASSOCIATED,COUNT(V.CODTAB) AS CURRENT_TABLES FROM C LEFT JOIN V ON V.CODTAB=C.CODTAB WHERE C.CODTAB>0`, 1);
+  const row=rows[0], associated=Number(row?.['ASSOCIATED']), current=Number(row?.['CURRENT_TABLES']);
+  if(rows.length!==1 || row?.['ASSOCIATED']==null || row?.['CURRENT_TABLES']==null || !Number.isSafeInteger(associated) || associated<0 || !Number.isSafeInteger(current) || current<0 || current>associated)
+    throw new SankhyaError('ERP_INVALID_RESPONSE', 'Estado da tabela de preço não confirmado.',502);
+  return associated===0 ? 'missing' : current===0 ? 'unavailable' : 'empty';
+}
 export async function readWindow(gateway: Transport, input: WindowInput, scope: ReadScope) {
   const q = queryParts(input, scope, [], true);
   const filteredTotal = await count(gateway, q.c.from, q.where);
   const totalWithoutSearch = q.where.length === q.withoutSearch.length ? filteredTotal : await count(gateway, q.c.from, q.withoutSearch);
   const rows = await gateway.select(`SELECT ${q.c.fields},${q.sortValue} AS SORT_VALUE FROM ${q.c.from} WHERE ${q.where.join(' AND ')} ORDER BY ${q.order} OFFSET ${q.offset} ROWS FETCH NEXT ${q.size} ROWS ONLY`, q.size);
-  return { ...observed(), items: rows.map(row => ({ ...dto(q.r, row), _sortValue: q.numeric ? num(row['SORT_VALUE']) : text(row['SORT_VALUE']) })), total: filteredTotal, totalWithoutSearch, offset: q.offset };
+  const priceTableState = q.r==='products' && input.filters?.customerCode !== undefined && totalWithoutSearch===0
+    ? await emptyCatalogState(gateway, input.filters.customerCode, scope) : undefined;
+  return { ...observed(), ...(priceTableState ? {priceTableState} : {}), items: rows.map(row => ({ ...dto(q.r, row), _sortValue: q.numeric ? num(row['SORT_VALUE']) : text(row['SORT_VALUE']) })), total: filteredTotal, totalWithoutSearch, offset: q.offset };
 }
 export async function readRecord(gateway: Transport, input: RecordInput, scope: ReadScope) {
   keys(input, ['resource', 'id']);

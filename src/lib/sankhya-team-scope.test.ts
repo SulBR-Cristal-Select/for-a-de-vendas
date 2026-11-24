@@ -23,7 +23,7 @@ const sqlOf = (g: ReturnType<typeof transport>) => g.select.mock.calls.map(c => 
 describe('escopo explícito de equipe, sem concessão por nome ou CODGER', () => {
   it('consulta próprio vendedor e somente os códigos privados autorizados', () => {
     const scope = scopeOf(manager);
-    expect(scope).toEqual({ companies: [1, 4], seller: 34, sellers: [34, 6, 7] });
+    expect(scope).toEqual({ companies: [1], seller: 34, sellers: [34, 6, 7] });
     expect(sellerPredicate(scope, 'P.CODVEND')).toBe('P.CODVEND IN (34,6,7)');
     expect(loggedSeller(manager)).toBe(34);
     expect(() => loggedSeller(manager, 6)).toThrow('Vendedor fora');
@@ -73,8 +73,8 @@ describe('mesmo escopo em páginas, ficha, facetas, histórico e condições', (
     }
   });
   it('permite filtrar um integrante autorizado sem substituir o vendedor da cotação', async () => {
-    const g = transport(); await readPage(g, { resource: 'customers', filters: { sellerCode: 6, companyCode: 4 } }, manager);
-    expect(sqlOf(g)).toContain('P.CODVEND=6'); expect(sqlOf(g)).toContain('P.CODEMP IN (4)');
+    const g = transport(); await readPage(g, { resource: 'customers', filters: { sellerCode: 6, companyCode: 1 } }, manager);
+    expect(sqlOf(g)).toContain('P.CODVEND=6'); expect(sqlOf(g)).toContain('P.CODEMP IN (1)');
     expect(loggedSeller(manager)).toBe(34);
   });
   it.each([{ sellerCode: 12 }, { companyCode: 3 }])('recusa filtro fora da carteira antes do ERP: %j', async filters => {

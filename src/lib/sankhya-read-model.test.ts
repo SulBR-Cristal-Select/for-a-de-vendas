@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readCategories, readFacets, readPage, readRecord, readWindow, type WindowInput, type PageInput, type ReadScope } from '../../supabase/functions/sankhya-online/read-model';
 
 const admin: ReadScope = { role: 'administrador' };
-const seller: ReadScope = { role: 'vendedor', sellerCode: 12, companyCodes: [4] };
+const seller: ReadScope = { role: 'vendedor', sellerCode: 12, companyCodes: [1] };
 function transport(rows: Record<string, unknown>[] = [], total = 103, withoutSearch = 207) {
   let counts = 0;
   return { select: vi.fn(async (sql: string, _limit: number) => /^SELECT COUNT\(\*\) AS TOTAL/.test(sql) ? [{ TOTAL: counts++ === 0 ? total : withoutSearch }] : rows) };
@@ -44,8 +44,8 @@ describe('modelo Sankhya somente leitura', () => {
     const g = transport(); await readPage(g, query, admin);
     const sql = g.select.mock.calls[1]![0];
     expect(sql).toContain("P.CLIENTE='S'"); expect(sql).toContain("P.ATIVO='S'");
-    expect(sql).toContain("P.CODEMP IN (1,4) OR (P.CODEMP IS NULL AND EXISTS");
-    expect(sql).toContain("H.CODEMP IN (1,4) AND H.TIPMOV IN ('P','V')");
+    expect(sql).toContain("P.CODEMP IN (1) OR (P.CODEMP IS NULL AND EXISTS");
+    expect(sql).toContain("H.CODEMP IN (1) AND H.TIPMOV IN ('P','V')");
     expect(sql).not.toMatch(/P.CODVEND=\d/);
   });
   it.each(['vendedor', 'gestor'] as const)('%s exige vínculo e não amplia a carteira', async role => {
@@ -57,9 +57,9 @@ describe('modelo Sankhya somente leitura', () => {
     }
     const g = transport(); await readPage(g, query, { ...seller, role });
     expect(g.select.mock.calls[0]![0]).toContain('P.CODVEND=12');
-    expect(g.select.mock.calls[0]![0]).toContain('P.CODEMP IN (4)');
+    expect(g.select.mock.calls[0]![0]).toContain('P.CODEMP IN (1)');
     await expect(readPage(g, { ...query, filters: { sellerCode: 13 } }, { ...seller, role })).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
-    await expect(readPage(g, { ...query, filters: { companyCode: 1 } }, { ...seller, role })).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
+    await expect(readPage(g, { ...query, filters: { companyCode: 4 } }, { ...seller, role })).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
   });
   it('detalhe permite cliente inativo sem gerar contexto, atribuição ou bloqueio geral', async () => {
     const g = transport([{ CODPARC: 10, RAZAOSOCIAL: 'Cliente', NOMEPARC: 'Loja', CODVEND: 9, APELIDO: 'ERP', CODEMP: null, BLOQUEAR: 'S', ATIVO: 'N', UF: 'RS', TIPO: 'Rua', NOMEEND: 'Central' }]);
@@ -72,19 +72,19 @@ describe('modelo Sankhya somente leitura', () => {
   });
   it('produtos abrangem usos sem inferir preço ou conversão, preservando DECQTD', async () => {
     const g = transport([{ CODPROD: 33, DESCRPROD: 'Produto', CODVOL: 'KG', DECQTD: 4, AGRUPMIN: null, BLOQVENDAFRAC: 'N', ATIVO: 'S', CODGRUPOPROD: 500, DESCRGRUPOPROD: 'Grupo' }]);
-    const result = await readPage(g, { resource: 'products', filters: { companyCode: 4, categoryCode: 500 } }, seller);
+    const result = await readPage(g, { resource: 'products', filters: { companyCode: 1, categoryCode: 500 } }, seller);
     expect(result.items[0]).toMatchObject({ id: 'sankhya:product:33', price: null, unit: 'KG', category: 'Grupo', categoryCode: 500, source: 'observado', erp: { quantityDecimals: 4, contexts: [], source: 'sankhya' } });
     expect(result.items[0]).toHaveProperty('multiple', null);
     expect(result.items[0]!.erp).toMatchObject({ fractionBlocked: false });
     const sql = g.select.mock.calls[1]![0];
     expect(sql).toContain('TGFITE I JOIN TGFCAB H ON H.NUNOTA=I.NUNOTA');
-    expect(sql).toContain('I.CODPROD=P.CODPROD AND H.CODEMP IN (4)');
+    expect(sql).toContain('I.CODPROD=P.CODPROD AND H.CODEMP IN (1)');
     // Listagens de produtos: somente "Usado como: Venda (fabricação própria)"; a leitura de um registro não filtra.
     expect(sql).toContain("P.USOPROD='V'");
     const detail = transport([{ CODPROD: 33, AGRUPMIN: null, BLOQVENDAFRAC: 'N', ATIVO: 'N' }]);
     await readRecord(detail, { resource: 'products', id: 33 }, seller);
     expect(detail.select.mock.calls[0]![0]).not.toContain("P.ATIVO='S'");
-    expect(detail.select.mock.calls[0]![0]).toContain('H.CODEMP IN (4)');
+    expect(detail.select.mock.calls[0]![0]).toContain('H.CODEMP IN (1)');
     expect(detail.select.mock.calls[0]![0]).not.toContain('USOPROD');
   });
   it('não trata regra de quantidade ausente como agrupamento zero ou permissão fracionada', async () => {
@@ -180,7 +180,7 @@ describe('janela ERP autenticada e limitada', () => {
     await expect(readWindow(g, { ...query, offset: 0, limit: 1 }, { role })).rejects.toMatchObject({ code: 'ERP_IDENTITY_REQUIRED' });
     expect(g.select).not.toHaveBeenCalled();
     await readWindow(g, { ...query, offset: 0, limit: 1 }, { ...seller, role });
-    for (const [sql] of g.select.mock.calls) { expect(sql).toContain('P.CODVEND=12'); expect(sql).toContain('P.CODEMP IN (4)'); }
+    for (const [sql] of g.select.mock.calls) { expect(sql).toContain('P.CODVEND=12'); expect(sql).toContain('P.CODEMP IN (1)'); }
     await expect(readWindow(g, { ...query, offset: 0, limit: 1, filters: { sellerCode: 13 } }, { ...seller, role })).rejects.toMatchObject({ code: 'ERP_SCOPE_FORBIDDEN' });
   });
   it.each([
@@ -241,7 +241,7 @@ describe('cadastro atual no relatório de clientes', () => {
     expect(result.items[0]).toMatchObject({ id: 'sankhya:customer:10', active: active === 'all' ? null : active === 'S' });
     for (const [sql, limit] of g.select.mock.calls) {
       expect(sql).toContain('P.CODVEND=12'); expect(sql).toContain('P.CODPARC=10');
-      expect(sql).toContain('P.CODEMP IN (4)'); expect(limit).toBeLessThanOrEqual(50);
+      expect(sql).toContain('P.CODEMP IN (1)'); expect(limit).toBeLessThanOrEqual(50);
       if (active === 'all') expect(sql).not.toMatch(/P\.ATIVO=/);
       else expect(sql).toContain(`P.ATIVO='${active}'`);
     }
@@ -265,5 +265,15 @@ describe('cadastro atual no relatório de clientes', () => {
     const g = transport();
     await expect(readWindow(g, { resource: 'customers', offset: 0, limit: 10, ...bad } as WindowInput, admin)).rejects.toBeDefined();
     expect(g.select).not.toHaveBeenCalled();
+  });
+});
+
+describe('diagnóstico explícito de catálogo vazio',()=>{
+  it.each([[0,0,'missing'],[1,0,'unavailable'],[1,1,'empty']] as const)('associação %s e vigência %s resultam em %s',async(associated,current,state)=>{
+    const g={select:vi.fn(async(sql:string)=>sql.startsWith('SELECT COUNT(*) AS TOTAL')?[{TOTAL:0}]:sql.startsWith('WITH C AS')?[{ASSOCIATED:associated,CURRENT_TABLES:current}]:sql.startsWith('SELECT P.CODPARC')?[{CODPARC:131,CODEMP:null,ATIVO:'S'}]:[])};
+    expect(await readWindow(g,{resource:'products',filters:{customerCode:131},offset:0,limit:50},admin)).toMatchObject({total:0,priceTableState:state});
+  });
+  it('zero resultados de busca não prova ausência de tabela',async()=>{
+    const g=transport([],0,10);expect(await readWindow(g,{resource:'products',filters:{customerCode:131},search:'inexistente',offset:0,limit:50},admin)).not.toHaveProperty('priceTableState');expect(g.select.mock.calls).toHaveLength(3);
   });
 });

@@ -18,8 +18,15 @@ beforeEach(() => {
 });
 describe('Preço nativo contextual, nunca preço-base ou catálogo aproximado', () => {
   it('gestor cota para integrante explicitamente autorizado, não por nome ou carteira',async()=>{
-    const g=gateway();const result=await readPrice(g,{...query,sellerCode:12},{role:'gestor',sellerCode:14,companyCodes:[1],teamSellerCodes:[12]});
+    customer.erp.sellerCode=12;const g=gateway();const result=await readPrice(g,{...query,sellerCode:12},{role:'gestor',sellerCode:14,companyCodes:[1],teamSellerCodes:[12]});
     expect(result.seller.id).toBe('sankhya:seller:12');expect(g.contextPrices).toHaveBeenCalledWith(expect.objectContaining({codigoVendedor:12}));
+  });
+  it('recusa vendedor divergente do cliente mesmo pertencendo à equipe do gestor',async()=>{
+    const g=gateway();await expect(readPrice(g,{...query,sellerCode:12},{role:'gestor',sellerCode:14,companyCodes:[1],teamSellerCodes:[12]})).rejects.toMatchObject({code:'ERP_CUSTOMER_SELLER_MISMATCH'});expect(g.contextPrices).not.toHaveBeenCalled();
+  });
+  it('distingue produto sem preço de variantes ambíguas',async()=>{
+    const g=gateway();g.select.mockImplementation(async sql=>sql.includes('TGFEXC')?[]:sql.includes('FROM TGFTPV')?[{CODTIPVENDA:29,CODTAB:null,ATIVO:'S',DESCRTIPVENDA:'Condição',SUBTIPOVENDA:'2',VERSION:'2026-06-10T11:47:42'}]:[{CODTIPOPER:1001,ATIVO:'S',TIPMOV:'P',OPERATION_VERSION:'2026-07-21T08:04:13'}]);
+    await expect(readPrice(g,query,{role:'vendedor',sellerCode:14,companyCodes:[1]})).rejects.toMatchObject({code:'ERP_PRODUCT_PRICE_UNAVAILABLE'});expect(g.contextPrices).not.toHaveBeenCalled();
   });
   it('usa filial1 só no contexto compartilhado, TOP1001 e vendedor real, preservando controle espaço', async () => {
     const g = gateway(), result = await readPrice(g, query, { role: 'administrador', sellerCode: 14, companyCodes: [1, 4] });
@@ -27,9 +34,9 @@ describe('Preço nativo contextual, nunca preço-base ou catálogo aproximado', 
     expect(g.contextPrices).toHaveBeenCalledWith({ codigoEmpresa: 1, codigoCliente: 141, codigoVendedor: 14, codigoTipoOperacao: 1001, codigoTipoNegociacao: 29, dataNegociacao: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), produtos: [{ codigoProduto: 11240, unidade: 'PC', quantidade: 1, codigoLocalEstoque: 0, controle: ' ' }] });
     expect(customer.erp.companyCode).toBeNull();
   });
-  it('não substitui filial4 do cadastro pela política dos compartilhados', async () => {
+  it('recusa filial4 do cadastro sem remapeá-la para filial1', async () => {
     customer.erp.companyCode = 4;
-    expect((await readPrice(gateway(), query, { role: 'administrador', sellerCode: 14, companyCodes: [1, 4] })).companyCode).toBe(4);
+    await expect(readPrice(gateway(), query, { role: 'administrador', sellerCode: 14, companyCodes: [1, 4] })).rejects.toMatchObject({code:'ERP_SCOPE_FORBIDDEN'});
   });
   it('não remapeia empresa3 nem aceita override de contexto do navegador', async () => {
     const g = gateway(); customer.erp.companyCode = 3;
@@ -85,7 +92,7 @@ describe('Local e controle reais sem exigir tabela no cliente', () => {
   function stockGateway(rows: Record<string, unknown>[] = [{ CODLOCAL: 0, CONTROLE: ' ' }], schema = columns) {
     const g = gateway(), original = g.select.getMockImplementation()!;
     g.select.mockImplementation(async (sql, limit) => sql.includes('FROM USER_TAB_COLUMNS') ? schema : sql.includes('FROM TGFEST') ? rows : original(sql, limit));
-    customer.erp.companyCode = 4; customer.erp.tableCode = null;
+    customer.erp.companyCode = 1; customer.erp.tableCode = null;
     return g;
   }
   it('sem tabela de preço no cliente e na condição recusa como ausência de negócio, não ambiguidade', async () => {
@@ -101,7 +108,7 @@ describe('Local e controle reais sem exigir tabela no cliente', () => {
     customer.erp.tableCode = 68;
     g.contextPrices.mockResolvedValueOnce({ precos: [{ codigoProduto: 11240, unidade: 'PC', codigoLocalEstoque: 81, controle: 'LOTE-REAL', valor: '12.34' }] });
     const r = await readPrice(g, query, { role: 'administrador', sellerCode: 14, companyCodes: [1, 4] });
-    expect(r).toMatchObject({ companyCode: 4, price: { amount: 12.34, localCode: 81, control: 'LOTE-REAL' } });
+    expect(r).toMatchObject({ companyCode: 1, price: { amount: 12.34, localCode: 81, control: 'LOTE-REAL' } });
     expect(g.select.mock.calls.some(([s]) => s.includes('FROM TGFEST'))).toBe(false);
   });
   it.each([{ rows: [{ CODLOCAL: 1, CONTROLE: 'A' }, { CODLOCAL: 2, CONTROLE: 'B' }] }])('recusa ambiguidade de contexto na tabela, sem inventar local: %j', async ({ rows }) => {

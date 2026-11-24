@@ -201,9 +201,9 @@ export function useERPTable(descriptor: ERPDescriptor | undefined, rows: ERPRow[
         const window = await tableWindow(descriptor, query, offset, limit);
         if ('summary' in window) {
           if(descriptor.commissionReport)commissionSummary=window.summary as ERPCommissionSummary;
-          else if(descriptor.walletReport)walletSummary=window.summary as ERPWalletSummary;
-          else if(descriptor.nonBuyersReport)nonBuyersSummary=window.summary as ERPNonBuyersSummary;
-          else if(descriptor.orderItemsReport)itemsSummary=window.summary as ERPItemSummary;
+          else if(descriptor.walletReport)walletSummary=window.summary as unknown as ERPWalletSummary;
+          else if(descriptor.nonBuyersReport)nonBuyersSummary=window.summary as unknown as ERPNonBuyersSummary;
+          else if(descriptor.orderItemsReport)itemsSummary=window.summary as unknown as ERPItemSummary;
           else summary = window.summary as ERPSalesSummary;
           if ('companyCodes' in window) {
             const codes = window.companyCodes;

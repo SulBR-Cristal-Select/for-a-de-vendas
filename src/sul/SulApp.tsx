@@ -1,3 +1,4 @@
+import { useERPCatalogPrices } from './erp-catalog-prices';
 import {useCustomerPerformance,customerPerformancePeriods} from './customer-performance';
 const customerNativeEnd=(month:string)=>customerPerformancePeriods(month).year.to;
 import CustomerGroups from './CustomerGroups';
@@ -998,8 +999,9 @@ function sz(): any {
     const e = React.useMemo(() => online ? { ...base, customers: [...manualRows(base.customers), ...lookups.customers], products: [...manualRows(base.products), ...lookups.products] } : base,
         [base, online, lookups.customers, lookups.products]);
     const onlineOrder = !!online && n.startsWith('sankhya:customer:');
-    // A lista de produtos online é a da tabela de preço do cliente: vazia e sem busca = cliente sem tabela.
-    const noPriceTable = !!online && n.startsWith('sankhya:customer:') && !lookups.loading && !lookups.error && lookups.totals['products'] === 0 && lookups.matches.products.query === '';
+    // Catálogo vazio não prova ausência de tabela: usar o estado comercial devolvido pelo servidor.
+    const noPriceTable = onlineOrder && lookups.priceTableState === 'missing';
+    const catalogUnavailable = onlineOrder && lookups.priceTableState === 'unavailable';
     const paymentMenu = useERPOrderPayments(online, n);
     const [paymentChoice, setPaymentChoice] = React.useState<{ customerId: string; row: ERPRow }>();
     const selectedPayment = paymentChoice && paymentChoice.customerId === n && paymentChoice.row['id'] === i ? paymentChoice.row : undefined;
@@ -1011,6 +1013,8 @@ function sz(): any {
         u(String(only['id'])); setPaymentChoice({ customerId: n, row: only });
     }, [onlineOrder, n, paymentMenu.rows, i]);
     const context: OnlineOrderContext = { customerId: n, paymentCode: Number(selectedPayment?.['code']), sellerId: onlineOrder ? operatingSeller : l, type: c, date: businessDate() };
+    const [catalogOpen, setCatalogOpen] = React.useState(false);
+    const catalogPrices = useERPCatalogPrices(onlineOrder ? online : undefined, {customerId:n, paymentCode:context.paymentCode, type:'Venda', sellerCode:Number(operatingSeller.split(':')[2]), date:context.date}, lookups.products.filter(row => lookups.matches.products.ids.has(String(row['id']))), catalogOpen);
     const prices = useERPOrderPrices(onlineOrder ? online : undefined, context, h, e.products);
     const contextKey = JSON.stringify([context, v]);
     const activeContext = useRef(contextKey); activeContext.current = contextKey;
@@ -1164,8 +1168,8 @@ function sz(): any {
                                                     className: "flex-1 min-w-0",
                                                     children: [(0, b.jsx)(Sl, {
                                                         label: "Produto",
-                                                        disabled: noPriceTable,
-                                                        remote: online ? lookups.matches.products : undefined,
+                                                        disabled: noPriceTable || catalogUnavailable,
+                                                        remote: online ? {...lookups.matches.products, onOpenChange:setCatalogOpen} : undefined,
                                                         value: v,
                                                         onValueChange: (D: any) => g(String(D)),
                                                         options: e.products
@@ -1175,8 +1179,9 @@ function sz(): any {
                                                             label: (D.code || "C\xF3digo n\xE3o extra\xEDdo") +
                                                                 " \xB7 " +
                                                                 D.name,
+                                                            description: onlineOrder ? catalogPrices[D.id] || (Number.isSafeInteger(context.paymentCode) && operatingSeller ? 'Carregando preço…' : 'Selecione cliente e condição para consultar o preço.') : undefined,
                                                         })),
-                                                    }), noPriceTable ? (0, b.jsx)("p", { role: "alert", className: "mt-2 text-[13px] text-rose", children: "Cliente sem tabela de pre\xE7o associada: n\xE3o h\xE1 produtos para listar." }) : null],
+                                                    }), noPriceTable ? (0, b.jsx)("p", { role: "alert", className: "mt-2 text-[13px] text-rose", children: "Cliente sem tabela de pre\xE7o associada: n\xE3o h\xE1 produtos para listar." }) : catalogUnavailable ? (0, b.jsx)('p', {role:'alert', className:'mt-2 text-[13px] text-rose', children:'Tabela de preço sem versão ativa e vigente.'}) : null],
                                                 }),
                                                 (0, b.jsxs)(xt, {
                                                     disabled: !v,

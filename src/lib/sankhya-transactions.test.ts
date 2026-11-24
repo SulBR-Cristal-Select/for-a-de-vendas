@@ -76,7 +76,7 @@ describe('Mesma identidade em preparação, cotação e prova', () => {
   it.each([['vendedor','Vendedor'],['gestor','Gestor']] as const)('prepara com vendedor da sessão sem promovê-lo a administrador:%s', async (role,label) => {
     const f = fixture(); f.state.company.role = label;
     await revalidateOrderRequest(f.gateway, f.request, { ...actor, role }, f.rpc, f.attest);
-    expect(readPrice).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ sellerCode: 14 }), { role, sellerCode: 14, companyCodes: [1, 4] });
+    expect(readPrice).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ sellerCode: 14 }), { role, sellerCode: 14, companyCodes: [1] });
     expect(f.attest.mock.calls[0]![0].p_actor_id).toBe(actor.id);
   });
   it('gestor recota integrante autorizado e mantém a autoria Auth da prova', async () => {

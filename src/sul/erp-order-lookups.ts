@@ -16,6 +16,7 @@ type Consulta = {
   loading: boolean;
   error?: string;
   total?: number;
+  priceTableState?: 'missing' | 'unavailable' | 'empty' | undefined;
   hasMore: boolean;
 };
 
@@ -112,6 +113,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
           context,
           loading: false,
           total,
+          priceTableState: pagina.priceTableState,
           hasMore: offset < total,
         });
       } catch (erro) {
@@ -222,6 +224,8 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
     fixados && fixados.client === client && fixados.chave === chave ? fixados : undefined;
   const rows = client ? unir(pagina?.rows || vazio, registros?.rows || vazio) : vazio;
   const matches: ERPMatches = {
+    loading: !!client && (!pagina || pagina.loading),
+    error: pagina?.error,
     onSearchChange: query => buscaAtual.current(query),
     query: pagina?.query ?? '',
     ids: new Set((pagina?.rows || vazio).map(row => String(row['id']))),
@@ -232,6 +236,7 @@ function useConsulta(client: ERPClient | undefined, recurso: ERPResource, ids: r
     loading: !!client && (!pagina || pagina.loading || !registros || registros.loading),
     error: pagina?.error || registros?.error,
     total: pagina?.total,
+    priceTableState: pagina?.priceTableState,
     hasMore: pagina?.hasMore ?? false,
   };
 }
@@ -265,6 +270,7 @@ export function useERPOrderLookups(
   return {
     customers: customers.rows,
     products: products.rows,
+    priceTableState: products.priceTableState,
     sellers: sellers.rows,
     matches: { customers: customers.matches, products: products.matches, sellers: sellers.matches },
     loading: recursos.some((recurso) => estados[recurso].loading),

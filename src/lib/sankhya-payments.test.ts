@@ -2,17 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readEligiblePayment, readPaymentOptions, readPaymentRules } from '../../supabase/functions/sankhya-online/payments';
 import { readRecord } from '../../supabase/functions/sankhya-online/read-model';
 vi.mock('../../supabase/functions/sankhya-online/read-model', async original => ({ ...await original<Record<string, unknown>>(), readRecord: vi.fn() }));
-const scope = { role: 'administrador' as const }, context = { partnerCode: 99000001, companyCode: 4 as const, date: '2026-10-23', creditBlocked: false };
+const scope = { role: 'administrador' as const }, context = { partnerCode: 99000001, companyCode: 1 as const, date: '2026-10-23', creditBlocked: false };
 const option = { CODTIPVENDA: 29, DESCRTIPVENDA: 'Condição sintética', ATIVO: 'S', CODTAB: null, VERSION: '2026-06-10T11:47:42', SUBTIPOVENDA: '2' };
 const installment = { SEQUENCIA: 1, PRAZO: 21, PERCENTUAL: 100, CODEMP: 1, CODPARC: 0, TIPOEMP: 'E', TIPOPAR: 'N', BASEPRAZO: -1, VENCNAOUTIL: 0, SOMAPRAZOCLIENTE: 'N', HASFORMULA: 0 };
-beforeEach(() => { vi.clearAllMocks(); vi.mocked(readRecord).mockResolvedValue({ source: 'sankhya', readOnly: true, readAt: '2026-10-23T22:00:00Z', record: { id: 'sankhya:customer:99000001', active: true, erp: { partnerCode: 99000001, companyCode: 4, creditBlocked: false } } } as any); });
+beforeEach(() => { vi.clearAllMocks(); vi.mocked(readRecord).mockResolvedValue({ source: 'sankhya', readOnly: true, readAt: '2026-10-23T22:00:00Z', record: { id: 'sankhya:customer:99000001', active: true, erp: { partnerCode: 99000001, companyCode: 1, creditBlocked: false } } } as any); });
 describe('Condições por parceiro e contexto, não lista global ativa', () => {
   it('usa grupo de autorização e versão não futura, sem filtrar filial por PPG.CODEMP', async () => {
     const g = { select: vi.fn().mockResolvedValue([option]) };
     expect(await readEligiblePayment(g, context, 29, scope)).toMatchObject({ code: 29, isCredit: true, tableCode: null });
     const sql = g.select.mock.calls[0]![0];
     expect(sql).toContain('INSTR(C.GRUPOAUTOR,TRIM(T.GRUPOAUTOR))>0');
-    expect(sql).toContain('C.CODEMP=4'); expect(sql).not.toContain('OR C.CODEMP IS NULL');
+    expect(sql).toContain('C.CODEMP=1'); expect(sql).toContain('OR C.CODEMP IS NULL');
     expect(sql).toContain('V.DHALTER<=LEAST(SYSDATE');
     expect(sql).not.toContain('G.CODEMP=4');
   });
