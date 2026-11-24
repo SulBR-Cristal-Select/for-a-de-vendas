@@ -1367,12 +1367,17 @@ function sz(): any {
         ],
     });
 }
-function iz({ id: e }: any): any {
-    const duplicateIdentity = useRef<{ source: string; id: string } | null>(null);
-    let { db: t, update: a, editor: o, confirm: n, submission, refresh } = qa(), r: any = t.orders.find((f: any) => f.id === e);
-    if (!r)
-        return (0, b.jsx)(Wu, {});
-    let l: any = zp(t, r.customerId);
+function OrderDetail({ id: e }: any): any {
+  const duplicateIdentity = useRef<{ source: string; id: string } | null>(null);
+  const { db: t, update: a, editor: o, confirm: n, submission, refresh, online } = qa();
+  const r = t.orders.find((f: { id: string }) => f.id === e);
+  const customerResult = useERPRecord(online, "customers", r?.customerId || "");
+  if (!r) return (0, b.jsx)(Wu, {});
+  const l = customerResult.enabled ? customerResult.record : zp(t, r.customerId);
+  const customerFallback =
+    customerResult.enabled && !customerResult.record
+      ? customerResult.error || "Carregando…"
+      : undefined;
     async function s(): Promise<any> {
         if (duplicateIdentity.current?.source !== e) duplicateIdentity.current = { source: e, id: crypto.randomUUID() };
         let f: any = duplicateIdentity.current!.id;
@@ -1550,9 +1555,9 @@ function iz({ id: e }: any): any {
                                 }),
                                 (0, b.jsxs)(Xt, {
                                     children: [
-                                        l?.cnpj || "CNPJ n\xE3o extra\xEDdo",
+                                        l?.cnpj || customerFallback || "CNPJ n\xE3o extra\xEDdo",
                                         " \xB7 ",
-                                        l?.city || "Cidade n\xE3o extra\xEDda",
+                                        l?.city || customerFallback || "Cidade n\xE3o extra\xEDda",
                                         l?.state ? " / " + l.state : "",
                                     ],
                                 }),
@@ -5190,7 +5195,7 @@ export default function SulApp({ initialState, persist, onSignOut, online, submi
                         : a === "/pedidos/novo"
                             ? (C = (0, b.jsx)(sz, {}))
                             : x[0] === "pedidos"
-                                ? (C = (0, b.jsx)(ERPDocumentDetail, { id: x[1], component: iz }, x[1]))
+                                ? (C = (0, b.jsx)(ERPDocumentDetail, { id: x[1], component: OrderDetail }, x[1]))
                                 : a === "/clientes"
                                     ? (C = (0, b.jsx)(uz, {}))
                                     : a === "/clientes/agrupamentos" || a.startsWith("/clientes/agrupamentos/")

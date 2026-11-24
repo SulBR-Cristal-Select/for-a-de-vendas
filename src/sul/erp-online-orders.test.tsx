@@ -478,3 +478,48 @@ describe('Feedbacks de cliente, tabela e inclusão de produto',()=>{
     expect(client.price).not.toHaveBeenCalled();expect(persist).not.toHaveBeenCalled();
   });
 });
+
+
+describe("Dados reais do cliente no detalhe do pedido", () => {
+  it("consulta o cadastro ERP mesmo sem cliente persistido localmente", async () => {
+    const id = "00000000-0000-4000-8000-000000000099";
+    location.hash = `#/pedidos/${id}`;
+    const client = fakeClient();
+    vi.mocked(client.record).mockResolvedValue({
+      source: "sankhya",
+      readOnly: true,
+      readAt: "2026-11-24T21:00:00Z",
+      record: { ...customer, cnpj: "11.517.841/0049-31", city: "CURITIBA", state: "PR" },
+    });
+    render(
+      <SulApp
+        initialState={createAppState({
+          customers: [],
+          products: [],
+          orders: [
+            {
+              id,
+              number: 17,
+              customerId: customer.id,
+              customerName: customer.name,
+              sellerId: seller.id,
+              date: "2026-11-24",
+              type: "Venda",
+              status: "Concluído",
+              items: [],
+              total: 0,
+              erp: { source: "sankhya", customer: { id: customer.id, name: customer.name } },
+            },
+          ],
+        })}
+        online={client}
+        persist={vi.fn(async (value) => value)}
+        onSignOut={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(/11.517.841\/0049-31/)).toBeTruthy());
+    expect(screen.getByText(/CURITIBA/)).toBeTruthy();
+    expect(screen.queryByText(/CNPJ não extraído/)).toBeNull();
+    expect(client.record).toHaveBeenCalledWith({ resource: "customers", id: customer.id });
+  });
+});
