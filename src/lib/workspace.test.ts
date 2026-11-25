@@ -172,6 +172,49 @@ describe("Congelamento e revalidação online com JWT do usuário", () => {
     await w.saveWorkspace(next);
     expect(mocks.invoke.mock.calls[1]![1].body.query.requestId).not.toBe(id);
   });
+  it.each(["ERP_ORDER_CONTEXT_CHANGED", "ERP_ORDER_PAYMENT_CHANGED", "ERP_ORDER_AGENDA_CHANGED"])(
+    "permite corrigir após rejeição cadastral definitiva %s antes da RPC",
+    async (code) => {
+      const w = await load();
+      mocks.invoke.mockResolvedValueOnce({
+        data: { code, message: "Cadastro alterado" },
+        error: null,
+      });
+      await expect(w.saveWorkspace(state())).rejects.toMatchObject({ code });
+      expect(mocks.rpc).toHaveBeenCalledTimes(1);
+      const id = mocks.invoke.mock.calls[0]![1].body.query.requestId;
+      const next = { ...state(), agenda: "4 - ANTECIPADO" };
+      mocks.invoke.mockResolvedValueOnce({ data: { ready: true }, error: null });
+      mocks.rpc.mockResolvedValueOnce({ data: { state: next, revision: 21 }, error: null });
+      await expect(w.saveWorkspace(next)).resolves.toEqual(next);
+      expect(mocks.invoke.mock.calls[1]![1].body.query.requestId).not.toBe(id);
+    },
+  );
+  it.each(["ERP_ORDER_CONTEXT_CHANGED", "ERP_ORDER_PAYMENT_CHANGED", "ERP_ORDER_AGENDA_CHANGED"])(
+    "preserva tentativa já submetida apesar de rejeição cadastral %s",
+    async (code) => {
+      const w = await load();
+      mocks.invoke.mockResolvedValueOnce({ data: { ready: true }, error: null });
+      mocks.rpc.mockResolvedValueOnce({
+        data: null,
+        error: { code: "", message: "Resposta perdida" },
+      });
+      await expect(w.saveWorkspace(state())).rejects.toThrow("perdida");
+      const args = mocks.rpc.mock.calls[1]![1];
+      mocks.invoke.mockResolvedValueOnce({
+        data: { code, message: "Cadastro alterado" },
+        error: null,
+      });
+      await expect(w.saveWorkspace(state())).rejects.toMatchObject({ code });
+      await expect(w.saveWorkspace({ ...state(), agenda: "4 - ANTECIPADO" })).rejects.toThrow(
+        "sem confirmação",
+      );
+      mocks.invoke.mockResolvedValueOnce({ data: { ready: true }, error: null });
+      mocks.rpc.mockResolvedValueOnce({ data: { state: state(), revision: 21 }, error: null });
+      await w.saveWorkspace(state());
+      expect(mocks.rpc.mock.calls[2]![1]).toEqual(args);
+    },
+  );
   it("resposta perdida da gravação mantém conteúdo e UUID até o reenvio confirmado", async () => {
     const w = await load();
     mocks.invoke.mockResolvedValue({ data: { ready: true }, error: null });
