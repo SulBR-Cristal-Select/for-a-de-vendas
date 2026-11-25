@@ -283,6 +283,25 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
       screen.queryByRole("dialog", { name: "Cadastrar produto local" }),
     ).not.toBeInTheDocument();
   });
+  it("desativa a rota antiga de destaques e mantém a consulta de produtos", async () => {
+    location.hash = "#/produtos/destaques";
+    render(<SulApp initialState={createAppState()} persist={vi.fn()} onSignOut={vi.fn()} />);
+    expect(await screen.findByRole("heading", { name: "Produtos" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Destaques" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Novo destaque" })).not.toBeInTheDocument();
+  });
+  it("bloqueia novos destaques sem apagar os anteriores", async () => {
+    const before = createAppState();
+    before.collections["destaques"] = [{ id: "preservado", name: "Existente" }];
+    const current = { current: before };
+    const persist = vi.fn(async (value) => value);
+    const queue = createMutationQueue(current, persist, vi.fn());
+    await expect(
+      queue((next) => next.collections["destaques"]?.push({ id: "novo", name: "Novo" })),
+    ).rejects.toThrow("Criação de destaques desativada");
+    expect(persist).not.toHaveBeenCalled();
+    expect(current.current.collections["destaques"]).toEqual(before.collections["destaques"]);
+  });
   it("bloqueia criação local antes da persistência sem remover produtos existentes", async () => {
     const before = createAppState({
       products: [{ id: "existente", name: "Preservado", price: 1 }],

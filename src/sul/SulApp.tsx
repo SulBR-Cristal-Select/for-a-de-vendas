@@ -520,6 +520,11 @@ export function assertOrderMutation(next: AppState, before: AppState): void {
     )
   )
     throw new Error("Criação local de produtos desativada. Utilize o catálogo ERP.");
+  const existingHighlights = new Set(
+    (before.collections?.["destaques"] || []).map((row) => row.id),
+  );
+  if ((next.collections?.["destaques"] || []).some((row) => !existingHighlights.has(row.id)))
+    throw new Error("Criação de destaques desativada.");
 }
 const orderError = (error: unknown) =>
   error instanceof Error ? error.message : "Não foi possível confirmar o contexto comercial.";
@@ -3954,7 +3959,6 @@ function ProductsPage() {
         area: "produtos",
         items: [
           ["/produtos", "Produtos"],
-          ["/produtos/destaques", "Destaques"],
           ["/config/produtos/categorias", "Configura\xE7\xF5es"],
         ],
       }),
@@ -6953,66 +6957,6 @@ function Rz() {
     ],
   });
 }
-function Iz() {
-  const { db: e, update: t, editor: a } = useSulContext();
-  return (0, b.jsxs)(fa, {
-    width: "wide",
-    children: [
-      (0, b.jsx)(Ua, {
-        title: "Destaques",
-        description:
-          "Um destaque finalizado foi observado; seus dados n\xE3o foram integralmente extra\xEDdos.",
-        actions: (0, b.jsxs)(Ft, {
-          onClick: () =>
-            a({
-              title: "Criar destaque de cat\xE1logo local",
-              allocateIdentity: true,
-              fields: [
-                { key: "name", label: "Nome", required: !0 },
-                {
-                  key: "start",
-                  label: "In\xEDcio",
-                  kind: "date",
-                  required: !0,
-                },
-                { key: "end", label: "T\xE9rmino", kind: "date", required: !0 },
-              ],
-              values: { start: bo },
-              save: async (o) =>
-                await t((n) => {
-                  (n["collections"]["destaques"] ||= []).push({
-                    ...o,
-                    id: o["id"]!,
-                    source: "simulado",
-                  });
-                }),
-            }),
-          children: [(0, b.jsx)(Sa, {}), "Novo destaque"],
-        }),
-      }),
-      (0, b.jsx)(Ui, {
-        area: "produtos",
-        items: [
-          ["/produtos", "Produtos"],
-          ["/produtos/destaques", "Destaques"],
-          ["/config/produtos/categorias", "Configura\xE7\xF5es"],
-        ],
-      }),
-      (0, b.jsx)(RecordsTable, {
-        rows: e["collections"]["destaques"] || [],
-        columns: [
-          z("name", "Destaque", void 0, { primary: !0 }),
-          z("start", "In\xEDcio", (o) => xo(o.start)),
-          z("end", "T\xE9rmino", (o) => xo(o.end)),
-          z("source", "Origem", (o) => (0, b.jsx)(qr, { row: o })),
-        ],
-      }),
-      (0, b.jsx)(Xt, {
-        children: "O destaque organiza a exposi\xE7\xE3o do cat\xE1logo. N\xE3o altera pre\xE7os.",
-      }),
-    ],
-  });
-}
 function AIPage() {
   const { db: e, online } = useSulContext(),
     [a, o] = (0, He.useState)(""),
@@ -7748,7 +7692,7 @@ export default function SulApp({
                             C = (0, b.jsx)(ProductsPage, {});
                           } else {
                             if (a === "/produtos/destaques") {
-                              C = (0, b.jsx)(Iz, {});
+                              C = (0, b.jsx)(ProductsPage, {});
                             } else {
                               if (x[0] === "produtos") {
                                 C = (0, b.jsx)(
