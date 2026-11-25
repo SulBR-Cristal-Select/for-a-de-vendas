@@ -63,6 +63,9 @@ describe("Sul IA real", () => {
       expect.objectContaining({ limit: 20, offset: 0 }),
     );
     expect(result.sources).toHaveLength(1);
+    const firstBody = JSON.parse(request.mock.calls[1]![1].body);
+    expect(firstBody.messages[0].content).toContain("Somente filial 1 está habilitada");
+    expect(firstBody.messages[0].content).not.toContain("filiais permitidas no máximo 1 e 4");
     expect(JSON.stringify(result)).not.toContain("segredo-teste");
     const body = JSON.parse(request.mock.calls[2]![1].body);
     expect(body.messages.at(-1).content).toContain("620613.50");

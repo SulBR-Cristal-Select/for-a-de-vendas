@@ -151,6 +151,23 @@ export class SankhyaGateway {
   }
   // O chamador é código servidor confiável; nenhuma consulta recebida do navegador é encaminhada.
   async select(sql: string, limit: number): Promise<ObjectValue[]> {
+    // Apenas rejeição explícita de concorrência: não repete timeout, rede ou comandos.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.selectOnce(sql, limit);
+      } catch (error) {
+        if (
+          !(error instanceof SankhyaError) ||
+          error.code !== "ERP_QUERY_REJECTED" ||
+          error.nativeFormat?.hint !== "concurrency-limit" ||
+          attempt >= 3
+        )
+          throw error;
+        await new Promise<void>((resolve) => setTimeout(resolve, 400 * 2 ** attempt));
+      }
+    }
+  }
+  private async selectOnce(sql: string, limit: number): Promise<ObjectValue[]> {
     if (
       !Number.isInteger(limit) ||
       limit < 1 ||

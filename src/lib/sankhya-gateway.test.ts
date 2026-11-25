@@ -244,7 +244,6 @@ describe("transporte Sankhya somente leitura", () => {
   });
   it.each([
     ["ORA-00904: CONTEUDO_PRIVADO", "oracle-00904"],
-    ["Limite de consultas simultâneas CONTEUDO_PRIVADO", "concurrency-limit"],
     ["Sessão inválida CONTEUDO_PRIVADO", "session"],
     ["Sem permissão CONTEUDO_PRIVADO", "permission"],
     ["Query timed out CONTEUDO_PRIVADO", "timeout"],
@@ -269,6 +268,58 @@ describe("transporte Sankhya somente leitura", () => {
       expect(JSON.stringify(log.mock.calls)).not.toContain("CONTEUDO_PRIVADO");
     } finally {
       log.mockRestore();
+    }
+  });
+  it("repete somente leitura explicitamente recusada por concorrência e recupera os dados", async () => {
+    vi.useFakeTimers();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const request = vi
+        .fn()
+        .mockResolvedValueOnce(token())
+        .mockResolvedValueOnce(
+          json({ status: "0", statusMessage: "Limite de consultas simultâneas CONTEUDO_PRIVADO" }),
+        )
+        .mockResolvedValueOnce(companies());
+      const result = new SankhyaGateway(env, request).select(query, 2);
+      await vi.advanceTimersByTimeAsync(399);
+      expect(request).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toHaveLength(2);
+      expect(request).toHaveBeenCalledTimes(3);
+      expect(JSON.stringify(log.mock.calls)).not.toContain("CONTEUDO_PRIVADO");
+    } finally {
+      log.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+  it("encerra após quatro recusas de concorrência sem transformar erro em lista vazia", async () => {
+    vi.useFakeTimers();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const request = vi
+        .fn()
+        .mockResolvedValueOnce(token())
+        .mockImplementation(() =>
+          Promise.resolve(
+            json({
+              status: "0",
+              statusMessage: "Limite de consultas simultâneas CONTEUDO_PRIVADO",
+            }),
+          ),
+        );
+      const result = new SankhyaGateway(env, request).select(query, 2);
+      const assertion = expect(result).rejects.toMatchObject({
+        code: "ERP_QUERY_REJECTED",
+        nativeFormat: { hint: "concurrency-limit" },
+      });
+      await vi.advanceTimersByTimeAsync(2800);
+      await assertion;
+      expect(request).toHaveBeenCalledTimes(5);
+      expect(JSON.stringify(log.mock.calls)).not.toContain("CONTEUDO_PRIVADO");
+    } finally {
+      log.mockRestore();
+      vi.useRealTimers();
     }
   });
   it("não trata HTTP 200 com rejeição do ERP como consulta válida", async () => {
