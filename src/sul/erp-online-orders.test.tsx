@@ -266,6 +266,43 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
     });
     expect(order.customerSnapshot).toBeUndefined();
   });
+  it("remove o acesso ao cadastro local de produto e preserva a consulta", async () => {
+    location.hash = "#/produtos";
+    render(
+      <SulApp
+        initialState={createAppState({
+          products: [{ id: "existente", name: "Produto preservado", unit: "PC", price: 1 }],
+        })}
+        persist={vi.fn()}
+        onSignOut={vi.fn()}
+      />,
+    );
+    expect(await screen.findByRole("link", { name: "Produto preservado" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cadastrar produto" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Cadastrar produto local" }),
+    ).not.toBeInTheDocument();
+  });
+  it("bloqueia criação local antes da persistência sem remover produtos existentes", async () => {
+    const before = createAppState({
+      products: [{ id: "existente", name: "Preservado", price: 1 }],
+    });
+    const current = { current: before };
+    const persist = vi.fn(async (value) => value);
+    const queue = createMutationQueue(current, persist, vi.fn());
+    await expect(
+      queue((next) => next.products.push({ id: "novo", name: "Novo", price: 1 })),
+    ).rejects.toThrow("Criação local de produtos desativada");
+    expect(persist).not.toHaveBeenCalled();
+    expect(current.current.products).toEqual(before.products);
+    await queue((next) => {
+      const existing = next.products.find((row) => row.id === "existente");
+      if (!existing) throw new Error("Produto existente ausente");
+      existing.name = "Preservado editado";
+    });
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(current.current.products).toHaveLength(1);
+  });
   it("libera somente documentos online locais na fila, bloqueando catálogo e outros comandos ERP", async () => {
     const before = createAppState({ orders: [], customers: [], products: [] });
     const current = { current: before };

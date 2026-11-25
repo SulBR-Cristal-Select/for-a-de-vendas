@@ -513,6 +513,13 @@ export function assertOrderMutation(next: AppState, before: AppState): void {
     { ...next, orders: (next["orders"] || []).map(referencesOnly) },
     { ...before, orders: (before["orders"] || []).map(referencesOnly) },
   );
+  const existingProducts = new Set((before.products || []).map((product) => product.id));
+  if (
+    (next.products || []).some(
+      (product) => !product.id.startsWith("sankhya:") && !existingProducts.has(product.id),
+    )
+  )
+    throw new Error("Criação local de produtos desativada. Utilize o catálogo ERP.");
 }
 const orderError = (error: unknown) =>
   error instanceof Error ? error.message : "Não foi possível confirmar o contexto comercial.";
@@ -3942,27 +3949,6 @@ function ProductsPage() {
       (0, b.jsx)(Ua, {
         title: "Produtos",
         description: "Cadastro e consulta de produtos persistidos na SulBR",
-        actions: (0, b.jsxs)(Ft, {
-          onClick: () =>
-            a({
-              title: "Cadastrar produto local",
-              allocateIdentity: true,
-              fields: pz(),
-              values: { unit: "PC", price: null },
-              save: async (s) =>
-                await t((i) => {
-                  i["products"].push({
-                    ...s,
-                    id: s["id"]!,
-                    active: !0,
-                    variants: [],
-                    source: "simulado",
-                    priceSource: "Preço cadastrado no sistema",
-                  });
-                }),
-            }),
-          children: [(0, b.jsx)(Sa, {}), "Cadastrar produto"],
-        }),
       }),
       (0, b.jsx)(Ui, {
         area: "produtos",
@@ -4068,21 +4054,6 @@ function ProductsPage() {
       }),
     ],
   });
-}
-function pz() {
-  return [
-    { key: "name", label: "Nome", required: !0 },
-    { key: "code", label: "C\xF3digo" },
-    { key: "unit", label: "Unidade de medida" },
-    { key: "multiple", label: "Venda em m\xFAltiplos de", kind: "number" },
-    { key: "category", label: "Categoria" },
-    {
-      key: "price",
-      label: "Pre\xE7o unit\xE1rio",
-      kind: "currency",
-      required: !0,
-    },
-  ];
 }
 function ProductDetail({ id: e }: { id: string }) {
   const { db: t, update: a, confirm: o } = useSulContext(),
