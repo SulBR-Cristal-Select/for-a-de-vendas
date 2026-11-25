@@ -208,3 +208,14 @@ describe("Parcelas originais sem financeiro ou correção por suposição", () =
     expect(g.select.mock.calls.map((c) => c[1])).toEqual([2, 1, 50, 1]);
   });
 });
+it("cotação e listagem compartilham condição fixa Sugestão Saída", async () => {
+  const g = { select: vi.fn().mockResolvedValue([option]) };
+  await readEligiblePayment(g, context, 29, scope);
+  expect(g.select.mock.calls[0]![0]).toContain(
+    "T.CODTIPVENDA IN (SELECT L.SUGTIPNEGSAID FROM TGFCPL L WHERE L.CODPARC=C.CODPARC AND L.SUGTIPNEGSAID>0)",
+  );
+  const noMatch = { select: vi.fn().mockResolvedValue([]) };
+  await expect(readEligiblePayment(noMatch, context, 1, scope)).rejects.toMatchObject({
+    code: "ERP_PAYMENT_SCOPE_UNAVAILABLE",
+  });
+});

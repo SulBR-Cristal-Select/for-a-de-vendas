@@ -190,7 +190,7 @@ export function makeCanonical(
   if (
     erp["source"] !== "sankhya" ||
     erp["mode"] !== "online" ||
-    ![1, 4].includes(company) ||
+    company !== 1 ||
     erp["operationCode"] !== 1001 ||
     saved["type"] !== "Venda" ||
     saved["status"] === "Cancelado"

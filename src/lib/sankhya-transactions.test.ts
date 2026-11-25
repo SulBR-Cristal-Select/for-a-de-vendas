@@ -33,6 +33,7 @@ const order = () => ({
   customerId,
   type: "Venda",
   date: "2026-10-23",
+  agenda: "1 - IMEDIATO",
   payment: payment.label,
   erp: {
     source: "sankhya",
@@ -61,7 +62,23 @@ function fixture() {
     error: null,
   });
   const attest = vi.fn().mockResolvedValue({ ready: true }),
-    gateway = { select: vi.fn(), contextPrices: vi.fn() };
+    gateway = {
+      select: vi.fn().mockImplementation(async () => [
+        {
+          CODPARC: 99000001,
+          CODVEND: state.orders[0]!.erp.sellerCode,
+          CLIENTE: "S",
+          ATIVO: "S",
+          AD_STATUS_PEDIDO: "1",
+          SUGTIPNEGSAID: 29,
+          CONDICAO_VALIDADA: 29,
+          CODNAT: 10100000,
+          ATIVA: "S",
+          ANALITICA: "S",
+        },
+      ]),
+      contextPrices: vi.fn(),
+    };
   return { state, request, rpc, attest, gateway };
 }
 const quote = () => ({
@@ -195,7 +212,7 @@ describe("Revalidação do ator real antes da gravação normal", () => {
     } as unknown as Awaited<ReturnType<typeof readPrice>>);
     await expect(
       revalidateOrderRequest(f.gateway, f.request, actor, f.rpc, f.attest),
-    ).rejects.toMatchObject({ code: "ERP_PRICE_PRECISION_UNSUPPORTED" });
+    ).rejects.toMatchObject({ code: "ERP_CONTEXT_REQUIRED" });
     expect(f.attest).not.toHaveBeenCalled();
   });
   it("recusa filial adulterada e não resolve condição pelo nome", async () => {
@@ -204,6 +221,10 @@ describe("Revalidação do ator real antes da gravação normal", () => {
     await expect(
       revalidateOrderRequest(f.gateway, f.request, actor, f.rpc, f.attest),
     ).rejects.toMatchObject({ code: "ERP_CONTEXT_REQUIRED" });
+    expect(readPrice).not.toHaveBeenCalled();
+    vi.mocked(readPrice)
+      .mockReset()
+      .mockResolvedValue(quote() as unknown as Awaited<ReturnType<typeof readPrice>>);
     f.state.orders[0]!.erp.companyCode = 1;
     f.state.orders[0]!.payment = "A VISTA FORJADA";
     await expect(
@@ -306,4 +327,34 @@ describe("Mesma identidade em preparação, cotação e prova", () => {
     expect(readPrice).not.toHaveBeenCalled();
     expect(f.attest).not.toHaveBeenCalled();
   });
+});
+it("agenda divergente bloqueia prova antes de cotar e atestar", async () => {
+  const f = fixture();
+  f.state.orders[0]!.agenda = "4 - ANTECIPADO";
+  await expect(
+    revalidateOrderRequest(f.gateway, f.request, actor, f.rpc, f.attest),
+  ).rejects.toMatchObject({ code: "ERP_ORDER_AGENDA_CHANGED" });
+  expect(readPrice).not.toHaveBeenCalled();
+  expect(f.attest).not.toHaveBeenCalled();
+});
+it("natureza inativa bloqueia prova sem alterar cadastro", async () => {
+  const f = fixture();
+  f.gateway.select.mockResolvedValueOnce([
+    {
+      CODPARC: 99000001,
+      CODVEND: 14,
+      CLIENTE: "S",
+      ATIVO: "S",
+      AD_STATUS_PEDIDO: "1",
+      SUGTIPNEGSAID: 29,
+      CONDICAO_VALIDADA: 29,
+      CODNAT: 10100000,
+      ATIVA: "N",
+      ANALITICA: "S",
+    },
+  ]);
+  await expect(
+    revalidateOrderRequest(f.gateway, f.request, actor, f.rpc, f.attest),
+  ).rejects.toMatchObject({ code: "ERP_ORDER_CONTEXT_CHANGED" });
+  expect(f.attest).not.toHaveBeenCalled();
 });

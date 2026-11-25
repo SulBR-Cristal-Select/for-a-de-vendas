@@ -58,13 +58,13 @@ function predicate(context: PaymentContext, scope: ReadScope): string {
   const clause = sellerPredicate(allowed, "C.CODVEND"),
     seller = clause ? ` AND ${clause}` : "";
   integer(context.partnerCode, 1);
-  if (![1, 4].includes(context.companyCode))
+  if (context.companyCode !== 1)
     throw new SankhyaError("ERP_SCOPE_FORBIDDEN", "Filial fora do escopo autorizado.", 403);
   const day = dateValue(context.date);
   const asOf = `LEAST(SYSDATE,TO_DATE('${day} 23:59:59','YYYY-MM-DD HH24:MI:SS'))`;
   // Grupo é um código do cadastro, nunca nome/e-mail. PPG.CODEMP não filtra a filial:
   // TIPOEMP=E usa a empresa do cabeçalho, conforme documentação e dicionário reais.
-  return `C.CODPARC=${context.partnerCode} AND (C.CODEMP=${context.companyCode}${context.companyCode === 1 ? " OR C.CODEMP IS NULL" : ""}) AND C.ATIVO='S' AND C.CLIENTE='S'${seller} AND T.ATIVO='S' AND T.DHALTER=(SELECT MAX(V.DHALTER) FROM TGFTPV V WHERE V.CODTIPVENDA=T.CODTIPVENDA AND V.DHALTER<=${asOf}) AND (TRIM(T.GRUPOAUTOR) IS NULL OR (LENGTH(TRIM(T.GRUPOAUTOR))=1 AND INSTR(C.GRUPOAUTOR,TRIM(T.GRUPOAUTOR))>0))${context.creditBlocked ? " AND T.SUBTIPOVENDA='1'" : ""} AND EXISTS(SELECT 1 FROM TGFPPG G WHERE G.CODTIPVENDA=T.CODTIPVENDA)`;
+  return `C.CODPARC=${context.partnerCode} AND (C.CODEMP=${context.companyCode}${context.companyCode === 1 ? " OR C.CODEMP IS NULL" : ""}) AND C.ATIVO='S' AND C.CLIENTE='S'${seller} AND T.CODTIPVENDA IN (SELECT L.SUGTIPNEGSAID FROM TGFCPL L WHERE L.CODPARC=C.CODPARC AND L.SUGTIPNEGSAID>0) AND T.ATIVO='S' AND T.DHALTER=(SELECT MAX(V.DHALTER) FROM TGFTPV V WHERE V.CODTIPVENDA=T.CODTIPVENDA AND V.DHALTER<=${asOf}) AND (TRIM(T.GRUPOAUTOR) IS NULL OR (LENGTH(TRIM(T.GRUPOAUTOR))=1 AND INSTR(C.GRUPOAUTOR,TRIM(T.GRUPOAUTOR))>0))${context.creditBlocked ? " AND T.SUBTIPOVENDA='1'" : ""} AND EXISTS(SELECT 1 FROM TGFPPG G WHERE G.CODTIPVENDA=T.CODTIPVENDA)`;
 }
 function mapPayment(row: Row): PaymentOption {
   const code = integer(row["CODTIPVENDA"], 1),
@@ -149,7 +149,7 @@ export async function readPaymentOptions(
     creditBlocked: erp["creditBlocked"] === true,
   };
   // Condição fixa do cadastro do cliente (TGFCPL.SUGTIPNEGSAID), a mesma exigida pela conferência de envio.
-  const base = `FROM TGFTPV T JOIN TGFPAR C ON C.CODPARC=${context.partnerCode} WHERE ${predicate(context, scope)} AND T.CODTIPVENDA IN (SELECT L.SUGTIPNEGSAID FROM TGFCPL L WHERE L.CODPARC=C.CODPARC AND L.SUGTIPNEGSAID>0)`;
+  const base = `FROM TGFTPV T JOIN TGFPAR C ON C.CODPARC=${context.partnerCode} WHERE ${predicate(context, scope)}`;
   const needle = foldERPText(input.search?.trim() ?? "");
   const folded =
     "ASCIISTR(TRANSLATE(UPPER(T.DESCRTIPVENDA),'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑ','AAAAAEEEEIIIIOOOOOUUUUCN'))";

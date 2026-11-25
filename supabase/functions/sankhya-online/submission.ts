@@ -1,3 +1,4 @@
+import { checkOrderRegistry } from "./registry-validation.ts";
 import { SankhyaError, type SankhyaGateway } from "./gateway.ts";
 import { actorScope, operationSeller, loggedSeller, type CommercialActor } from "./identity.ts";
 import { readPrice } from "./price-context.ts";
@@ -102,40 +103,6 @@ async function load(d: SubmissionDeps, id: string) {
     receipt: (order["receipt"] ?? null) as SubmissionReceipt | null,
   };
 }
-/** O cadastro é revalidado antes de incluir e de confirmar, como na skill. */
-async function checkRegistry(d: SubmissionDeps, p: CanonicalOrder): Promise<void> {
-  const rows = await d.gateway.select(
-    `SELECT P.CODPARC,P.CODVEND,P.CLIENTE,P.ATIVO,P.AD_STATUS_PEDIDO,C.SUGTIPNEGSAID,T.CODTIPVENDA CONDICAO_VALIDADA,N.CODNAT,N.ATIVA,N.ANALITICA
-FROM TGFPAR P LEFT JOIN TGFCPL C ON C.CODPARC=P.CODPARC
-LEFT JOIN TGFTPV T ON T.CODTIPVENDA=C.SUGTIPNEGSAID AND T.DHALTER=(SELECT MAX(X.DHALTER) FROM TGFTPV X WHERE X.CODTIPVENDA=T.CODTIPVENDA AND X.DHALTER<=SYSDATE)
-LEFT JOIN TGFNAT N ON N.CODNAT=10100000 WHERE P.CODPARC=${p.codigo_parceiro} AND ROWNUM<=2`,
-    2,
-  );
-  const r = rows[0];
-  if (d.actor.role === "gestor" && Number(r?.["CODVEND"]) !== p.codigo_vendedor)
-    return fail(
-      "ERP_CUSTOMER_SELLER_MISMATCH",
-      "O vendedor do pedido deve ser o vendedor cadastrado no cliente.",
-      400,
-    );
-  if (
-    rows.length !== 1 ||
-    !r ||
-    r["CLIENTE"] !== "S" ||
-    r["ATIVO"] !== "S" ||
-    Number(r["CODPARC"]) !== p.codigo_parceiro ||
-    Number(r["SUGTIPNEGSAID"]) !== p.codigo_condicao ||
-    Number(r["CONDICAO_VALIDADA"]) !== p.codigo_condicao ||
-    String(r["AD_STATUS_PEDIDO"]) !== p.tipo_agenda ||
-    Number(r["CODNAT"]) !== 10100000 ||
-    r["ATIVA"] !== "S" ||
-    r["ANALITICA"] !== "S"
-  )
-    return fail(
-      "ERP_ORDER_CONTEXT_CHANGED",
-      "Condição, agenda ou natureza divergem do cadastro. Atualize a conferência; nenhum envio novo foi feito.",
-    );
-}
 async function prepare(
   d: SubmissionDeps,
   order: Row,
@@ -208,7 +175,7 @@ async function prepare(
       "O Nº Pedido do Cliente excede 15 caracteres (limite do Sankhya). Ajuste o pedido antes de enviar; nenhum envio foi feito.",
       400,
     );
-  await checkRegistry(d, canonical.pedidos_fiscais[0]);
+  await checkOrderRegistry(d.gateway, canonical.pedidos_fiscais[0]);
   return canonical;
 }
 const money = (alias: string, field: string) =>
@@ -492,7 +459,7 @@ export async function submitOrder(d: SubmissionDeps, input: unknown): Promise<Su
     )
       return result();
   }
-  await checkRegistry(d, p);
+  await checkOrderRegistry(d.gateway, p);
   if (
     !(await save(
       {

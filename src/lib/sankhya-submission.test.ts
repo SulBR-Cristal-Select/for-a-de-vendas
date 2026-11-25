@@ -227,7 +227,7 @@ describe("canônico e contexto de envio", () => {
     expect(r.write).not.toHaveBeenCalled();
     expect(r.includeOrder).not.toHaveBeenCalled();
   });
-  it("a natureza e a condição precisam estar vigentes no cadastro", async () => {
+  it("a condição precisa corresponder ao cadastro vigente", async () => {
     const r = rig();
     r.select.mockImplementationOnce(async () => [
       {
@@ -243,7 +243,7 @@ describe("canônico e contexto de envio", () => {
         ANALITICA: "S",
       },
     ]);
-    await expect(approved(r)).rejects.toMatchObject({ code: "ERP_ORDER_CONTEXT_CHANGED" });
+    await expect(approved(r)).rejects.toMatchObject({ code: "ERP_ORDER_PAYMENT_CHANGED" });
     expect(r.write).not.toHaveBeenCalled();
   });
   it("preço alterado não é aprovado silenciosamente", async () => {

@@ -1,3 +1,5 @@
+import { checkOrderRegistry } from "./registry-validation.ts";
+import { validateOnlineOrderShape } from "../../../src/lib/online-order-validation.ts";
 import { SankhyaError, type SankhyaGateway } from "./gateway.ts";
 import { readPrice } from "./price-context.ts";
 import { readPaymentRules } from "./payments.ts";
@@ -104,6 +106,14 @@ export async function revalidateOrderRequest(
     return fail("INVALID_REQUEST", "Revalidação limitada a cinquenta itens por gravação.");
   const verified: Row[] = [];
   for (const order of selected) {
+    try {
+      validateOnlineOrderShape(order, true);
+    } catch (error) {
+      return fail(
+        "ERP_CONTEXT_REQUIRED",
+        error instanceof Error ? error.message : "Pedido online inválido.",
+      );
+    }
     const erp = object(order["erp"]),
       customerId = text(order["customerId"]),
       date = text(order["date"]);
@@ -118,6 +128,12 @@ export async function revalidateOrderRequest(
       return fail("ERP_CONTEXT_REQUIRED", "Pedido ERP exige cliente e itens ERP compatíveis.");
     const actorSeller = operationSeller(scope, erp["sellerCode"]);
     const paymentCode = code(object(erp["payment"])["code"]);
+    await checkOrderRegistry(gateway, {
+      codigo_parceiro: Number(customerId.split(":")[2]),
+      codigo_vendedor: actorSeller,
+      codigo_condicao: paymentCode,
+      tipo_agenda: String(order["agenda"]).split(" - ")[0]!,
+    });
     const items: Row[] = [],
       seen = new Set<string>();
     let commercial: Row | undefined,

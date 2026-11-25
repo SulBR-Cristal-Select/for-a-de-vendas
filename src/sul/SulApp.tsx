@@ -1,3 +1,4 @@
+import { validateOnlineOrderShape } from "../lib/online-order-validation";
 import { useERPCatalogPrices } from "./erp-catalog-prices";
 import { useCustomerPerformance, customerPerformancePeriods } from "./customer-performance";
 const customerNativeEnd = (month: string) => customerPerformancePeriods(month).year.to;
@@ -478,12 +479,13 @@ export function assertOrderMutation(next: AppState, before: AppState): void {
     order?.erp?.source === "sankhya" && order.erp.mode === "online";
   for (const order of next["orders"] || []) {
     if (!document(order)) continue;
+    validateOnlineOrderShape(order, true);
     if (
       typeof order.id !== "string" ||
       order.id.startsWith("sankhya:") ||
       order.readOnly === true ||
       !/^sankhya:customer:[1-9]\d*$/.test(order.customerId) ||
-      ![1, 4].includes(order.erp.companyCode) ||
+      order.erp.companyCode !== 1 ||
       order.erp.operationCode !== 1001 ||
       !Number.isSafeInteger(order.erp.sellerCode) ||
       order.erp.sellerCode < 1 ||
@@ -709,6 +711,7 @@ export function prepareOnlineOrder<Order extends OrderDraft>(
   sellerId?: string | undefined;
   customerSnapshot?: ERPRow | undefined;
 } {
+  validateOnlineOrderShape({ ...order, date: context.date }, false);
   const first = quotes[0];
   if (context.type !== "Venda")
     throw new Error("Tipo de pedido ERP não autorizado neste contexto.");
@@ -722,6 +725,7 @@ export function prepareOnlineOrder<Order extends OrderDraft>(
       quote.product["id"] !== item.productId ||
       quote.seller["id"] !== context.sellerId ||
       quote.payment.code !== context.paymentCode ||
+      quote.companyCode !== 1 ||
       quote.companyCode !== first.companyCode ||
       quote.operationCode !== 1001 ||
       quote.operationVersion !== first.operationVersion ||
@@ -735,6 +739,7 @@ export function prepareOnlineOrder<Order extends OrderDraft>(
   });
   return {
     ...order,
+    date: context.date,
     customerId: context.customerId,
     seller: String(first.seller["name"] || order.seller),
     payment: first.payment.label,
