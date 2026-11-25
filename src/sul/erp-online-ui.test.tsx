@@ -153,6 +153,20 @@ afterEach(() => {
 });
 
 describe("Paginação transitória de cadastros online", () => {
+  it("não converte componentes em texto no contador durante carregamento de clientes", () => {
+    location.hash = "#/clientes";
+    const client = createERPClient(() => new Promise(() => {}));
+    const root = render(
+      <SulApp
+        initialState={createAppState()}
+        online={client}
+        persist={async (next) => next}
+        onSignOut={async () => {}}
+      />,
+    );
+    expect(root.container.textContent).not.toContain("[object Object]");
+    expect(root.container.textContent).not.toContain("0 registros");
+  });
   it("busca cidade sem acento também nos cadastros manuais, sem mudar o filtro para só nome", async () => {
     const { client } = fakeERP([{ ...customer(1, "Loja ERP"), city: "SÃO PAULO" }]);
     const hook = tableHook({ client, resource: "customers" }, [

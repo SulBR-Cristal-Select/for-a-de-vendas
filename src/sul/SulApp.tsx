@@ -1074,16 +1074,8 @@ function RecordsTable({
           children: (0, b.jsx)(cv, {
             query: f,
             onQuery: i || c,
-            shown: remote
-              ? onlinePage.loading && onlinePage.total === undefined
-                ? (0, b.jsx)(LoadingSpinner, { size: "xs", label: "Carregando" })
-                : (onlinePage.total ?? pa)
-              : d.length,
-            total: remote
-              ? onlinePage.loading && onlinePage.totalWithoutSearch === undefined
-                ? (0, b.jsx)(LoadingSpinner, { size: "xs", label: "Carregando" })
-                : (onlinePage.totalWithoutSearch ?? pa)
-              : e.length,
+            shown: remote ? (onlinePage.total ?? pa) : d.length,
+            total: remote ? (onlinePage.totalWithoutSearch ?? pa) : e.length,
             noun: "registro",
             hideSearch: !1,
             dirty: !!f,
