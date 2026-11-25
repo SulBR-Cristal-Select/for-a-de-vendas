@@ -94,8 +94,13 @@ function useConsulta(
       const versao = geracao;
       definirEstado((anterior) => ({
         client,
-        rows: anexar ? anterior.rows : [],
-        query: consulta,
+        rows:
+          anterior.client === client &&
+          anterior.context === context &&
+          (anexar || recurso === "products")
+            ? anterior.rows
+            : [],
+        query: "",
         context,
         loading: true,
         hasMore: false,
@@ -153,9 +158,18 @@ function useConsulta(
       ocupado = false;
       offset = 0;
       total = 0;
-      linhas.current = [];
       clearTimeout(temporizador);
-      definirEstado({ client, context, rows: [], loading: true, hasMore: false });
+      // Resultados conhecidos continuam filtráveis enquanto chega a janela remota.
+      // IDs remotos não confirmam o termo novo até a resposta vigente.
+      linhas.current = [];
+      definirEstado((anterior) => ({
+        client,
+        context,
+        rows: recurso === "products" ? anterior.rows : [],
+        query: "",
+        loading: true,
+        hasMore: false,
+      }));
       temporizador = setTimeout(() => {
         void carregar();
       }, 180);

@@ -28,6 +28,7 @@ export function useERPCatalogPrices(
     )
       return;
     let alive = true;
+    const pending = new AbortController();
     const labels: Record<string, string> = {};
     setState({ client, key, labels: {} });
     // Sequencial: respeita a coordenação de leituras ERP existente e evita rajada de cotações.
@@ -38,7 +39,10 @@ export function useERPCatalogPrices(
           unit = row["unit"];
         if (!id.startsWith("sankhya:product:") || typeof unit !== "string" || !unit) continue;
         try {
-          const quote = await client.price({ ...context, productId: id, quantity: 1, unit });
+          const quote = await client.price(
+            { ...context, productId: id, quantity: 1, unit },
+            pending.signal,
+          );
           labels[id] =
             `${quote.price.amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 9 })} / ${unit} · quantidade 1`;
         } catch (error) {
@@ -50,6 +54,7 @@ export function useERPCatalogPrices(
     })();
     return () => {
       alive = false;
+      pending.abort();
     };
   }, [client, key, enabled]);
   return state && state.client === client && state.key === key ? state.labels : {};

@@ -130,6 +130,40 @@ describe("Cliente de leitura online", () => {
       transport.mock.calls.map((c) => ("search" in c[0].query ? c[0].query.search : undefined)),
     ).toEqual([undefined, "guerro"]);
   });
+  it("remove cotação de catálogo superada da fila e libera a busca sem leitura extra", async () => {
+    const delayed = deferred();
+    const windowData = { ...observed, items: [], offset: 0, total: 0, totalWithoutSearch: 0 };
+    const transport = vi
+      .fn<ERPTransport>()
+      .mockImplementationOnce(() => delayed.promise)
+      .mockResolvedValue({ data: windowData, error: null });
+    const client = createERPClient(transport);
+    const active = client.page({ resource: "products" });
+    const obsolete = new AbortController();
+    const quote = client.price(
+      {
+        customerId: "sankhya:customer:131",
+        productId: "sankhya:product:11029",
+        paymentCode: 93,
+        sellerCode: 14,
+        type: "Venda",
+        date: "2026-11-25",
+        quantity: 1,
+        unit: "PC",
+      },
+      obsolete.signal,
+    );
+    const rejected = expect(quote).rejects.toMatchObject({ code: "REQUEST_CANCELLED" });
+    const search = client.window({ resource: "products", search: "11070", offset: 0, limit: 50 });
+    obsolete.abort();
+    await rejected;
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(transport.mock.calls[0]![1].aborted).toBe(false);
+    delayed.resolve({ data: page, error: null });
+    await active;
+    await search;
+    expect(transport.mock.calls.map(([body]) => body.operation)).toEqual(["page", "window"]);
+  });
   it("não cancela ao receber a mesma identidade", async () => {
     const delayed = deferred(),
       client = createERPClient(() => delayed.promise);

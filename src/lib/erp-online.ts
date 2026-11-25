@@ -1302,7 +1302,8 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
       >("billed-orders-report", query),
     billingReport: (query: ERPBillingQuery) => request<ERPSalesWindow>("billing-report", query),
     document: (query: ERPDocumentQuery) => request<ERPDocument>("document", query),
-    price: (query: ERPPriceQuery) => request<ERPPrice>("price-query", query),
+    price: (query: ERPPriceQuery, superseded?: AbortSignal) =>
+      request<ERPPrice>("price-query", query, superseded),
     paymentOptions: <T = ERPRow>(query: ERPPaymentQuery) =>
       request<ERPWindow<T>>("payment-options", query),
   };

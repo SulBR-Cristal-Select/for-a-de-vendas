@@ -2243,7 +2243,7 @@ function OrderEditor() {
       date: context.date,
     },
     lookups.products.filter((row) => lookups.matches.products.ids.has(String(row["id"]))),
-    catalogOpen,
+    catalogOpen && !lookups.matches.products.loading,
   );
   const prices = useERPOrderPrices(onlineOrder ? online : undefined, context, h, e["products"]);
   // Valores antigos permanecem somente como rascunho interno, nunca como preço confirmado.

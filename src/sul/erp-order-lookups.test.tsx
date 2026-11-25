@@ -123,6 +123,26 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
     await new Promise((resolve) => setTimeout(resolve, 220));
     expect(transporte).toHaveBeenCalledTimes(4);
   });
+  it("mantém produtos conhecidos durante a busca e ainda consulta referências remotas", async () => {
+    const { client, transporte } = preparar();
+    const { result } = renderHook(() => useERPOrderLookups(client, "", []));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const conhecidos = result.current.products;
+    act(() => result.current.matches.products.onSearchChange!("REFERENCIA-EXTERNA"));
+    expect(result.current.products).toEqual(conhecidos);
+    expect(result.current.matches.products.query).toBe("");
+    expect(result.current.matches.products.loading).toBe(true);
+    await waitFor(() => expect(result.current.matches.products.loading).toBe(false));
+    expect(
+      transporte.mock.calls.some(
+        ([c]) =>
+          c.operation === "window" &&
+          c.query.resource === "products" &&
+          c.query.search === "REFERENCIA-EXTERNA",
+      ),
+    ).toBe(true);
+    expect(result.current.matches.products.query).toBe("REFERENCIA-EXTERNA");
+  });
   it("anexa só ao chegar ao fim do listbox correspondente e reinicia o offset ao buscar", async () => {
     const { client, transporte } = preparar();
     const { result } = renderHook(() => useERPOrderLookups(client, "", []));

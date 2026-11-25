@@ -21,12 +21,26 @@ describe("preço contextual na lista de produtos", () => {
     expect(price).not.toHaveBeenCalled();
     rerender({ open: true });
     await waitFor(() => expect(result.current[rows[0]!.id]).toContain("11,10"));
-    expect(price).toHaveBeenCalledWith({
-      ...context,
-      productId: rows[0]!.id,
-      quantity: 1,
-      unit: "PC",
-    });
+    expect(price).toHaveBeenCalledWith(
+      { ...context, productId: rows[0]!.id, quantity: 1, unit: "PC" },
+      expect.any(AbortSignal),
+    );
+  });
+  it("cancela cotações pendentes ao mudar a busca ou fechar o seletor", async () => {
+    const price = vi.fn().mockResolvedValue({ price: { amount: 11.1 } });
+    const client = { price } as unknown as ERPClient;
+    const { rerender } = renderHook(
+      ({ products, open }) => useERPCatalogPrices(client, context, products, open),
+      { initialProps: { products: rows, open: true } },
+    );
+    await waitFor(() => expect(price).toHaveBeenCalledTimes(1));
+    const first = price.mock.calls[0]![1] as AbortSignal;
+    rerender({ products: [{ id: "sankhya:product:11070", unit: "PC" }], open: true });
+    expect(first.aborted).toBe(true);
+    await waitFor(() => expect(price).toHaveBeenCalledTimes(2));
+    const second = price.mock.calls[1]![1] as AbortSignal;
+    rerender({ products: [{ id: "sankhya:product:11070", unit: "PC" }], open: false });
+    expect(second.aborted).toBe(true);
   });
   it("trocar cliente limpa preços e descarta resposta antiga", async () => {
     let resolve!: (value: unknown) => void;
