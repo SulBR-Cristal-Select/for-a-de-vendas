@@ -525,6 +525,17 @@ export function assertOrderMutation(next: AppState, before: AppState): void {
   );
   if ((next.collections?.["destaques"] || []).some((row) => !existingHighlights.has(row.id)))
     throw new Error("Criação de destaques desativada.");
+  if (JSON.stringify(next.products || []) !== JSON.stringify(before.products || []))
+    throw new Error("Cadastro de produtos disponível somente para consulta.");
+  for (const key of Object.keys(next.collections || {}).filter((key) =>
+    key.startsWith("produtos/"),
+  )) {
+    if (
+      JSON.stringify(next.collections?.[key] || []) !==
+      JSON.stringify(before.collections?.[key] || [])
+    )
+      throw new Error("Configuração de produtos disponível somente para consulta.");
+  }
 }
 const orderError = (error: unknown) =>
   error instanceof Error ? error.message : "Não foi possível confirmar o contexto comercial.";
@@ -3938,7 +3949,7 @@ function PriceTablesPage() {
   });
 }
 function ProductsPage() {
-  const { db: e, update: t, editor: a, confirm: o, online } = useSulContext(),
+  const { db: e, online } = useSulContext(),
     [n, r] = (0, He.useState)(""),
     l = (online ? manualRows(e["products"]) : e["products"]).filter(
       (s) => !n || s["category"] === n,
@@ -3957,10 +3968,7 @@ function ProductsPage() {
       }),
       (0, b.jsx)(Ui, {
         area: "produtos",
-        items: [
-          ["/produtos", "Produtos"],
-          ["/config/produtos/categorias", "Configura\xE7\xF5es"],
-        ],
+        items: [["/produtos", "Produtos"]],
       }),
       (0, b.jsxs)("div", {
         className: "flex flex-wrap items-end gap-3",
@@ -3980,25 +3988,6 @@ function ProductsPage() {
                 ]),
               ).map((s) => ({ value: String(s), label: String(s) })),
             ]),
-          }),
-          (0, b.jsxs)(xt, {
-            onClick: () => {
-              {
-                if (e["config"].stock) {
-                  bn("/relatorios/estoque");
-                } else {
-                  o(
-                    "Habilitar controle de estoque local?",
-                    async () =>
-                      await t((s) => {
-                        s["config"].stock = !0;
-                      }),
-                    "O Sul real permanece com controle desabilitado.",
-                  );
-                }
-              }
-            },
-            children: [(0, b.jsx)(du, {}), "Gerenciar estoque"],
           }),
           (0, b.jsx)(Gp, {
             rows: l,
@@ -4060,29 +4049,12 @@ function ProductsPage() {
   });
 }
 function ProductDetail({ id: e }: { id: string }) {
-  const { db: t, update: a, confirm: o } = useSulContext(),
+  const { db: t } = useSulContext(),
     n = Ur(t, e),
-    [r, l] = (0, He.useState)<Partial<Product>>(() => Xu(n || {})),
+    r: Partial<Product> = n || {},
     [s, i] = (0, He.useState)("precos"),
-    u = (f: string, d: unknown) => l((m) => ({ ...m, [f]: d }));
+    u = (_field: string, _value: unknown) => {};
   if (!n) return (0, b.jsx)(Wu, {});
-  const c = async () => {
-    if (!r.name || (r.price ?? 0) < 0) {
-      go("Informe nome e pre\xE7o v\xE1lido", void 0, "bad");
-      return;
-    }
-    try {
-      await a((f) =>
-        Object.assign(Ur(f, e)!, r, {
-          source: "simulado",
-          priceSource: "Preço cadastrado no sistema",
-        }),
-      );
-      go("Produto alterado no sistema");
-    } catch {
-      /* A atualização já informou o erro pelo canal existente. */
-    }
-  };
   return (0, b.jsxs)(fa, {
     width: "wide",
     children: [
@@ -4090,66 +4062,31 @@ function ProductDetail({ id: e }: { id: string }) {
         title: "Ficha do produto",
         description: n.name,
         back: { label: "Produtos", to: "/produtos" },
-        actions: (0, b.jsxs)(b.Fragment, {
-          children: [
-            (0, b.jsx)(xt, {
-              onClick: () => {
-                {
-                  l(Xu(n));
-                  go("Edi\xE7\xE3o local descartada");
-                }
-              },
-              children: "Cancelar",
-            }),
-            (0, b.jsxs)(Ft, {
-              onClick: c,
-              children: [(0, b.jsx)(ka, {}), "Salvar altera\xE7\xF5es"],
-            }),
-            (0, b.jsx)(Il, {
-              label: "Op\xE7\xF5es do produto",
-              actions: [
-                {
-                  label: "Excluir produto",
-                  tone: "danger",
-                  onSelect: () =>
-                    o(
-                      "Excluir produto no sistema?",
-                      async () => {
-                        {
-                          await a((f) => {
-                            f["products"] = f["products"].filter((d) => d.id !== e);
-                          });
-                          bn("/produtos");
-                        }
-                      },
-                      "Os pedidos preservam os seus itens. Nenhum registro real ser\xE1 exclu\xEDdo.",
-                    ),
-                },
-              ],
-            }),
-          ],
-        }),
       }),
       (0, b.jsx)(qr, { row: n }),
       (0, b.jsx)(Vt, {
         children: (0, b.jsxs)(Vi, {
           children: [
             (0, b.jsx)(vr, {
+              disabled: true,
               label: "Nome",
               value: r.name || "",
               onChange: (f: string) => u("name", f),
             }),
             (0, b.jsx)(vr, {
+              disabled: true,
               label: "C\xF3digo",
               value: r.code || "",
               onChange: (f: string) => u("code", f),
             }),
             (0, b.jsx)(vr, {
+              disabled: true,
               label: "Unidade de medida",
               value: r.unit || "",
               onChange: (f: string) => u("unit", f),
             }),
             (0, b.jsx)(Hr, {
+              disabled: true,
               label: "Venda em m\xFAltiplos de",
               min: 1,
               value: r["multiple"] ?? null,
@@ -4157,6 +4094,7 @@ function ProductDetail({ id: e }: { id: string }) {
               hint: "Valor n\xE3o extra\xEDdo quando vazio",
             }),
             (0, b.jsx)(vr, {
+              disabled: true,
               label: "Categoria",
               value: r.category || "",
               onChange: (f: string) => u("category", f),
@@ -4181,6 +4119,7 @@ function ProductDetail({ id: e }: { id: string }) {
             title: "Pre\xE7o unit\xE1rio",
             children: [
               (0, b.jsx)(Up, {
+                disabled: true,
                 label: "Pre\xE7o unit\xE1rio",
                 value: r.price ?? null,
                 onChange: (f: number | null) => u("price", f),
@@ -4205,6 +4144,7 @@ function ProductDetail({ id: e }: { id: string }) {
               (0, b.jsxs)(Vi, {
                 children: [
                   (0, b.jsx)(Hr, {
+                    disabled: true,
                     label: "IPI (%)",
                     value: r["ipi"] ?? null,
                     min: 0,
@@ -4213,11 +4153,13 @@ function ProductDetail({ id: e }: { id: string }) {
                     onChange: (f: number | null) => u("ipi", f),
                   }),
                   (0, b.jsx)(vr, {
+                    disabled: true,
                     label: "NCM",
                     value: r["ncm"] || "",
                     onChange: (f: string) => u("ncm", f),
                   }),
                   (0, b.jsx)(Hr, {
+                    disabled: true,
                     label: "Comiss\xE3o (%)",
                     min: 0,
                     max: 100,
@@ -4230,6 +4172,7 @@ function ProductDetail({ id: e }: { id: string }) {
               (0, b.jsx)("div", {
                 className: "mt-4",
                 children: (0, b.jsx)($u, {
+                  disabled: true,
                   label: "Informa\xE7\xF5es adicionais",
                   value: r.notes || "",
                   onChange: (f: string) => u("notes", f),
@@ -4248,6 +4191,7 @@ function ProductDetail({ id: e }: { id: string }) {
             title: "Varia\xE7\xF5es",
             children: [
               (0, b.jsx)(vr, {
+                disabled: true,
                 label: "Atributo de varia\xE7\xE3o",
                 value: r["variantLabel"] || "",
                 onChange: (f: string) => u("variantLabel", f),
@@ -4256,6 +4200,7 @@ function ProductDetail({ id: e }: { id: string }) {
               (0, b.jsx)("div", {
                 className: "mt-4",
                 children: (0, b.jsx)(vr, {
+                  disabled: true,
                   label: "Valores separados por v\xEDrgula",
                   value: (r["variants"] || []).join(", "),
                   onChange: (f: string) =>
@@ -4286,6 +4231,7 @@ function ProductDetail({ id: e }: { id: string }) {
             title: "Peso e dimens\xF5es",
             children: [
               (0, b.jsx)(ho, {
+                disabled: true,
                 label: "Forma de cadastro",
                 value: r["dimensionMode"] || "unitario",
                 onValueChange: (f: string) => u("dimensionMode", f),
@@ -4305,6 +4251,7 @@ function ProductDetail({ id: e }: { id: string }) {
                 children: (0, b.jsxs)(Vi, {
                   children: [
                     (0, b.jsx)(Hr, {
+                      disabled: true,
                       label: "Peso bruto (kg)",
                       value: r["weight"] ?? null,
                       digits: 3,
@@ -4312,6 +4259,7 @@ function ProductDetail({ id: e }: { id: string }) {
                       onChange: (f: number | null) => u("weight", f),
                     }),
                     (0, b.jsx)(Hr, {
+                      disabled: true,
                       label: "Largura (cm)",
                       value: r["width"] ?? null,
                       digits: 2,
@@ -4319,6 +4267,7 @@ function ProductDetail({ id: e }: { id: string }) {
                       onChange: (f: number | null) => u("width", f),
                     }),
                     (0, b.jsx)(Hr, {
+                      disabled: true,
                       label: "Altura (cm)",
                       value: r["height"] ?? null,
                       digits: 2,
@@ -4326,6 +4275,7 @@ function ProductDetail({ id: e }: { id: string }) {
                       onChange: (f: number | null) => u("height", f),
                     }),
                     (0, b.jsx)(Hr, {
+                      disabled: true,
                       label: "Comprimento (cm)",
                       value: r["length"] ?? null,
                       digits: 2,
@@ -6200,6 +6150,7 @@ function Cz({ area: e, section: t }: { area: string; section: string }) {
     ),
     i = yz[e] || [],
     u = i.find((p) => p.id === t);
+  if (e === "produtos") return (0, b.jsx)(ProductsPage, {});
   if (!u) return (0, b.jsx)(Wu, {});
   const c = (
       {

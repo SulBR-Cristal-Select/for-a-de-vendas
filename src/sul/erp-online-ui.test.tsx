@@ -390,10 +390,8 @@ describe("Ficha online separada da persistência manual", () => {
     );
     expect(screen.queryByDisplayValue("Descrição da origem")).not.toBeInTheDocument();
     await screen.findByDisplayValue("Descrição da origem");
-    fireEvent.click(screen.getByRole("button", { name: /Salvar alterações/ }));
-    await waitFor(() =>
-      expect(notify).toHaveBeenCalledWith("Cadastro ERP disponível somente para consulta."),
-    );
+    expect(screen.getByRole("textbox", { name: "Nome" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Salvar alterações/ })).not.toBeInTheDocument();
     expect(persist).not.toHaveBeenCalled();
   });
 });
@@ -515,13 +513,8 @@ describe("Integração dos componentes existentes sem estruturas visuais novas",
       />,
     );
     await screen.findByDisplayValue("Produto 7");
-    fireEvent.click(screen.getByRole("button", { name: "Opções do produto" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Excluir produto" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Confirmar no sistema" }));
-    await waitFor(() =>
-      expect(notify).toHaveBeenCalledWith("Cadastro ERP disponível somente para consulta."),
-    );
-    expect(notify).not.toHaveBeenCalledWith("Alteração confirmada");
+    expect(screen.queryByRole("button", { name: "Opções do produto" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Excluir produto" })).not.toBeInTheDocument();
     expect(persist).not.toHaveBeenCalled();
     expect(location.hash).toBe("#/produtos/sankhya:product:7");
   });

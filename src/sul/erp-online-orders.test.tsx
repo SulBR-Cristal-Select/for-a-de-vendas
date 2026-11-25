@@ -314,12 +314,14 @@ describe("Contrato do formulário online sem catálogo persistido", () => {
     ).rejects.toThrow("Criação local de produtos desativada");
     expect(persist).not.toHaveBeenCalled();
     expect(current.current.products).toEqual(before.products);
-    await queue((next) => {
-      const existing = next.products.find((row) => row.id === "existente");
-      if (!existing) throw new Error("Produto existente ausente");
-      existing.name = "Preservado editado";
-    });
-    expect(persist).toHaveBeenCalledTimes(1);
+    await expect(
+      queue((next) => {
+        const existing = next.products.find((row) => row.id === "existente");
+        if (!existing) throw new Error("Produto existente ausente");
+        existing.name = "Preservado editado";
+      }),
+    ).rejects.toThrow("somente para consulta");
+    expect(persist).not.toHaveBeenCalled();
     expect(current.current.products).toHaveLength(1);
   });
   it("libera somente documentos online locais na fila, bloqueando catálogo e outros comandos ERP", async () => {
