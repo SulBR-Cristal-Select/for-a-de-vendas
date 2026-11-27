@@ -173,11 +173,17 @@ function useConsulta(
       }));
       temporizador = setTimeout(() => {
         void carregar();
-      }, 180);
+      }, 350);
     }
     function entrada(evento: Event) {
       const alvo = evento.target;
-      if (alvo instanceof HTMLInputElement && popupDoCampo(alvo, recurso, label))
+      // O adaptador React é a única fonte para o campo controlado; o listener
+      // global fica apenas para seletores DS legados, sem disparar antes do React.
+      if (
+        alvo instanceof HTMLInputElement &&
+        alvo.dataset["erpControlledSearch"] !== "true" &&
+        popupDoCampo(alvo, recurso, label)
+      )
         buscar(alvo.value);
     }
     function rolagem(evento: Event) {

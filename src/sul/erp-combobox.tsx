@@ -33,7 +33,7 @@ import {
   type ComboboxOption,
 } from "@g4ai/ds";
 import { Check, ChevronsUpDown, Search } from "lucide-react";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 
 export type ERPMatches = {
   query: string;
@@ -83,14 +83,22 @@ function RemoteSingle(props: SingleProps) {
     remote,
   } = props;
   const [portalRef, container] = usePortalContainer();
+  // Texto local independente da chegada/substituição de opções ERP.
+  const [searchText, setSearchText] = useState("");
   const field = useControlLabel(props);
   return field.wrap(
     <BaseCombobox.Root<ComboboxOption>
       items={options}
-      onOpenChange={(open) => remote.onOpenChange?.(open)}
+      inputValue={searchText}
+      onOpenChange={(open) => {
+        if (!open) setSearchText("");
+        remote.onOpenChange?.(open);
+      }}
       onInputValueChange={(query, details) => {
-        if (["input", "change", "compositionend"].includes(details.event.type))
+        if (["input", "change", "compositionend"].includes(details.event.type)) {
+          setSearchText(query);
           remote.onSearchChange?.(query);
+        }
       }}
       value={options.find((option) => option.value === value) ?? null}
       onValueChange={(next) => onValueChange(next?.value ?? "")}
@@ -138,6 +146,7 @@ function RemoteSingle(props: SingleProps) {
             <div className="focus-field flex shrink-0 items-center gap-2 border-b border-line px-3">
               <Search aria-hidden className="h-4 w-4 shrink-0 text-muted" />
               <BaseCombobox.Input
+                data-erp-controlled-search="true"
                 aria-label={`Buscar em ${label.toLocaleLowerCase("pt-BR")}`}
                 placeholder="Buscar…"
                 className="h-11 w-full min-w-0 border-0 bg-transparent text-[14px] outline-none placeholder:text-muted"

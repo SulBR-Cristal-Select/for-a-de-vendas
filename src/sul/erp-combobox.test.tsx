@@ -231,6 +231,39 @@ describe("Invariância da estrutura existente DS0.9.0", () => {
   );
 });
 
+describe("Teclado nativo sem batching artificial", () => {
+  it("preserva cada caractere antes da resposta remota", async () => {
+    const client = clientFor(casos[0]!);
+    function Formulario() {
+      const dados = useERPOrderLookups(client, "", []);
+      return (
+        <ERPCombobox
+          label="Cliente"
+          value=""
+          onValueChange={vi.fn()}
+          remote={dados.matches.customers}
+          options={dados.customers.map((row) => ({
+            value: String(row["id"]),
+            label: String(row["name"]),
+          }))}
+        />
+      );
+    }
+    render(<Formulario />);
+    fireEvent.click(screen.getByRole("combobox", { name: "Cliente" }));
+    const input = (await screen.findByLabelText("Buscar em cliente")) as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    for (const value of ["a", "an", "ang", "ange", "angeloni"]) {
+      setter.call(input, value);
+      input.dispatchEvent(
+        new InputEvent("input", { bubbles: true, inputType: "insertText", data: value.at(-1) ?? null }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(input).toHaveValue(value);
+    }
+  });
+});
+
 describe("Digitação incremental com resposta remota atrasada", () => {
   it.each(["Cliente", "Produto"])(
     "mantém a pesquisa em %s enquanto as opções são substituídas",
@@ -283,11 +316,15 @@ describe("Digitação incremental com resposta remota atrasada", () => {
       render(<Formulario />);
       fireEvent.click(screen.getByRole("combobox", { name: label }));
       const input = await screen.findByLabelText(`Buscar em ${label.toLowerCase()}`);
-      fireEvent.change(input, { target: { value: "g" } });
+      fireEvent.input(input, { target: { value: "g" } });
+      expect(input).toHaveValue("g");
       await waitFor(() => expect(requests).toContain("g"));
-      for (const value of ["gu", "gue", "guer", "guerr", "guerro"])
-        fireEvent.change(input, { target: { value } });
+      for (const value of ["gu", "gue", "guer", "guerr", "guerro"]) {
+        fireEvent.input(input, { target: { value } });
+        expect(input).toHaveValue(value);
+      }
       await waitFor(() => expect(requests).toContain("guerro"));
+      expect(requests.filter((query) => query.startsWith("gu"))).toEqual(["guerro"]);
       await screen.findByRole("option", { name: row.name });
       expect(input).toHaveValue("guerro");
     },
