@@ -112,7 +112,9 @@ export async function readPrice(gateway: Transport, input: PriceInput, scope: Re
     input.type !== "Venda"
   )
     return fail("INVALID_REQUEST", "Contexto comercial inválido.");
-  const sellerCode = operationSeller(scope, input.sellerCode);
+  // Vendedores/gestores validam antes da consulta; diretoria deriva do cadastro ERP.
+  const sessionSeller =
+    scope.role === "administrador" ? undefined : operationSeller(scope, input.sellerCode);
   const paymentCode = integer(input.paymentCode),
     quantity = input.quantity ?? 1;
   const observedCustomer = await readRecord(
@@ -125,13 +127,19 @@ export async function readPrice(gateway: Transport, input: PriceInput, scope: Re
     return fail("ERP_CONTEXT_REQUIRED", "Cliente ativo não confirmado no ERP.");
   const customerERP = object(customer.erp),
     companyCode = partnerCompany(customerERP["companyCode"]);
-  if (scope.role === "gestor" && customerERP["sellerCode"] !== sellerCode)
+  const sellerCode =
+    scope.role === "administrador"
+      ? operationSeller(scope, input.sellerCode ?? customerERP["sellerCode"])
+      : sessionSeller!;
+  if (["gestor", "administrador"].includes(scope.role) && customerERP["sellerCode"] !== sellerCode)
     return fail(
       "ERP_CUSTOMER_SELLER_MISMATCH",
       "O vendedor do pedido deve ser o vendedor cadastrado no cliente.",
       400,
     );
-  if (!scope.companyCodes?.includes(companyCode))
+  if (
+    scope.role === "administrador" ? companyCode !== 1 : !scope.companyCodes?.includes(companyCode)
+  )
     return fail("ERP_SCOPE_FORBIDDEN", "Filial fora do escopo autorizado.", 403);
   const sellerResult = await readRecord(gateway, { resource: "sellers", id: sellerCode }, scope);
   if (

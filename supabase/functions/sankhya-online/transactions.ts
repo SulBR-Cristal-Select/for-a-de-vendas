@@ -91,7 +91,7 @@ export async function revalidateOrderRequest(
   // Mesmo UUID, revisão e estado: ledger antes de prazo/consumo; não repetir preço em reenvio.
   if (context["replay"] || context["proofReady"] || required.length === 0)
     return { ready: true, replay: context["replay"], proofReady: context["proofReady"] };
-  loggedSeller(scope);
+  if (scope.role !== "administrador") loggedSeller(scope);
   if (!Array.isArray(state["orders"])) return fail("INVALID_REQUEST", "Pedidos inválidos.");
   const orders = state["orders"].map(object);
   const selected = required.map((id) => {

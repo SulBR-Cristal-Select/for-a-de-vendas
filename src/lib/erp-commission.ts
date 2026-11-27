@@ -1,5 +1,5 @@
 type ERPRow = Record<string, unknown>;
-import { erpDecimal, sumERPDecimals } from "./erp-decimal";
+import { erpDecimal, sumERPDecimals } from "./erp-decimal.ts";
 export type ERPCommissionQuery = {
   resource: "orders";
   view: "sellers" | "orders";

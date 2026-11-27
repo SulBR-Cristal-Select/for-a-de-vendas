@@ -111,6 +111,34 @@ beforeEach(() => {
   );
 });
 describe("Preço nativo contextual, nunca preço-base ou catálogo aproximado", () => {
+  it("diretoria sem vínculo cota com o vendedor canônico do cliente", async () => {
+    customer.erp.sellerCode = 12;
+    const g = gateway();
+    const result = await readPrice(g, query, { role: "administrador", companyCodes: [1] });
+    expect(result.seller.id).toBe("sankhya:seller:12");
+    expect(g.contextPrices).toHaveBeenCalledWith(expect.objectContaining({ codigoVendedor: 12 }));
+  });
+  it("diretoria não pode substituir vendedor cadastrado no cliente", async () => {
+    const g = gateway();
+    await expect(
+      readPrice(g, { ...query, sellerCode: 12 }, { role: "administrador", companyCodes: [1] }),
+    ).rejects.toMatchObject({ code: "ERP_CUSTOMER_SELLER_MISMATCH" });
+    expect(g.contextPrices).not.toHaveBeenCalled();
+  });
+  it("diretoria não opera cliente sem vendedor", async () => {
+    customer.erp.sellerCode = 0;
+    const g = gateway();
+    await expect(
+      readPrice(g, query, { role: "administrador", companyCodes: [1] }),
+    ).rejects.toMatchObject({ code: "ERP_IDENTITY_REQUIRED" });
+    expect(g.contextPrices).not.toHaveBeenCalled();
+  });
+  it("diretoria permanece na filial 1 mesmo com vínculo antigo contendo 4", async () => {
+    customer.erp.companyCode = 4;
+    await expect(
+      readPrice(gateway(), query, { role: "administrador", companyCodes: [1, 4] }),
+    ).rejects.toMatchObject({ code: "ERP_SCOPE_FORBIDDEN" });
+  });
   it("gestor cota para integrante explicitamente autorizado, não por nome ou carteira", async () => {
     customer.erp.sellerCode = 12;
     const g = gateway();
@@ -166,7 +194,7 @@ describe("Preço nativo contextual, nunca preço-base ou catálogo aproximado", 
   it("usa filial1 só no contexto compartilhado, TOP1001 e vendedor real, preservando controle espaço", async () => {
     const g = gateway(),
       result = await readPrice(g, query, {
-        role: "administrador",
+        role: "vendedor",
         sellerCode: 14,
         companyCodes: [1, 4],
       });
@@ -197,18 +225,18 @@ describe("Preço nativo contextual, nunca preço-base ou catálogo aproximado", 
   it("recusa filial4 do cadastro sem remapeá-la para filial1", async () => {
     customer.erp.companyCode = 4;
     await expect(
-      readPrice(gateway(), query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(gateway(), query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toMatchObject({ code: "ERP_SCOPE_FORBIDDEN" });
   });
   it("não remapeia empresa3 nem aceita override de contexto do navegador", async () => {
     const g = gateway();
     customer.erp.companyCode = 3;
     await expect(
-      readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toMatchObject({ code: "ERP_SCOPE_FORBIDDEN" });
     await expect(
       readPrice(g, { ...query, companyCode: 1 } as Parameters<typeof readPrice>[1], {
-        role: "administrador",
+        role: "vendedor",
         sellerCode: 14,
         companyCodes: [1, 4],
       }),
@@ -218,7 +246,7 @@ describe("Preço nativo contextual, nunca preço-base ou catálogo aproximado", 
   it("usa vendedor do Auth mesmo quando o cadastro do cliente tem vendedor0", async () => {
     const g = gateway();
     customer.erp.sellerCode = 0;
-    await readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] });
+    await readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] });
     expect(g.contextPrices).toHaveBeenCalledWith(expect.objectContaining({ codigoVendedor: 14 }));
     expect(customer.erp.sellerCode).toBe(0);
   });
@@ -257,13 +285,13 @@ describe("Preço nativo contextual, nunca preço-base ou catálogo aproximado", 
       ],
     });
     await expect(
-      readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toMatchObject({
       code: "ERP_PRICE_AMBIGUOUS",
       nativeFormat: { kind: "empty_prices", context: { candidates: 0 } },
     });
     await expect(
-      readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toMatchObject({
       code: "ERP_PRICE_AMBIGUOUS",
       nativeFormat: { kind: "context_mismatch", context: { candidates: 2, productMatches: 2 } },
@@ -280,8 +308,8 @@ describe("Preço nativo contextual, nunca preço-base ou catálogo aproximado", 
       };
     g.contextPrices.mockResolvedValueOnce({ precos: [native, { ...native }] });
     expect(
-      (await readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }))
-        .price.amount,
+      (await readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] })).price
+        .amount,
     ).toBe(10.56);
     g.contextPrices.mockResolvedValueOnce({
       precos: [
@@ -290,7 +318,7 @@ describe("Preço nativo contextual, nunca preço-base ou catálogo aproximado", 
       ],
     } as unknown as Awaited<ReturnType<ReturnType<typeof gateway>["contextPrices"]>>);
     await expect(
-      readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toMatchObject({
       nativeFormat: { context: { distinctMatches: 2, priceValuesEqual: true } },
     });
@@ -300,28 +328,28 @@ describe("Preço nativo contextual, nunca preço-base ou catálogo aproximado", 
     await readPrice(
       g,
       { ...query, quantity: 1.23456 },
-      { role: "administrador", sellerCode: 14, companyCodes: [1, 4] },
+      { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] },
     );
     await expect(
       readPrice(
         g,
         { ...query, quantity: 1.234567 },
-        { role: "administrador", sellerCode: 14, companyCodes: [1, 4] },
+        { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] },
       ),
     ).rejects.toThrow("precisão");
     await expect(
       readPrice(
         g,
         { ...query, unit: "UN" },
-        { role: "administrador", sellerCode: 14, companyCodes: [1, 4] },
+        { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] },
       ),
     ).rejects.toThrow("precisão");
     expect(g.contextPrices).toHaveBeenCalledTimes(1);
   });
   it("reconsulta a cada leitura e valida versão ativa sem voltar a uma antiga", async () => {
     const g = gateway();
-    await readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] });
-    await readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] });
+    await readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] });
+    await readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] });
     expect(g.contextPrices).toHaveBeenCalledTimes(2);
     expect(
       g.select.mock.calls
@@ -343,7 +371,7 @@ describe("Preço nativo contextual, nunca preço-base ou catálogo aproximado", 
       },
     ]);
     await expect(
-      readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toThrow("confirmada");
     expect(g.contextPrices).toHaveBeenCalledTimes(2);
   });
@@ -375,7 +403,7 @@ describe("Local e controle reais sem exigir tabela no cliente", () => {
   it("sem tabela de preço no cliente e na condição recusa como ausência de negócio, não ambiguidade", async () => {
     const g = stockGateway([{ CODLOCAL: 81, CONTROLE: "LOTE-REAL" }]);
     await expect(
-      readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toMatchObject({ code: "ERP_PRICE_TABLE_MISSING" });
     expect(g.select.mock.calls.some(([s]) => s.includes("TGFEXC") || s.includes("TGFEST"))).toBe(
       false,
@@ -401,7 +429,7 @@ describe("Local e controle reais sem exigir tabela no cliente", () => {
       ],
     });
     const r = await readPrice(g, query, {
-      role: "administrador",
+      role: "vendedor",
       sellerCode: 14,
       companyCodes: [1, 4],
     });
@@ -426,7 +454,7 @@ describe("Local e controle reais sem exigir tabela no cliente", () => {
     );
     customer.erp.tableCode = 68;
     await expect(
-      readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toMatchObject({ code: "ERP_PRICE_AMBIGUOUS" });
     expect(g.contextPrices).not.toHaveBeenCalled();
   });
@@ -438,7 +466,7 @@ describe("Local e controle reais sem exigir tabela no cliente", () => {
     );
     customer.erp.tableCode = 68;
     await expect(
-      readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toMatchObject({ code: "ERP_CONTEXT_REQUIRED" });
     expect(g.contextPrices).not.toHaveBeenCalled();
   });
@@ -455,7 +483,7 @@ describe("Local e controle reais sem exigir tabela no cliente", () => {
     );
     customer.erp.tableCode = 68;
     await expect(
-      readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toMatchObject({ code: "ERP_CONTEXT_REQUIRED" });
     expect(g.contextPrices).not.toHaveBeenCalled();
   });
@@ -471,7 +499,7 @@ describe("Local e controle reais sem exigir tabela no cliente", () => {
         : original(sql, limit),
     );
     await expect(
-      readPrice(g, query, { role: "administrador", sellerCode: 14, companyCodes: [1, 4] }),
+      readPrice(g, query, { role: "vendedor", sellerCode: 14, companyCodes: [1, 4] }),
     ).rejects.toMatchObject({ code: "ERP_PRICE_AMBIGUOUS" });
     expect(
       g.select.mock.calls.some(
@@ -499,7 +527,7 @@ describe("Literal monetário exato do provedor", () => {
 });
 
 describe("Preço com vendedor da sessão autenticada", () => {
-  it.each(["administrador", "gestor", "vendedor"] as const)(
+  it.each(["gestor", "vendedor"] as const)(
     "não usa vendedor do cliente nem body para%s sem vínculo",
     async (role) => {
       const g = gateway();
@@ -515,14 +543,14 @@ describe("Preço com vendedor da sessão autenticada", () => {
     const g = gateway();
     customer.erp.sellerCode = 0;
     for (const sellerCode of [12, 34]) {
-      await readPrice(g, query, { role: "administrador", sellerCode, companyCodes: [1, 4] });
+      await readPrice(g, query, { role: "vendedor", sellerCode, companyCodes: [1, 4] });
       expect(g.contextPrices).toHaveBeenLastCalledWith(
         expect.objectContaining({ codigoVendedor: sellerCode }),
       );
     }
     expect(customer.erp.sellerCode).toBe(0);
   });
-  it.each(["administrador", "gestor", "vendedor"] as const)(
+  it.each(["gestor", "vendedor"] as const)(
     "recusa trocar vendedor antes de consultar ERP:%s",
     async (role) => {
       const g = gateway();
@@ -536,7 +564,7 @@ describe("Preço com vendedor da sessão autenticada", () => {
   it("não dá filial4 ao administrador com vínculo comercial restrito à1", async () => {
     customer.erp.companyCode = 4;
     await expect(
-      readPrice(gateway(), query, { role: "administrador", sellerCode: 12, companyCodes: [1] }),
+      readPrice(gateway(), query, { role: "vendedor", sellerCode: 12, companyCodes: [1] }),
     ).rejects.toMatchObject({ code: "ERP_SCOPE_FORBIDDEN" });
   });
 });

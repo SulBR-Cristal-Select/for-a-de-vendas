@@ -2146,25 +2146,24 @@ function OrderEditor() {
     [k, M] = (0, He.useState)(""),
     [A, N] = (0, He.useState)("");
   const actorSeller = workspaceERPSeller(base["company"]);
+  const directorOrder = base["company"].role === "Administrador";
   const managerOrder = base["company"].role === "Gestor";
   const permittedSellers = actorSeller
     ? [actorSeller.sellerCode, ...(managerOrder ? (actorSeller.teamSellerCodes ?? []) : [])]
     : [];
   // Gestor: o vendedor é sempre o cadastrado no cliente e não pode ser trocado (evita vender um cliente em nome de outro vendedor).
-  const sellerLocked = !!(online && managerOrder && actorSeller);
+  const sellerLocked = !!(online && (directorOrder || (managerOrder && actorSeller)));
   const [customerSeller, setCustomerSeller] = He.useState({ customerId: "" } as {
     customerId: string;
     code?: number | undefined;
   });
   const lockedCode =
     sellerLocked && customerSeller.customerId === n ? customerSeller.code : undefined;
-  const operatingSeller = !actorSeller
-    ? ""
-    : !sellerLocked || !n
-      ? actorSeller.sellerId
-      : lockedCode !== undefined && permittedSellers.includes(lockedCode)
-        ? `sankhya:seller:${lockedCode}`
-        : "";
+  const operatingSeller = sellerLocked
+    ? n && lockedCode !== undefined && (directorOrder || permittedSellers.includes(lockedCode))
+      ? `sankhya:seller:${lockedCode}`
+      : ""
+    : actorSeller?.sellerId || "";
   const lookupSeller = sellerLocked
     ? operatingSeller
     : operatingSeller || (/^sankhya:seller:[1-9]\d*$/.test(l) ? l : "");
@@ -2537,6 +2536,7 @@ function OrderEditor() {
                           ? lookups.sellers
                               .filter(
                                 (seller) =>
+                                  directorOrder ||
                                   !actorSeller ||
                                   permittedSellers.includes(
                                     Number(String(seller["id"]).split(":")[2]),

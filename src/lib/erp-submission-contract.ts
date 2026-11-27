@@ -1,4 +1,4 @@
-import { decimalUnits, erpDecimal, sumERPDecimals } from "./erp-decimal";
+import { decimalUnits, erpDecimal, sumERPDecimals } from "./erp-decimal.ts";
 
 export const SUBMISSION_HASH_FORMAT = "sha256-json-numerico-v1" as const;
 export type FreightType = "C" | "F";

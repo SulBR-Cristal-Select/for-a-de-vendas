@@ -283,9 +283,10 @@ describe("Mesma identidade em preparação, cotação e prova", () => {
   });
   it("recusa vendedor adulterado no snapshot antes de recotar", async () => {
     const f = fixture();
+    f.state.company.role = "Vendedor";
     f.state.orders[0]!.erp.sellerCode = 5;
     await expect(
-      revalidateOrderRequest(f.gateway, f.request, actor, f.rpc, f.attest),
+      revalidateOrderRequest(f.gateway, f.request, { ...actor, role: "vendedor" }, f.rpc, f.attest),
     ).rejects.toMatchObject({ code: "ERP_SCOPE_FORBIDDEN" });
     expect(readPrice).not.toHaveBeenCalled();
     expect(f.attest).not.toHaveBeenCalled();
@@ -301,13 +302,21 @@ describe("Mesma identidade em preparação, cotação e prova", () => {
     ).rejects.toMatchObject({ code: "ERP_SCOPE_FORBIDDEN" });
     expect(f.attest).not.toHaveBeenCalled();
   });
-  it("não encontra vínculo do administrador a partir do vendedor enviado pelo navegador", async () => {
+  it("diretoria sem vínculo revalida vendedor ERP e preserva autoria Auth", async () => {
     const f = fixture();
-    await expect(
-      revalidateOrderRequest(f.gateway, f.request, { ...actor, binding: null }, f.rpc, f.attest),
-    ).rejects.toMatchObject({ code: "ERP_IDENTITY_REQUIRED" });
-    expect(readPrice).not.toHaveBeenCalled();
-    expect(f.attest).not.toHaveBeenCalled();
+    await revalidateOrderRequest(
+      f.gateway,
+      f.request,
+      { ...actor, binding: null },
+      f.rpc,
+      f.attest,
+    );
+    expect(readPrice).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ sellerCode: 14 }),
+      { role: "administrador", companyCodes: [1] },
+    );
+    expect(f.attest.mock.calls[0]![0].p_actor_id).toBe(actor.id);
   });
   it("mantém replay no ledger anterior à exigência de nova cotação/vínculo", async () => {
     const f = fixture();

@@ -1,4 +1,4 @@
-import { erpDecimal, sumERPDecimals } from "./erp-decimal";
+import { erpDecimal, sumERPDecimals } from "./erp-decimal.ts";
 export const RECEIVABLES_POLICY = {
   sourceTable: "TGFFIN",
   receivableField: "RECDESP",

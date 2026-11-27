@@ -75,7 +75,7 @@ function request(value: unknown, operation: "review" | "submit" | "status") {
 }
 async function load(d: SubmissionDeps, id: string) {
   const scope = actorScope(d.actor);
-  loggedSeller(scope);
+  if (scope.role !== "administrador") loggedSeller(scope);
   const response = await d.rpc("erp_submission_read", { p_order_id: id });
   if (response.error) {
     const e = record(response.error);

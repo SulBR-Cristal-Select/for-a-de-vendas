@@ -1,4 +1,4 @@
-import { decimalUnits, erpDecimal, formatERPShare, sumERPDecimals } from "./erp-decimal";
+import { decimalUnits, erpDecimal, formatERPShare, sumERPDecimals } from "./erp-decimal.ts";
 export const RANKING_POLICY = {
   sales: "standard-orders",
   dateField: "TGFCAB.DTNEG",

@@ -1,5 +1,5 @@
-import { decimalUnits, erpDecimal, sumERPDecimals } from "./erp-decimal";
-import { rankingPeriod, validRankingQuery } from "./erp-ranking";
+import { decimalUnits, erpDecimal, sumERPDecimals } from "./erp-decimal.ts";
+import { rankingPeriod, validRankingQuery } from "./erp-ranking.ts";
 export const INDICATOR_SERIES = {
   "items-selected": {
     family: "items",

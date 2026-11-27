@@ -77,8 +77,8 @@ describe("Operação do gestor com autoria preservada", () => {
     for (const invalid of [99, "12", null, 0])
       expect(() => operationSeller(scope, invalid)).toThrow();
   });
-  it("administrador não ganha delegação implícita e vendedor não ganha equipe", () => {
-    for (const role of ["administrador", "vendedor"])
+  it("vendedor não ganha equipe", () => {
+    for (const role of ["vendedor"])
       expect(() =>
         operationSeller(actorScope({ id, company_id: "432299", active: true, role, binding }), 12),
       ).toThrow();

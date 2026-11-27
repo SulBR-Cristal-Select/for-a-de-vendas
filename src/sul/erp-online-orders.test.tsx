@@ -590,6 +590,67 @@ describe("Feedbacks de cliente, tabela e inclusão de produto", () => {
     await waitFor(() => expect(persist).toHaveBeenCalledTimes(1));
     expect(persist.mock.calls[0]![0].orders[0].customerId).toBe(customer.id);
   });
+  it("diretoria sem vínculo usa vendedor do cliente e mantém autoria Auth", async () => {
+    location.hash = "#/pedidos/novo";
+    const id = "00000000-0000-4000-8000-000000000001";
+    const client = fakeClient(),
+      persist = vi.fn();
+    const directorCustomer = { ...customer, sellerCode: 8 };
+    vi.mocked(client.window).mockImplementation(
+      async ({ resource }) =>
+        ({
+          items:
+            resource === "customers"
+              ? [directorCustomer]
+              : resource === "products"
+                ? [product]
+                : [seller],
+          total: 1,
+        }) as import("../lib/erp-online").ERPWindow<unknown>,
+    );
+    vi.mocked(client.record).mockImplementation(
+      async ({ resource }) =>
+        ({
+          record:
+            resource === "customers"
+              ? directorCustomer
+              : resource === "products"
+                ? product
+                : seller,
+        }) as Awaited<ReturnType<ERPClient["record"]>>,
+    );
+    render(
+      <SulApp
+        initialState={createAppState({
+          company: { userId: id, role: "Administrador" },
+          customers: [],
+          products: [],
+          orders: [],
+        })}
+        online={client}
+        persist={persist}
+        onSignOut={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "Cliente ERP (7)" });
+    fireEvent.change(screen.getByLabelText("Cliente"), { target: { value: customer.id } });
+    await waitFor(() => expect(screen.getByLabelText("Vendedor")).toHaveValue(seller.id));
+    expect(screen.getByLabelText("Vendedor")).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByLabelText("Condição de pagamento")).toHaveValue(payment.id),
+    );
+    fireEvent.change(screen.getByLabelText("Produto"), { target: { value: product.id } });
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar produto/ }));
+    await waitFor(() =>
+      expect(client.price).toHaveBeenCalledWith(expect.objectContaining({ sellerCode: 8 })),
+    );
+    await screen.findAllByText(/12,34/);
+    fireEvent.click(screen.getByRole("button", { name: /Salvar pedido/ }));
+    await waitFor(() => expect(persist).toHaveBeenCalledTimes(1));
+    expect(persist.mock.calls[0]![0].company.userId).toBe(id);
+    expect(persist.mock.calls[0]![0].orders[0].sellerId).toBeUndefined();
+    expect(persist.mock.calls[0]![0].orders[0].erp.sellerCode).toBe(8);
+  });
   it("gestor não filtra clientes por vendedor, e cliente de vendedor fora da equipe bloqueia o pedido", async () => {
     location.hash = "#/pedidos/novo";
     const id = "00000000-0000-4000-8000-000000000001",

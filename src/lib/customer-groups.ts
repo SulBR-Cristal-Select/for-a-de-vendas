@@ -1,5 +1,5 @@
-import { foldERPText } from "./erp-order";
-import { sumERPDecimals } from "./erp-decimal";
+import { foldERPText } from "./erp-order.ts";
+import { sumERPDecimals } from "./erp-decimal.ts";
 export type CustomerGroup = {
   id: string;
   name: string;

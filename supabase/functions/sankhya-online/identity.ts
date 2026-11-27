@@ -20,7 +20,8 @@ export function actorScope(actor: CommercialActor, value: unknown = actor.bindin
       403,
     );
   const role = actor.role as ReadScope["role"];
-  if (value === null || value === undefined) return { role };
+  if (value === null || value === undefined)
+    return role === "administrador" ? { role, companyCodes: [1] } : { role };
   const binding = decodeERPActorBinding(value, actor.id);
   if (!binding)
     throw new SankhyaError(
@@ -81,8 +82,22 @@ export function loggedSeller(scope: ReadScope, requested?: unknown): number {
   return code;
 }
 
-/** Operação delegada somente para a equipe explícita do gestor; autoria Auth preservada. */
+/** Diretoria usa o vendedor do cliente, revalidado no ERP por readPrice; autoria Auth preservada. */
 export function operationSeller(scope: ReadScope, requested?: unknown): number {
+  if (scope.role === "administrador") {
+    if (
+      typeof requested === "number" &&
+      Number.isSafeInteger(requested) &&
+      requested > 0 &&
+      requested <= 2147483647
+    )
+      return requested;
+    throw new SankhyaError(
+      "ERP_IDENTITY_REQUIRED",
+      "Vendedor cadastrado no cliente necessário.",
+      403,
+    );
+  }
   const own = loggedSeller(scope);
   if (requested === undefined || requested === own) return own;
   if (

@@ -167,11 +167,18 @@ describe("canônico e contexto de envio", () => {
     });
     expect(r.rpc).not.toHaveBeenCalled();
   });
-  it("administrador sem vínculo não aprova como outro vendedor", async () => {
+  it("vendedor sem vínculo não aprova como outro vendedor", async () => {
     const r = rig();
-    r.deps.actor = { ...r.deps.actor, role: "administrador", binding: null };
+    r.deps.actor = { ...r.deps.actor, role: "vendedor", binding: null };
     await expect(approved(r)).rejects.toMatchObject({ code: "ERP_IDENTITY_REQUIRED" });
     expect(r.rpc).not.toHaveBeenCalled();
+  });
+  it("diretoria sem vínculo confere pedido próprio sem enviar ou incluir", async () => {
+    const r = rig();
+    r.deps.actor = { ...r.deps.actor, role: "administrador", binding: null };
+    const view = await reviewSubmission(r.deps, { orderId, freightType: "C" });
+    expect(view.canonical.pedidos_fiscais[0].codigo_vendedor).toBe(12);
+    expect(r.includeOrder).not.toHaveBeenCalled();
   });
   it("perfil inativo não consulta nem envia", async () => {
     const r = rig();
