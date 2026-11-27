@@ -558,27 +558,47 @@ async function emptyCatalogState(
 }
 export async function readWindow(gateway: Transport, input: WindowInput, scope: ReadScope) {
   const q = queryParts(input, scope, [], true);
-  // Busca de clientes: uma única leitura conta o recorte e o universo autorizado.
-  // Não remove filtros de carteira/filial nem substitui contagens por estimativas.
-  const combined = q.r === "customers" && q.where.length !== q.withoutSearch.length;
-  let filteredTotal: number;
-  let totalWithoutSearch: number;
-  if (combined) {
-    const counts = await gateway.select(
-      `SELECT COUNT(CASE WHEN ${q.where.slice(q.withoutSearch.length).join(" AND ")} THEN 1 END) AS TOTAL,COUNT(*) AS TOTAL_WITHOUT_SEARCH FROM ${q.c.from} WHERE ${q.withoutSearch.join(" AND ")}`,
-      1,
+  // Uma única ida ao ERP retorna resultados e contagens exatas da busca de clientes.
+  // LEFT JOIN preserva as contagens mesmo para busca/página sem resultados.
+  if (q.r === "customers" && q.where.length !== q.withoutSearch.length) {
+    const result = await gateway.select(
+      `SELECT D.*,C.TOTAL,C.TOTAL_WITHOUT_SEARCH FROM (SELECT COUNT(CASE WHEN ${q.where.slice(q.withoutSearch.length).join(" AND ")} THEN 1 END) AS TOTAL,COUNT(*) AS TOTAL_WITHOUT_SEARCH FROM ${q.c.from} WHERE ${q.withoutSearch.join(" AND ")}) C LEFT JOIN (SELECT ${q.c.fields},${q.sortValue} AS SORT_VALUE,1 AS ROW_PRESENT,ROW_NUMBER() OVER (ORDER BY ${q.order}) AS WINDOW_POSITION FROM ${q.c.from} WHERE ${q.where.join(" AND ")} ORDER BY ${q.order} OFFSET ${q.offset} ROWS FETCH NEXT ${q.size} ROWS ONLY) D ON 1=1 ORDER BY D.WINDOW_POSITION`,
+      q.size,
     );
-    filteredTotal = total(counts);
-    totalWithoutSearch = total(counts.map((row) => ({ TOTAL: row["TOTAL_WITHOUT_SEARCH"] })));
-    if (filteredTotal > totalWithoutSearch)
+    if (!result.length) throw new SankhyaError("ERP_INVALID_RESPONSE", "Contagens ERP ausentes.");
+    const filteredTotal = total([{ TOTAL: result[0]!["TOTAL"] }]);
+    const totalWithoutSearch = total([{ TOTAL: result[0]!["TOTAL_WITHOUT_SEARCH"] }]);
+    if (
+      filteredTotal > totalWithoutSearch ||
+      result.some(
+        (row) =>
+          Number(row["TOTAL"]) !== filteredTotal ||
+          Number(row["TOTAL_WITHOUT_SEARCH"]) !== totalWithoutSearch,
+      )
+    )
       throw new SankhyaError("ERP_INVALID_RESPONSE", "Contagens ERP incompatíveis.");
-  } else {
-    filteredTotal = await count(gateway, q.c.from, q.where);
-    totalWithoutSearch =
-      q.where.length === q.withoutSearch.length
-        ? filteredTotal
-        : await count(gateway, q.c.from, q.withoutSearch);
+    const rows = result.filter((row) => row["ROW_PRESENT"] != null);
+    if (
+      rows.some((row) => Number(row["ROW_PRESENT"]) !== 1 || row["CODPARC"] == null) ||
+      (rows.length === 0 && (result.length !== 1 || q.offset < filteredTotal))
+    )
+      throw new SankhyaError("ERP_INVALID_RESPONSE", "Janela ERP incompatível.");
+    return {
+      ...observed(),
+      items: rows.map((row) => ({
+        ...dto(q.r, row),
+        _sortValue: q.numeric ? num(row["SORT_VALUE"]) : text(row["SORT_VALUE"]),
+      })),
+      total: filteredTotal,
+      totalWithoutSearch,
+      offset: q.offset,
+    };
   }
+  const filteredTotal = await count(gateway, q.c.from, q.where);
+  const totalWithoutSearch =
+    q.where.length === q.withoutSearch.length
+      ? filteredTotal
+      : await count(gateway, q.c.from, q.withoutSearch);
   const rows = await gateway.select(
     `SELECT ${q.c.fields},${q.sortValue} AS SORT_VALUE FROM ${q.c.from} WHERE ${q.where.join(" AND ")} ORDER BY ${q.order} OFFSET ${q.offset} ROWS FETCH NEXT ${q.size} ROWS ONLY`,
     q.size,

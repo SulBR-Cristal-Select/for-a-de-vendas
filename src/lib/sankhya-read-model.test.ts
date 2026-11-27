@@ -17,8 +17,15 @@ function transport(rows: Record<string, unknown>[] = [], total = 103, withoutSea
   let counts = 0;
   return {
     select: vi.fn(async (sql: string, _limit: number) =>
-      sql.startsWith("SELECT COUNT(CASE WHEN")
-        ? [{ TOTAL: total, TOTAL_WITHOUT_SEARCH: withoutSearch }]
+      sql.startsWith("SELECT D.*,C.TOTAL")
+        ? rows.length
+          ? rows.map((row) => ({
+              ...row,
+              ROW_PRESENT: 1,
+              TOTAL: total,
+              TOTAL_WITHOUT_SEARCH: withoutSearch,
+            }))
+          : [{ ROW_PRESENT: null, TOTAL: 0, TOTAL_WITHOUT_SEARCH: withoutSearch }]
         : /^SELECT COUNT\(\*\) AS TOTAL/.test(sql)
           ? [{ TOTAL: counts++ === 0 ? total : withoutSearch }]
           : rows,
@@ -326,7 +333,7 @@ describe("modelo Sankhya somente leitura", () => {
 });
 
 describe("janela ERP autenticada e limitada", () => {
-  it("busca cliente com duas leituras, contagens exatas e escopo preservado", async () => {
+  it("busca cliente com uma leitura, contagens exatas e escopo preservado", async () => {
     const g = transport([{ CODPARC: 131, RAZAOSOCIAL: "Cliente", CODEMP: null }], 1, 1275);
     const result = await readWindow(
       g,
@@ -334,13 +341,13 @@ describe("janela ERP autenticada e limitada", () => {
       seller,
     );
     expect(result).toMatchObject({ total: 1, totalWithoutSearch: 1275 });
-    expect(g.select).toHaveBeenCalledTimes(2);
+    expect(g.select).toHaveBeenCalledTimes(1);
     const sql = g.select.mock.calls[0]![0];
     expect(sql).toContain("COUNT(CASE WHEN");
     expect(sql).toContain("COUNT(*) AS TOTAL_WITHOUT_SEARCH");
     expect(sql).toContain("P.CODVEND=12");
     expect(sql).toContain("P.ATIVO='S'");
-    expect(g.select.mock.calls[1]![1]).toBe(50);
+    expect(g.select.mock.calls[0]![1]).toBe(50);
   });
   it.each([undefined, -1, 0.5, "", 0])(
     "recusa universo inválido ou menor que o recorte: %s",
@@ -352,6 +359,26 @@ describe("janela ERP autenticada e limitada", () => {
       expect(g.select).toHaveBeenCalledTimes(1);
     },
   );
+  it.each([0, 7])("preserva totais e janela vazia no offset %s em uma leitura", async (offset) => {
+    const g = {
+      select: vi.fn(async (_sql: string, _limit: number) => [
+        { TOTAL: offset ? 7 : 0, TOTAL_WITHOUT_SEARCH: 1275, ROW_PRESENT: null },
+      ]),
+    };
+    const result = await readWindow(
+      g,
+      { resource: "customers", search: "ZZZQA", offset, limit: 50 },
+      admin,
+    );
+    expect(result).toMatchObject({
+      items: [],
+      total: offset ? 7 : 0,
+      totalWithoutSearch: 1275,
+      offset,
+    });
+    expect(g.select).toHaveBeenCalledTimes(1);
+    expect(g.select.mock.calls[0]?.[0]).toContain("ORDER BY D.WINDOW_POSITION");
+  });
   it("offset arbitrário com contagens reais, escapes e categoria exata", async () => {
     const g = transport(
       [{ CODPROD: 7, DECQTD: 5, AGRUPMIN: null, BLOQVENDAFRAC: "N", SORT_VALUE: "D'AGUA" }],
