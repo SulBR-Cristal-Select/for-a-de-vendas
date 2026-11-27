@@ -2174,6 +2174,7 @@ function OrderEditor() {
     [...h.map((item) => item.productId), v],
     lookupSeller,
     sellerLocked ? null : undefined,
+    { deferProductsUntilCustomer: true, lockedSeller: sellerLocked },
   );
   useEffect(() => {
     if (!sellerLocked) return;

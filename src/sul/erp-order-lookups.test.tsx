@@ -91,6 +91,31 @@ describe("Consultas transitórias dos Combobox de pedido", () => {
     expect(result.current.sellers).toEqual([]);
     expect(result.current.loading).toBe(false);
   });
+  it("prioriza busca de cliente no pedido sem carregar produtos ou vendedores antes de haver contexto", async () => {
+    const { client, transporte } = preparar();
+    const hook = renderHook(
+      ({ customer }) =>
+        useERPOrderLookups(client, customer, [], undefined, null, {
+          deferProductsUntilCustomer: true,
+          lockedSeller: true,
+        }),
+      { initialProps: { customer: "" } },
+    );
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    expect(transporte.mock.calls.map(([body]) => body.query.resource)).toEqual(["customers"]);
+    expect(hook.result.current.products).toEqual([]);
+    expect(hook.result.current.sellers).toEqual([]);
+    act(() => hook.result.current.matches.customers.onSearchChange!("124"));
+    await waitFor(() =>
+      expect(hook.result.current.customers[0]?.["id"]).toBe("sankhya:customer:124"),
+    );
+    expect(transporte.mock.calls.map(([body]) => body.query.resource)).toEqual([
+      "customers",
+      "customers",
+    ]);
+    hook.rerender({ customer: "sankhya:customer:124" });
+    await waitFor(() => expect(hook.result.current.products).toHaveLength(50));
+  });
   it("consulta três janelas de 50 uma por vez, sem persistência", async () => {
     const { client, transporte } = preparar();
     const gravar = vi.spyOn(Storage.prototype, "setItem");

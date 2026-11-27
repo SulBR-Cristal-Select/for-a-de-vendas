@@ -49,6 +49,7 @@ function useConsulta(
   ids: readonly string[],
   filters?: ERPPageQuery["filters"],
   label: string = rotulos[recurso],
+  windowEnabled = true,
 ) {
   const context = JSON.stringify(filters ?? {});
   const [estado, definirEstado] = useState<Consulta>({
@@ -75,8 +76,8 @@ function useConsulta(
 
   useEffect(() => {
     linhas.current = [];
-    if (!client) {
-      definirEstado({ rows: [], loading: false, hasMore: false });
+    if (!client || !windowEnabled) {
+      definirEstado({ client, context, rows: [], loading: false, hasMore: false });
       return;
     }
     let vivo = true,
@@ -208,7 +209,7 @@ function useConsulta(
       document.removeEventListener("focusin", entrada, true);
       document.removeEventListener("scroll", rolagem, true);
     };
-  }, [client, recurso, JSON.stringify(filters), label]);
+  }, [client, recurso, JSON.stringify(filters), label, windowEnabled]);
 
   useEffect(() => {
     if (!client) return;
@@ -296,6 +297,7 @@ export function useERPOrderLookups(
   actorSellerId?: string,
   /** null = carteira inteira autorizada pelo servidor (gestor: o vendedor vem do cliente). */
   customerSellerId?: string | null,
+  options?: { deferProductsUntilCustomer?: boolean; lockedSeller?: boolean },
 ) {
   const sellerCode =
     customerSellerId === null
@@ -310,7 +312,7 @@ export function useERPOrderLookups(
   // Somente produtos da tabela de preço do cliente (cadastro + condição fixa); sem cliente, a lista fica livre.
   const customerCode = /^sankhya:customer:([1-9]\d*)$/.exec(customerId)?.[1];
   const products = useConsulta(
-    client,
+    options?.deferProductsUntilCustomer && !customerCode ? undefined : client,
     "products",
     productIds,
     customerCode ? { customerCode: Number(customerCode) } : undefined,
@@ -320,7 +322,14 @@ export function useERPOrderLookups(
     typeof actorSellerId === "string" && /^sankhya:seller:[1-9]\d*$/.test(actorSellerId)
       ? actorSellerId
       : "";
-  const sellers = useConsulta(client, "sellers", sellerId ? [sellerId] : []);
+  const sellers = useConsulta(
+    client,
+    "sellers",
+    sellerId ? [sellerId] : [],
+    undefined,
+    rotulos.sellers,
+    !options?.lockedSeller,
+  );
   const estados = { customers, products, sellers };
   const erro = recursos.map((recurso) => estados[recurso].error).find(Boolean);
   return {
