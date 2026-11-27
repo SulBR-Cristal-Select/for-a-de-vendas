@@ -1284,9 +1284,10 @@ export function createERPClient(transport: ERPTransport = normalTransport) {
     walletReport: (query: ERPWalletQuery) => request<ERPWalletWindow>("wallet-report", query),
     nonBuyersReport: (query: ERPNonBuyersQuery) =>
       request<ERPNonBuyersWindow>("nonbuyers-report", query),
-    indicatorSeries: (query: ERPIndicatorQuery) =>
-      request<ERPIndicatorWindow>("indicator-series", query),
-    rankingReport: (query: ERPRankingQuery) => request<ERPRankingWindow>("ranking-report", query),
+    indicatorSeries: (query: ERPIndicatorQuery, superseded?: AbortSignal) =>
+      request<ERPIndicatorWindow>("indicator-series", query, superseded),
+    rankingReport: (query: ERPRankingQuery, superseded?: AbortSignal) =>
+      request<ERPRankingWindow>("ranking-report", query, superseded),
     receivablesReport: (query: ERPReceivablesQuery) =>
       request<ERPReceivablesWindow>("receivables-report", query),
     billedOrdersReport: (query: ERPSalesQuery) =>

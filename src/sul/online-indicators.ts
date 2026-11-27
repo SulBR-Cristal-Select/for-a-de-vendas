@@ -22,12 +22,13 @@ export async function collectIndicatorSeries(
   client: ERPClient,
   q: Omit<ERPIndicatorQuery, "offset" | "limit">,
   check: () => void = () => {},
+  superseded?: AbortSignal,
 ): Promise<ERPIndicatorWindow> {
   const rows: ERPIndicatorWindow["items"] = [];
   let first: ERPIndicatorWindow | undefined, key: string | undefined;
   for (let offset = 0; ; offset += 50) {
     check();
-    const r = await client.indicatorSeries({ ...q, offset, limit: 50 });
+    const r = await client.indicatorSeries({ ...q, offset, limit: 50 }, superseded);
     check();
     const signature = JSON.stringify([
       r.summary,
@@ -62,6 +63,7 @@ export function useOnlineIndicators(
   useEffect(() => {
     if (!client) return;
     let alive = true;
+    const obsolete = new AbortController();
     const data: OnlineIndicators = { series: {}, errors: {} };
     const check = () => {
       if (!alive) throw new ERPOnlineError("REQUEST_CANCELLED");
@@ -90,13 +92,16 @@ export function useOnlineIndicators(
     const jobs = [
       async () => {
         try {
-          const ranking = await client.rankingReport({
-            resource: "orders",
-            month,
-            offset: 0,
-            limit: 50,
-            ...(sellerCode === undefined ? {} : { sellerCode }),
-          });
+          const ranking = await client.rankingReport(
+            {
+              resource: "orders",
+              month,
+              offset: 0,
+              limit: 50,
+              ...(sellerCode === undefined ? {} : { sellerCode }),
+            },
+            obsolete.signal,
+          );
           check();
           data.ranking = ranking;
         } catch (e) {
@@ -116,6 +121,7 @@ export function useOnlineIndicators(
               ...(sellerCode === undefined ? {} : { sellerCode }),
             },
             check,
+            obsolete.signal,
           );
         } catch (e) {
           if (!alive) return;
@@ -136,6 +142,8 @@ export function useOnlineIndicators(
     void Promise.all(Array.from({ length: Math.min(3, jobs.length) }, worker)).catch(() => {});
     return () => {
       alive = false;
+      // Cancela somente leituras ainda na fila; a leitura ERP ativa termina serialmente.
+      obsolete.abort();
     };
   }, [client, key]);
   return result?.client === client && result?.key === key ? result.data : undefined;

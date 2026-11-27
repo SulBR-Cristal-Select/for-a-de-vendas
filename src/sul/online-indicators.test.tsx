@@ -2,6 +2,7 @@ import { cleanup, renderHook, waitFor, act } from "@testing-library/react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { useOnlineIndicators, collectIndicatorSeries } from "./online-indicators";
 import type { ERPClient } from "./erp-hooks";
+import { createERPClient, type ERPTransport } from "../lib/erp-online";
 import {
   INDICATOR_SERIES,
   indicatorPeriod,
@@ -67,6 +68,43 @@ describe("Carregamento dos indicadores com concorrência limitada", () => {
     expect(max).toBeLessThanOrEqual(3);
     await act(async () => finish({ items: [], summary: {} }));
     await waitFor(() => expect(result.current?.ranking).toBeDefined());
+  });
+  it("retira indicadores desmontados da fila sem abortar a leitura ativa nem bloquear a busca de cliente", async () => {
+    let finish!: (value: { data: unknown; error: null }) => void;
+    const transport = vi
+      .fn<ERPTransport>()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValue({
+        data: {
+          source: "sankhya",
+          readOnly: true,
+          readAt: "2026-11-27T19:00:00Z",
+          items: [],
+          offset: 0,
+          total: 0,
+          totalWithoutSearch: 0,
+        },
+        error: null,
+      });
+    const client = createERPClient(transport);
+    const active = client.record({ resource: "products", id: 11029 });
+    const hook = renderHook(() => useOnlineIndicators(client, "2026-11", "", [], "bruna"));
+    expect(transport).toHaveBeenCalledTimes(1);
+    hook.unmount();
+    const customer = client.window({ resource: "customers", search: "5261", offset: 0, limit: 50 });
+    expect(transport.mock.calls[0]![1].aborted).toBe(false);
+    finish({
+      data: { source: "sankhya", readOnly: true, readAt: "2026-11-27T19:00:00Z", record: null },
+      error: null,
+    });
+    await active;
+    await customer;
+    expect(transport.mock.calls.map(([body]) => body.operation)).toEqual(["record", "window"]);
   });
   it("interrompe paginação incompleta em vez de manter loop e resultados parciais", async () => {
     const client = {
