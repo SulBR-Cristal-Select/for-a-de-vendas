@@ -558,11 +558,27 @@ async function emptyCatalogState(
 }
 export async function readWindow(gateway: Transport, input: WindowInput, scope: ReadScope) {
   const q = queryParts(input, scope, [], true);
-  const filteredTotal = await count(gateway, q.c.from, q.where);
-  const totalWithoutSearch =
-    q.where.length === q.withoutSearch.length
-      ? filteredTotal
-      : await count(gateway, q.c.from, q.withoutSearch);
+  // Busca de clientes: uma única leitura conta o recorte e o universo autorizado.
+  // Não remove filtros de carteira/filial nem substitui contagens por estimativas.
+  const combined = q.r === "customers" && q.where.length !== q.withoutSearch.length;
+  let filteredTotal: number;
+  let totalWithoutSearch: number;
+  if (combined) {
+    const counts = await gateway.select(
+      `SELECT COUNT(CASE WHEN ${q.where.slice(q.withoutSearch.length).join(" AND ")} THEN 1 END) AS TOTAL,COUNT(*) AS TOTAL_WITHOUT_SEARCH FROM ${q.c.from} WHERE ${q.withoutSearch.join(" AND ")}`,
+      1,
+    );
+    filteredTotal = total(counts);
+    totalWithoutSearch = total(counts.map((row) => ({ TOTAL: row["TOTAL_WITHOUT_SEARCH"] })));
+    if (filteredTotal > totalWithoutSearch)
+      throw new SankhyaError("ERP_INVALID_RESPONSE", "Contagens ERP incompatíveis.");
+  } else {
+    filteredTotal = await count(gateway, q.c.from, q.where);
+    totalWithoutSearch =
+      q.where.length === q.withoutSearch.length
+        ? filteredTotal
+        : await count(gateway, q.c.from, q.withoutSearch);
+  }
   const rows = await gateway.select(
     `SELECT ${q.c.fields},${q.sortValue} AS SORT_VALUE FROM ${q.c.from} WHERE ${q.where.join(" AND ")} ORDER BY ${q.order} OFFSET ${q.offset} ROWS FETCH NEXT ${q.size} ROWS ONLY`,
     q.size,
